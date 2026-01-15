@@ -1,0 +1,70 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Outfit", sans-serif;
+  --font-body: "DM Sans", sans-serif;
+  
+  --color-midnight-950: #0a0b0f;
+  --color-midnight-900: #0f1117;
+  --color-midnight-800: #151821;
+  --color-midnight-700: #1c2030;
+  --color-midnight-600: #252a3d;
+  --color-midnight-500: #3a4160;
+  
+  --color-accent-500: #6366f1;
+  --color-accent-400: #818cf8;
+  --color-accent-300: #a5b4fc;
+  
+  --color-emerald-500: #10b981;
+  --color-emerald-400: #34d399;
+  
+  --color-amber-500: #f59e0b;
+  --color-amber-400: #fbbf24;
+  
+  --color-rose-500: #f43f5e;
+  --color-rose-400: #fb7185;
+  
+  --color-slate-100: #f1f5f9;
+  --color-slate-200: #e2e8f0;
+  --color-slate-300: #cbd5e1;
+  --color-slate-400: #94a3b8;
+  --color-slate-500: #64748b;
+}
+
+@layer base {
+  * {
+    @apply border-midnight-600;
+  }
+  
+  body {
+    @apply bg-midnight-950 text-slate-100 font-body antialiased;
+    margin: 0;
+    min-height: 100vh;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display font-semibold;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-midnight-800 border border-midnight-600 rounded-xl p-6;
+  }
+  
+  .btn-primary {
+    @apply bg-accent-500 hover:bg-accent-400 text-white font-medium px-4 py-2 rounded-lg transition-colors duration-200;
+  }
+  
+  .btn-secondary {
+    @apply bg-midnight-700 hover:bg-midnight-600 text-slate-100 font-medium px-4 py-2 rounded-lg transition-colors duration-200 border border-midnight-500;
+  }
+  
+  .input {
+    @apply bg-midnight-900 border border-midnight-600 rounded-lg px-4 py-2 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent transition-all;
+  }
+  
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+}
