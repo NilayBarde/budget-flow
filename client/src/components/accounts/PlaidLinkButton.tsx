@@ -5,8 +5,16 @@ import { Button } from '../ui';
 import { useCreatePlaidLinkToken, useExchangePlaidToken } from '../../hooks';
 import { LINK_TOKEN_STORAGE_KEY } from '../../utils/constants';
 
-const OAUTH_REDIRECT_URI = import.meta.env.VITE_OAUTH_REDIRECT_URI || 
-  (typeof window !== 'undefined' ? `${window.location.origin}/oauth-callback` : '');
+// Only use OAuth redirect URI on HTTPS (Plaid production requires HTTPS)
+const getOAuthRedirectUri = () => {
+  if (typeof window === 'undefined') return;
+  // Only send redirect_uri for HTTPS - Plaid production rejects HTTP
+  if (window.location.protocol === 'https:') {
+    return import.meta.env.VITE_OAUTH_REDIRECT_URI || `${window.location.origin}/oauth-callback`;
+  }
+  // For localhost/HTTP, don't send redirect_uri (OAuth banks won't work locally anyway)
+  return;
+};
 
 export const PlaidLinkButton = () => {
   const [linkToken, setLinkToken] = useState<string | null>(null);
@@ -17,8 +25,8 @@ export const PlaidLinkButton = () => {
   useEffect(() => {
     const fetchToken = async () => {
       try {
-        // Pass redirect_uri for OAuth support
-        const result = await createLinkToken.mutateAsync(OAUTH_REDIRECT_URI);
+        // Pass redirect_uri for OAuth support (only on HTTPS)
+        const result = await createLinkToken.mutateAsync(getOAuthRedirectUri());
         const token = result.link_token;
         
         // Store in localStorage for OAuth flow continuation
