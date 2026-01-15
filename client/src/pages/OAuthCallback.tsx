@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { usePlaidLink } from 'react-plaid-link';
-import { getStoredLinkToken, exchangePlaidToken } from '../services/api';
+import { exchangePlaidToken } from '../services/api';
 import { Spinner } from '../components/ui';
+import { LINK_TOKEN_STORAGE_KEY } from '../utils/constants';
 
 export const OAuthCallback = () => {
   const [searchParams] = useSearchParams();
@@ -10,30 +11,32 @@ export const OAuthCallback = () => {
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Get the OAuth state from URL params
+  // Get the OAuth state from URL params - Plaid includes this to verify the redirect
   const oauthStateId = searchParams.get('oauth_state_id');
 
   useEffect(() => {
-    const fetchLinkToken = async () => {
-      try {
-        const result = await getStoredLinkToken();
-        setLinkToken(result.link_token);
-      } catch (err) {
-        console.error('Failed to get stored link token:', err);
-        setError('Failed to continue bank connection. Please try again.');
-      }
-    };
-
-    if (oauthStateId) {
-      fetchLinkToken();
-    } else {
+    // Validate that this is a legitimate OAuth callback
+    if (!oauthStateId) {
       setError('Invalid OAuth callback. Missing state.');
+      return;
     }
+
+    // Retrieve link token from localStorage (stored when PlaidLinkButton created it)
+    const storedToken = localStorage.getItem(LINK_TOKEN_STORAGE_KEY);
+    
+    if (!storedToken) {
+      setError('Failed to continue bank connection. Please try connecting again.');
+      return;
+    }
+
+    setLinkToken(storedToken);
   }, [oauthStateId]);
 
   const onSuccess = useCallback(async (publicToken: string, metadata: unknown) => {
     try {
       await exchangePlaidToken(publicToken, metadata);
+      // Clear stored token after successful connection
+      localStorage.removeItem(LINK_TOKEN_STORAGE_KEY);
       navigate('/accounts', { replace: true });
     } catch (err) {
       console.error('Failed to exchange token:', err);

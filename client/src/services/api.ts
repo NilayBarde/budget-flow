@@ -43,9 +43,6 @@ export const createPlaidLinkToken = (redirectUri?: string) =>
     body: JSON.stringify({ redirect_uri: redirectUri }),
   });
 
-export const getStoredLinkToken = () =>
-  fetchApi<PlaidLinkToken>('/plaid/link-token');
-
 export const exchangePlaidToken = (publicToken: string, metadata: unknown) =>
   fetchApi<Account>('/plaid/exchange-token', {
     method: 'POST',

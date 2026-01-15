@@ -7,9 +7,6 @@ const router = Router();
 
 const DEFAULT_USER_ID = 'default-user';
 
-// Store link tokens for OAuth flow (in-memory for simplicity, use Redis/DB for production)
-const linkTokenStore: Map<string, string> = new Map();
-
 // Create link token for Plaid Link
 router.post('/create-link-token', async (req, res) => {
   try {
@@ -20,9 +17,6 @@ router.post('/create-link-token', async (req, res) => {
     
     const { redirect_uri } = req.body;
     const linkToken = await plaidService.createLinkToken(DEFAULT_USER_ID, redirect_uri);
-    
-    // Store link token for OAuth continuation
-    linkTokenStore.set(DEFAULT_USER_ID, linkToken.link_token);
     
     res.json({
       link_token: linkToken.link_token,
@@ -35,20 +29,6 @@ router.post('/create-link-token', async (req, res) => {
       console.error('Plaid error details:', plaidError.response.data);
     }
     res.status(500).json({ message: 'Failed to create link token' });
-  }
-});
-
-// Get stored link token for OAuth continuation
-router.get('/link-token', async (req, res) => {
-  try {
-    const linkToken = linkTokenStore.get(DEFAULT_USER_ID);
-    if (!linkToken) {
-      return res.status(404).json({ message: 'No link token found' });
-    }
-    res.json({ link_token: linkToken });
-  } catch (error) {
-    console.error('Error getting link token:', error);
-    res.status(500).json({ message: 'Failed to get link token' });
   }
 });
 

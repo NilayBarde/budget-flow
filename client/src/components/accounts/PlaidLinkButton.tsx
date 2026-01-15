@@ -3,6 +3,7 @@ import { usePlaidLink } from 'react-plaid-link';
 import { Plus } from 'lucide-react';
 import { Button } from '../ui';
 import { useCreatePlaidLinkToken, useExchangePlaidToken } from '../../hooks';
+import { LINK_TOKEN_STORAGE_KEY } from '../../utils/constants';
 
 const OAUTH_REDIRECT_URI = import.meta.env.VITE_OAUTH_REDIRECT_URI || 
   (typeof window !== 'undefined' ? `${window.location.origin}/oauth-callback` : '');
@@ -18,7 +19,11 @@ export const PlaidLinkButton = () => {
       try {
         // Pass redirect_uri for OAuth support
         const result = await createLinkToken.mutateAsync(OAUTH_REDIRECT_URI);
-        setLinkToken(result.link_token);
+        const token = result.link_token;
+        
+        // Store in localStorage for OAuth flow continuation
+        localStorage.setItem(LINK_TOKEN_STORAGE_KEY, token);
+        setLinkToken(token);
       } catch (error) {
         console.error('Failed to create link token:', error);
       }
