@@ -6,4 +6,5 @@ export { Subscriptions } from './Subscriptions';
 export { Accounts } from './Accounts';
 export { Tags } from './Tags';
 export { Settings } from './Settings';
+export { OAuthCallback } from './OAuthCallback';
 

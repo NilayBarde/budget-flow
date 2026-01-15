@@ -9,7 +9,8 @@ import {
   Subscriptions, 
   Accounts, 
   Tags, 
-  Settings 
+  Settings,
+  OAuthCallback
 } from './pages';
 
 const queryClient = new QueryClient({
@@ -36,6 +37,7 @@ function App() {
             <Route path="tags" element={<Tags />} />
             <Route path="settings" element={<Settings />} />
           </Route>
+          <Route path="/oauth-callback" element={<OAuthCallback />} />
         </Routes>
       </BrowserRouter>
     </QueryClientProvider>

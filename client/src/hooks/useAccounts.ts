@@ -10,7 +10,7 @@ export const useAccounts = () => {
 
 export const useCreatePlaidLinkToken = () => {
   return useMutation({
-    mutationFn: api.createPlaidLinkToken,
+    mutationFn: (redirectUri?: string) => api.createPlaidLinkToken(redirectUri),
   });
 };
 

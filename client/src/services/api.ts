@@ -37,8 +37,14 @@ const fetchApi = async <T>(
 // Accounts
 export const getAccounts = () => fetchApi<Account[]>('/accounts');
 
-export const createPlaidLinkToken = () => 
-  fetchApi<PlaidLinkToken>('/plaid/create-link-token', { method: 'POST' });
+export const createPlaidLinkToken = (redirectUri?: string) => 
+  fetchApi<PlaidLinkToken>('/plaid/create-link-token', { 
+    method: 'POST',
+    body: JSON.stringify({ redirect_uri: redirectUri }),
+  });
+
+export const getStoredLinkToken = () =>
+  fetchApi<PlaidLinkToken>('/plaid/link-token');
 
 export const exchangePlaidToken = (publicToken: string, metadata: unknown) =>
   fetchApi<Account>('/plaid/exchange-token', {

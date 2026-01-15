@@ -18,14 +18,21 @@ const configuration = new Configuration({
 
 export const plaidClient = new PlaidApi(configuration);
 
-export const createLinkToken = async (userId: string) => {
-  const response = await plaidClient.linkTokenCreate({
+export const createLinkToken = async (userId: string, redirectUri?: string) => {
+  const request: Parameters<typeof plaidClient.linkTokenCreate>[0] = {
     user: { client_user_id: userId },
     client_name: 'BudgetFlow',
     products: [Products.Transactions],
     country_codes: [CountryCode.Us],
     language: 'en',
-  });
+  };
+
+  // Add redirect_uri for OAuth institutions (required for production)
+  if (redirectUri) {
+    request.redirect_uri = redirectUri;
+  }
+
+  const response = await plaidClient.linkTokenCreate(request);
   
   return response.data;
 };

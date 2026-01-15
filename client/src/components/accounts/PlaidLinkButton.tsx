@@ -4,6 +4,9 @@ import { Plus } from 'lucide-react';
 import { Button } from '../ui';
 import { useCreatePlaidLinkToken, useExchangePlaidToken } from '../../hooks';
 
+const OAUTH_REDIRECT_URI = import.meta.env.VITE_OAUTH_REDIRECT_URI || 
+  (typeof window !== 'undefined' ? `${window.location.origin}/oauth-callback` : '');
+
 export const PlaidLinkButton = () => {
   const [linkToken, setLinkToken] = useState<string | null>(null);
   
@@ -13,13 +16,15 @@ export const PlaidLinkButton = () => {
   useEffect(() => {
     const fetchToken = async () => {
       try {
-        const result = await createLinkToken.mutateAsync();
+        // Pass redirect_uri for OAuth support
+        const result = await createLinkToken.mutateAsync(OAUTH_REDIRECT_URI);
         setLinkToken(result.link_token);
       } catch (error) {
         console.error('Failed to create link token:', error);
       }
     };
     fetchToken();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const onSuccess = useCallback(async (publicToken: string, metadata: unknown) => {
