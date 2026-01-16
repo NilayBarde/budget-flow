@@ -37,14 +37,14 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction, allTransact
   const categoryChanged = transaction && categoryId !== (transaction.category_id || '');
 
   useEffect(() => {
-    if (transaction) {
+    if (isOpen && transaction) {
       setMerchantName(transaction.merchant_display_name || transaction.merchant_name);
       setCategoryId(transaction.category_id || '');
       setNotes(transaction.notes || '');
       setSelectedTags(transaction.tags || []);
       setApplyToAll(false);
     }
-  }, [transaction]);
+  }, [isOpen, transaction]);
 
   const handleSave = async () => {
     if (!transaction) return;

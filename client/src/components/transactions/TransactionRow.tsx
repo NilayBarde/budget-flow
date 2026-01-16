@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { MoreHorizontal, Split, Tag, Edit2 } from 'lucide-react';
 import clsx from 'clsx';
 import type { Transaction } from '../../types';
@@ -13,9 +13,23 @@ interface TransactionRowProps {
 
 export const TransactionRow = ({ transaction, onEdit, onSplit }: TransactionRowProps) => {
   const [showMenu, setShowMenu] = useState(false);
+  const [openUpward, setOpenUpward] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  
+  useEffect(() => {
+    if (showMenu && menuButtonRef.current) {
+      const rect = menuButtonRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      // If less than 150px below, open upward
+      setOpenUpward(spaceBelow < 150);
+    }
+  }, [showMenu]);
   
   const displayName = transaction.merchant_display_name || transaction.merchant_name;
-  const isExpense = transaction.amount > 0;
+  const transactionType = transaction.transaction_type || (transaction.amount > 0 ? 'expense' : 'income');
+  const isTransfer = transactionType === 'transfer';
+  const isIncome = transactionType === 'income';
+  const isInvestment = transactionType === 'investment';
   
   const handleToggleMenu = useCallback(() => {
     setShowMenu(prev => !prev);
@@ -32,17 +46,20 @@ export const TransactionRow = ({ transaction, onEdit, onSplit }: TransactionRowP
   }, [onSplit, transaction]);
 
   return (
-    <div className="flex items-center gap-4 px-4 py-3 hover:bg-midnight-700/50 transition-colors border-b border-midnight-700 last:border-b-0">
+    <div className={clsx(
+      "flex items-center gap-4 px-4 py-3 hover:bg-midnight-700/50 transition-colors border-b border-midnight-700 last:border-b-0",
+      isTransfer && "opacity-60"
+    )}>
       {/* Category Icon */}
       <div 
         className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
-        style={{ backgroundColor: `${transaction.category?.color || '#64748b'}20` }}
+        style={{ backgroundColor: isIncome ? '#10b98120' : isInvestment ? '#8b5cf620' : isTransfer ? '#64748b20' : `${transaction.category?.color || '#64748b'}20` }}
       >
         <span 
           className="text-sm"
-          style={{ color: transaction.category?.color || '#64748b' }}
+          style={{ color: isIncome ? '#10b981' : isInvestment ? '#8b5cf6' : isTransfer ? '#64748b' : transaction.category?.color || '#64748b' }}
         >
-          {transaction.category?.name?.charAt(0) || '?'}
+          {isIncome ? '$' : isInvestment ? '📈' : isTransfer ? '↔' : transaction.category?.name?.charAt(0) || '?'}
         </span>
       </div>
       
@@ -50,6 +67,15 @@ export const TransactionRow = ({ transaction, onEdit, onSplit }: TransactionRowP
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="font-medium text-slate-100 truncate">{displayName}</span>
+          {isTransfer && (
+            <Badge color="#64748b" size="sm">Transfer</Badge>
+          )}
+          {isIncome && (
+            <Badge color="#10b981" size="sm">Income</Badge>
+          )}
+          {isInvestment && (
+            <Badge color="#8b5cf6" size="sm">Investment</Badge>
+          )}
           {transaction.is_split && (
             <Badge color="#6366f1" size="sm">Split</Badge>
           )}
@@ -57,6 +83,13 @@ export const TransactionRow = ({ transaction, onEdit, onSplit }: TransactionRowP
             <Badge color="#10b981" size="sm">Recurring</Badge>
           )}
         </div>
+        {/* Show original description if different from display name */}
+        {transaction.original_description && 
+         transaction.original_description.toLowerCase() !== displayName.toLowerCase() && (
+          <div className="text-xs text-slate-500 truncate">
+            {transaction.original_description}
+          </div>
+        )}
         <div className="flex items-center gap-2 text-sm text-slate-400">
           <span>{formatDate(transaction.date)}</span>
           {transaction.category && (
@@ -86,14 +119,15 @@ export const TransactionRow = ({ transaction, onEdit, onSplit }: TransactionRowP
       {/* Amount */}
       <div className={clsx(
         'font-semibold tabular-nums',
-        isExpense ? 'text-slate-100' : 'text-emerald-400'
+        isIncome ? 'text-emerald-400' : isInvestment ? 'text-violet-400' : isTransfer ? 'text-slate-500' : 'text-slate-100'
       )}>
-        {isExpense ? '-' : '+'}{formatCurrency(transaction.amount)}
+        {isIncome ? '+' : '-'}{formatCurrency(Math.abs(transaction.amount))}
       </div>
       
       {/* Actions */}
       <div className="relative">
         <button
+          ref={menuButtonRef}
           onClick={handleToggleMenu}
           className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-600 rounded-lg transition-colors"
         >
@@ -106,7 +140,10 @@ export const TransactionRow = ({ transaction, onEdit, onSplit }: TransactionRowP
               className="fixed inset-0 z-10" 
               onClick={() => setShowMenu(false)} 
             />
-            <div className="absolute right-0 top-full mt-1 w-40 bg-midnight-700 border border-midnight-600 rounded-lg shadow-xl z-20 py-1">
+            <div className={clsx(
+              "absolute right-0 w-40 bg-midnight-700 border border-midnight-600 rounded-lg shadow-xl z-20 py-1",
+              openUpward ? "bottom-full mb-1" : "top-full mt-1"
+            )}>
               <button
                 onClick={handleEdit}
                 className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-midnight-600 transition-colors"

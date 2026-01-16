@@ -1,3 +1,5 @@
+export type TransactionType = 'income' | 'expense' | 'transfer' | 'investment';
+
 export interface Account {
   id: string;
   user_id: string;
@@ -16,8 +18,10 @@ export interface Transaction {
   amount: number;
   date: string;
   merchant_name: string;
+  original_description: string | null;  // Full description from bank/Plaid
   merchant_display_name: string | null;
   category_id: string | null;
+  transaction_type: TransactionType;
   is_split: boolean;
   parent_transaction_id: string | null;
   is_recurring: boolean;
@@ -55,6 +59,7 @@ export interface TransactionSplit {
   parent_transaction_id: string;
   amount: number;
   description: string;
+  is_my_share: boolean;  // Only splits marked as my_share count toward totals
   created_at: string;
 }
 
@@ -93,15 +98,17 @@ export interface MonthlyStats {
   year: number;
   total_spent: number;
   total_income: number;
+  total_invested: number;
   by_category: { category: Category; amount: number }[];
 }
 
 export interface YearlyStats {
   year: number;
-  monthly_totals: { month: number; spent: number; income: number }[];
+  monthly_totals: { month: number; spent: number; income: number; invested: number }[];
   category_totals: { category: Category; amount: number }[];
   total_spent: number;
   total_income: number;
+  total_invested: number;
 }
 
 export interface PlaidLinkToken {
@@ -117,5 +124,6 @@ export type TransactionFilters = {
   tag_id?: string;
   search?: string;
   is_recurring?: boolean;
+  transaction_type?: TransactionType;
 };
 

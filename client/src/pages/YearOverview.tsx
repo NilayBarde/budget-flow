@@ -17,6 +17,7 @@ export const YearOverview = () => {
     name: MONTHS[index].slice(0, 3),
     spent: m.spent,
     income: m.income,
+    invested: m.invested,
   })) || [];
 
   const categoryData = stats?.category_totals
@@ -26,6 +27,8 @@ export const YearOverview = () => {
 
   const totalSpent = stats?.total_spent || 0;
   const totalIncome = stats?.total_income || 0;
+  const totalInvested = stats?.total_invested || 0;
+  const netSavings = totalIncome - totalSpent - totalInvested;
   const avgMonthly = totalSpent / 12;
 
   if (isLoading) {
@@ -60,7 +63,7 @@ export const YearOverview = () => {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
         <Card>
           <p className="text-sm text-slate-400">Total Spent</p>
           <p className="text-2xl font-bold text-slate-100 mt-1">
@@ -74,9 +77,15 @@ export const YearOverview = () => {
           </p>
         </Card>
         <Card>
+          <p className="text-sm text-slate-400">Total Invested</p>
+          <p className="text-2xl font-bold text-violet-400 mt-1">
+            {formatCurrency(totalInvested)}
+          </p>
+        </Card>
+        <Card>
           <p className="text-sm text-slate-400">Net Savings</p>
-          <p className={`text-2xl font-bold mt-1 ${totalIncome - totalSpent >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-            {formatCurrency(totalIncome - totalSpent)}
+          <p className={`text-2xl font-bold mt-1 ${netSavings >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+            {formatCurrency(netSavings)}
           </p>
         </Card>
         <Card>
@@ -89,7 +98,7 @@ export const YearOverview = () => {
 
       {/* Monthly Chart */}
       <Card>
-        <CardHeader title="Monthly Spending" subtitle="Expenses and income by month" />
+        <CardHeader title="Monthly Overview" subtitle="Expenses, income, and investments by month" />
         <div className="h-80">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={monthlyData}>
@@ -114,6 +123,7 @@ export const YearOverview = () => {
               />
               <Bar dataKey="spent" fill="#f43f5e" radius={[4, 4, 0, 0]} name="Expenses" />
               <Bar dataKey="income" fill="#10b981" radius={[4, 4, 0, 0]} name="Income" />
+              <Bar dataKey="invested" fill="#8b5cf6" radius={[4, 4, 0, 0]} name="Invested" />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -191,6 +201,11 @@ export const YearOverview = () => {
                 {month.income > 0 && (
                   <p className="text-xs text-emerald-400">
                     +{formatCurrency(month.income)}
+                  </p>
+                )}
+                {month.invested > 0 && (
+                  <p className="text-xs text-violet-400">
+                    {formatCurrency(month.invested)} invested
                   </p>
                 )}
               </div>

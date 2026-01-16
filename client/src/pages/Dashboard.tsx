@@ -39,7 +39,8 @@ export const Dashboard = () => {
 
   const totalSpent = stats?.total_spent || 0;
   const totalIncome = stats?.total_income || 0;
-  const netSavings = totalIncome - totalSpent;
+  const totalInvested = stats?.total_invested || 0;
+  const netSavings = totalIncome - totalSpent - totalInvested;
 
   const categoryData = useMemo(() => {
     if (!stats?.by_category) return [];
@@ -95,7 +96,7 @@ export const Dashboard = () => {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <Card className="bg-gradient-to-br from-midnight-800 to-midnight-900">
           <div className="flex items-center justify-between">
             <div>
@@ -127,6 +128,20 @@ export const Dashboard = () => {
         <Card className="bg-gradient-to-br from-midnight-800 to-midnight-900">
           <div className="flex items-center justify-between">
             <div>
+              <p className="text-sm text-slate-400">Total Invested</p>
+              <p className="text-2xl font-bold text-violet-400 mt-1">
+                {formatCurrency(totalInvested)}
+              </p>
+            </div>
+            <div className="p-3 bg-violet-500/20 rounded-xl">
+              <TrendingUp className="h-6 w-6 text-violet-400" />
+            </div>
+          </div>
+        </Card>
+
+        <Card className="bg-gradient-to-br from-midnight-800 to-midnight-900">
+          <div className="flex items-center justify-between">
+            <div>
               <p className="text-sm text-slate-400">Net Savings</p>
               <p className={`text-2xl font-bold mt-1 ${netSavings >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                 {formatCurrency(netSavings)}
@@ -134,7 +149,7 @@ export const Dashboard = () => {
             </div>
             <div className={`p-3 rounded-xl ${netSavings >= 0 ? 'bg-emerald-500/20' : 'bg-rose-500/20'}`}>
               {netSavings >= 0 
-                ? <TrendingUp className="h-6 w-6 text-emerald-400" />
+                ? <Wallet className="h-6 w-6 text-emerald-400" />
                 : <Wallet className="h-6 w-6 text-rose-400" />
               }
             </div>

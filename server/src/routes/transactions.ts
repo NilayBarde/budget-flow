@@ -8,7 +8,7 @@ const router = Router();
 // Get transactions with filters
 router.get('/', async (req, res) => {
   try {
-    const { month, year, account_id, category_id, tag_id, search, is_recurring } = req.query;
+    const { month, year, account_id, category_id, tag_id, search, is_recurring, transaction_type } = req.query;
 
     let query = supabase
       .from('transactions')
@@ -37,6 +37,11 @@ router.get('/', async (req, res) => {
 
     if (is_recurring === 'true') {
       query = query.eq('is_recurring', true);
+    }
+
+    // Filter by transaction type (income, expense, transfer)
+    if (transaction_type) {
+      query = query.eq('transaction_type', transaction_type);
     }
 
     if (search) {
@@ -115,14 +120,17 @@ router.get('/:id', async (req, res) => {
 // Create manual transaction
 router.post('/', async (req, res) => {
   try {
-    const { amount, date, merchant_name, category_id, notes } = req.body;
+    const { amount, date, merchant_name, category_id, notes, transaction_type } = req.body;
 
     const displayName = cleanMerchantName(merchant_name);
     const autoCategoryName = categorizeTransaction(merchant_name);
     
-    // Get category ID if not provided
+    // Determine transaction type - default to expense for positive, income for negative
+    const finalTransactionType = transaction_type || (amount < 0 ? 'income' : 'expense');
+    
+    // Get category ID if not provided (only for expenses)
     let finalCategoryId = category_id;
-    if (!finalCategoryId) {
+    if (!finalCategoryId && finalTransactionType === 'expense') {
       const { data: category } = await supabase
         .from('categories')
         .select('id')
@@ -140,6 +148,7 @@ router.post('/', async (req, res) => {
       merchant_name,
       merchant_display_name: displayName,
       category_id: finalCategoryId,
+      transaction_type: finalTransactionType,
       is_split: false,
       is_recurring: false,
       notes,
@@ -265,11 +274,12 @@ router.post('/:id/splits', async (req, res) => {
       .update({ is_split: true })
       .eq('id', id);
 
-    const splitRecords = splits.map((s: { amount: number; description: string }) => ({
+    const splitRecords = splits.map((s: { amount: number; description: string; is_my_share?: boolean }) => ({
       id: uuidv4(),
       parent_transaction_id: id,
       amount: s.amount,
       description: s.description,
+      is_my_share: s.is_my_share ?? true,  // Default to true if not specified
       created_at: new Date().toISOString(),
     }));
 

@@ -6,6 +6,142 @@ import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
+type TransactionType = 'income' | 'expense' | 'transfer' | 'investment';
+
+// Investment detection patterns (checked BEFORE transfers)
+const INVESTMENT_PATTERNS = [
+  /robinhood-debit/i,        // Robinhood recurring investment debits
+  /robinhood debit/i,
+  /fidelity/i,
+  /vanguard/i,
+  /schwab/i,
+  /etrade/i,
+  /e-trade/i,
+  /td\s*ameritrade/i,
+  /coinbase/i,
+  /webull/i,
+  /acorns/i,
+  /betterment/i,
+];
+
+// Transfer detection patterns
+const TRANSFER_PATTERNS = [
+  /payment.*thank\s*you/i,
+  /autopay/i,
+  /credit\s*card\s*payment/i,
+  /credit\s*crd/i,           // "CREDIT CRD AUTOPAY"
+  /crd\s*autopay/i,          // Abbreviated card autopay
+  /epayment/i,               // Electronic payment
+  /e-payment/i,
+  /transfer\s*(to|from)/i,
+  /online\s*transfer/i,
+  /ach\s*transfer/i,
+  /wire\s*transfer/i,
+  /^payment$/i,
+  /bill\s*pay/i,
+  /billpay/i,
+  /direct\s*debit/i,
+  /loan\s*payment/i,
+  /mortgage\s*payment/i,
+  /\bpmt\b/i,                // Common abbreviation for payment
+  /internet\s*transfer/i,
+  /mobile\s*transfer/i,
+  /zelle/i,                  // Zelle transfers
+  /cash\s*app/i,             // Cash App transfers
+  /acctverify/i,             // Account verification micro-deposits
+  /account\s*verification/i,
+  /-transfer-[a-z0-9]+/i,    // Transfer with ID hash (e.g., "Capital One-transfer-rt05b...")
+  /credit\s*card.*auto\s*pay/i,  // Credit card auto pay
+  /bank\s*xfer/i,            // Bank transfer (e.g., Apple Cash-Bank Xfer)
+  /mobile\s*pmt/i,           // Mobile payment
+  /-ach\s*pmt/i,             // ACH payment (e.g., "Amex Epayment-Ach Pmt")
+  /robinhood.*card.*payment/i, // Robinhood credit card payments (not investments)
+  // Note: Venmo intentionally excluded - users often receive reimbursements via Venmo
+  // and need to manually decide if it's income vs transfer
+  // Note: Robinhood-Debits excluded - they are investments, not transfers
+];
+
+// Plaid categories that indicate transfers (legacy category field)
+const TRANSFER_CATEGORIES = ['Transfer', 'Payment', 'Credit Card', 'Loan Payments'];
+
+// Plaid personal_finance_category primary values that indicate transfers
+const TRANSFER_PFC_PRIMARY = ['TRANSFER_IN', 'TRANSFER_OUT', 'LOAN_PAYMENTS', 'BANK_FEES'];
+
+interface PlaidPersonalFinanceCategory {
+  primary?: string;
+  detailed?: string;
+}
+
+/**
+ * Detect transaction type based on amount and patterns
+ * Priority: investments > transfers > amount sign
+ * - Investment pattern match = investment
+ * - Plaid says it's a transfer = transfer
+ * - Transfer pattern match = transfer (regardless of amount sign)
+ * - Negative amount = income
+ * - Positive amount = expense
+ */
+const detectTransactionType = (
+  amount: number,
+  merchantName: string | null,
+  fullName: string | null,
+  plaidCategories: string[] | undefined,
+  personalFinanceCategory?: PlaidPersonalFinanceCategory | null,
+  originalDescription?: string | null
+): TransactionType => {
+  // Check for INVESTMENTS FIRST (before transfers)
+  // This ensures Robinhood-Debits are investments, not transfers
+  const textsToCheck = [merchantName || '', fullName || '', originalDescription || ''];
+  const matchesInvestmentPattern = textsToCheck.some(text =>
+    INVESTMENT_PATTERNS.some(pattern => pattern.test(text))
+  );
+  
+  if (matchesInvestmentPattern) {
+    return 'investment';
+  }
+
+  // Check Plaid's personal_finance_category
+  const pfcPrimary = personalFinanceCategory?.primary;
+  const pfcDetailed = personalFinanceCategory?.detailed;
+  
+  // Check if it's an investment based on Plaid's detailed category
+  if (pfcDetailed?.includes('INVESTMENT') || pfcDetailed?.includes('RETIREMENT')) {
+    return 'investment';
+  }
+  
+  if (pfcPrimary && TRANSFER_PFC_PRIMARY.some(t => pfcPrimary.startsWith(t.split('_')[0]))) {
+    // TRANSFER_IN, TRANSFER_OUT, LOAN_PAYMENTS are all transfers
+    if (pfcPrimary.startsWith('TRANSFER') || pfcPrimary.startsWith('LOAN')) {
+      return 'transfer';
+    }
+  }
+
+  // Check BOTH merchant_name and full name for transfer patterns
+  const namesToCheck = [merchantName || '', fullName || ''];
+  
+  // Check if any transfer pattern matches either name
+  const matchesTransferPattern = namesToCheck.some(name => 
+    TRANSFER_PATTERNS.some(pattern => pattern.test(name))
+  );
+  
+  // Check if Plaid legacy category indicates transfer
+  const hasTransferCategory = plaidCategories?.some(cat => 
+    TRANSFER_CATEGORIES.some(tc => cat.includes(tc))
+  ) || false;
+
+  // Transfers take priority - they can be money in OR out
+  if (matchesTransferPattern || hasTransferCategory) {
+    return 'transfer';
+  }
+
+  // Income: negative amounts (money coming in) that aren't transfers
+  if (amount < 0) {
+    return 'income';
+  }
+
+  return 'expense';
+};
+
 // Get all accounts
 router.get('/', async (req, res) => {
   try {
@@ -77,9 +213,26 @@ router.post('/:id/sync', async (req, res) => {
       const mapping = mappingMap.get(tx.merchant_name?.toLowerCase() || '');
       const displayName = mapping?.display_name || cleanMerchantName(tx.merchant_name || tx.name);
       
-      // Categorize transaction
-      const categoryName = categorizeTransaction(tx.merchant_name || tx.name);
-      const categoryId = mapping?.default_category_id || categoryMap.get(categoryName) || null;
+      // Detect transaction type (income, expense, transfer, or investment)
+      // Pass merchant_name, full name, and original_description for accurate detection
+      const originalDesc = (tx as { original_description?: string }).original_description;
+      const transactionType = detectTransactionType(
+        tx.amount,
+        tx.merchant_name ?? null,
+        tx.name, // Full transaction description from bank
+        tx.category ?? undefined,
+        tx.personal_finance_category as PlaidPersonalFinanceCategory | null,
+        originalDesc
+      );
+      
+      
+      // Categorize transaction (only for expenses)
+      const categoryName = transactionType === 'expense' 
+        ? categorizeTransaction(tx.merchant_name || tx.name, originalDesc)
+        : null;
+      const categoryId = transactionType === 'expense'
+        ? (mapping?.default_category_id || categoryMap.get(categoryName || '') || null)
+        : null;
 
       await supabase.from('transactions').insert({
         id: uuidv4(),
@@ -88,8 +241,11 @@ router.post('/:id/sync', async (req, res) => {
         amount: tx.amount,
         date: tx.date,
         merchant_name: tx.merchant_name || tx.name,
+        // Use raw bank description if available, otherwise fall back to Plaid's cleaned name
+        original_description: (tx as { original_description?: string }).original_description || tx.name,
         merchant_display_name: displayName,
         category_id: categoryId,
+        transaction_type: transactionType,
         is_split: false,
         is_recurring: false,
       });
@@ -119,6 +275,71 @@ router.delete('/:id', async (req, res) => {
   } catch (error) {
     console.error('Error deleting account:', error);
     res.status(500).json({ message: 'Failed to delete account' });
+  }
+});
+
+// Reclassify all existing transactions with transaction_type
+// This is a one-time migration endpoint
+router.post('/reclassify-transactions', async (req, res) => {
+  try {
+    console.log('Starting transaction reclassification...');
+    
+    // Get all transactions
+    const { data: transactions, error } = await supabase
+      .from('transactions')
+      .select('id, amount, merchant_name, original_description');
+
+    if (error) throw error;
+
+    let reclassified = 0;
+    let incomeCount = 0;
+    let expenseCount = 0;
+    let transferCount = 0;
+    let investmentCount = 0;
+
+    for (const tx of transactions || []) {
+      // Detect transaction type using both merchant_name and original_description
+      // Note: personal_finance_category not available for reclassification (not stored)
+      const detectedType = detectTransactionType(
+        tx.amount, 
+        tx.merchant_name, 
+        tx.original_description,
+        undefined,
+        undefined,
+        tx.original_description  // Also pass as originalDescription for investment detection
+      );
+      
+      
+      // Update the transaction
+      const { error: updateError } = await supabase
+        .from('transactions')
+        .update({ transaction_type: detectedType })
+        .eq('id', tx.id);
+
+      if (updateError) {
+        console.error(`Error updating transaction ${tx.id}:`, updateError);
+        continue;
+      }
+
+      reclassified++;
+      if (detectedType === 'income') incomeCount++;
+      else if (detectedType === 'expense') expenseCount++;
+      else if (detectedType === 'transfer') transferCount++;
+      else if (detectedType === 'investment') investmentCount++;
+    }
+
+    res.json({ 
+      reclassified, 
+      breakdown: {
+        income: incomeCount,
+        expense: expenseCount,
+        transfer: transferCount,
+        investment: investmentCount
+      }
+    });
+  } catch (error) {
+    console.error('Error reclassifying transactions:', error);
+    res.status(500).json({ message: 'Failed to reclassify transactions' });
   }
 });
 

@@ -29,19 +29,20 @@ router.get('/', async (req, res) => {
     const startDate = new Date(Number(year), Number(month) - 1, 1).toISOString().split('T')[0];
     const endDate = new Date(Number(year), Number(month), 0).toISOString().split('T')[0];
 
+    // Only count expenses (exclude income and transfers)
     const { data: transactions } = await supabase
       .from('transactions')
-      .select('category_id, amount')
+      .select('category_id, amount, transaction_type')
       .gte('date', startDate)
       .lte('date', endDate)
-      .gt('amount', 0); // Only expenses
+      .eq('transaction_type', 'expense');
 
     // Sum by category
     const spentByCategory = new Map<string, number>();
     transactions?.forEach(t => {
       if (t.category_id) {
         const current = spentByCategory.get(t.category_id) || 0;
-        spentByCategory.set(t.category_id, current + t.amount);
+        spentByCategory.set(t.category_id, current + Math.abs(t.amount));
       }
     });
 

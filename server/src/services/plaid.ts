@@ -65,6 +65,9 @@ export const getTransactions = async (
     access_token: accessToken,
     start_date: startDate,
     end_date: endDate,
+    options: {
+      include_original_description: true,  // Get raw bank description (e.g., "robinhood-debits")
+    },
   });
   
   return response.data;

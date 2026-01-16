@@ -48,8 +48,10 @@ CREATE TABLE transactions (
   amount DECIMAL(12, 2) NOT NULL,
   date DATE NOT NULL,
   merchant_name TEXT NOT NULL,
+  original_description TEXT,  -- Full transaction description from bank/Plaid
   merchant_display_name TEXT,
   category_id UUID REFERENCES categories(id) ON DELETE SET NULL,
+  transaction_type TEXT NOT NULL DEFAULT 'expense' CHECK (transaction_type IN ('income', 'expense', 'transfer', 'investment')),
   is_split BOOLEAN DEFAULT FALSE,
   parent_transaction_id UUID REFERENCES transactions(id) ON DELETE CASCADE,
   is_recurring BOOLEAN DEFAULT FALSE,
@@ -74,6 +76,7 @@ CREATE TABLE transaction_splits (
   parent_transaction_id UUID NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
   amount DECIMAL(12, 2) NOT NULL,
   description TEXT,
+  is_my_share BOOLEAN DEFAULT TRUE,  -- Only splits marked as my_share count toward totals
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -117,6 +120,7 @@ CREATE INDEX idx_transactions_date ON transactions(date);
 CREATE INDEX idx_transactions_account_id ON transactions(account_id);
 CREATE INDEX idx_transactions_category_id ON transactions(category_id);
 CREATE INDEX idx_transactions_merchant_name ON transactions(merchant_name);
+CREATE INDEX idx_transactions_type ON transactions(transaction_type);
 CREATE INDEX idx_budget_goals_month_year ON budget_goals(month, year);
 CREATE INDEX idx_recurring_transactions_merchant ON recurring_transactions(merchant_display_name);
 

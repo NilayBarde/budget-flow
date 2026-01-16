@@ -55,6 +55,12 @@ export const syncAccount = (accountId: string) =>
 export const deleteAccount = (accountId: string) =>
   fetchApi<void>(`/accounts/${accountId}`, { method: 'DELETE' });
 
+export const reclassifyTransactions = () =>
+  fetchApi<{ reclassified: number; breakdown: { income: number; expense: number; transfer: number } }>(
+    '/accounts/reclassify-transactions',
+    { method: 'POST' }
+  );
+
 // Transactions
 export const getTransactions = (filters: TransactionFilters = {}) => {
   const params = new URLSearchParams();

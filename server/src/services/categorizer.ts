@@ -55,12 +55,16 @@ const CATEGORY_PATTERNS: Record<string, string[]> = {
   ],
 };
 
-export const categorizeTransaction = (merchantName: string): string => {
+export const categorizeTransaction = (merchantName: string, originalDescription?: string | null): string => {
   const normalizedName = merchantName.toLowerCase();
+  const normalizedDescription = originalDescription?.toLowerCase() || '';
+  // Check both merchant name and original description for pattern matches
+  const textsToCheck = [normalizedName, normalizedDescription];
 
   for (const [category, patterns] of Object.entries(CATEGORY_PATTERNS)) {
     for (const pattern of patterns) {
-      if (normalizedName.includes(pattern.toLowerCase())) {
+      const lowerPattern = pattern.toLowerCase();
+      if (textsToCheck.some(text => text.includes(lowerPattern))) {
         return category;
       }
     }
@@ -71,12 +75,30 @@ export const categorizeTransaction = (merchantName: string): string => {
 
 export const cleanMerchantName = (rawName: string): string => {
   let cleaned = rawName
+    // Remove Wealthfront/Plaid specific patterns
+    .replace(/\s*Money\s*(In|Out)\s*Dda_transaction\s*$/i, '')
+    .replace(/\s*Dda_transaction\s*$/i, '')
+    // Remove random hashes (common in transfer IDs)
+    .replace(/-[a-z0-9]{10,}/gi, '')
+    // Remove acctverify patterns
+    .replace(/-acctverify/gi, ' Verification')
+    // Clean up transfer patterns  
+    .replace(/-transfer\b/gi, ' Transfer')
+    // Remove common suffixes
     .replace(/\s*#\d+/g, '')
     .replace(/\s*\*\d+/g, '')
     .replace(/\s*-\s*\d+/g, '')
     .replace(/\s+\d{4,}/g, '')
     .replace(/\s*(US|USA|CA|NY|TX|FL|IL)\s*$/i, '')
     .replace(/\s*\d{5}(-\d{4})?\s*$/g, '')
+    // Clean up abbreviations
+    .replace(/\bEnterta-edi\b/gi, 'Entertainment')
+    .replace(/\bPymnts?\b/gi, 'Payment')
+    .replace(/\bPmt\b/gi, 'Payment')
+    .replace(/\bXfer\b/gi, 'Transfer')
+    .replace(/\bDep\b/gi, 'Deposit')
+    .replace(/\bWdrl\b/gi, 'Withdrawal')
+    // Normalize whitespace
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -93,6 +115,8 @@ export const cleanMerchantName = (rawName: string): string => {
     'chick-fil-a': 'Chick-fil-A',
     'dd donut': "Dunkin'",
     'dunkin': "Dunkin'",
+    'capital one verification': 'Capital One (Verification)',
+    'capital one transfer': 'Capital One Transfer',
   };
 
   const lowerCleaned = cleaned.toLowerCase();

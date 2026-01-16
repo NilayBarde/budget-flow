@@ -70,18 +70,34 @@ export const categorizeTransaction = (merchantName: string): string => {
 };
 
 export const cleanMerchantName = (rawName: string): string => {
-  // Remove common suffixes and transaction codes
   let cleaned = rawName
+    // Remove Wealthfront/Plaid specific patterns
+    .replace(/\s*Money\s*(In|Out)\s*Dda_transaction\s*$/i, '')
+    .replace(/\s*Dda_transaction\s*$/i, '')
+    // Remove random hashes (common in transfer IDs)
+    .replace(/-[a-z0-9]{10,}/gi, '')
+    // Remove acctverify patterns
+    .replace(/-acctverify/gi, ' Verification')
+    // Clean up transfer patterns  
+    .replace(/-transfer\b/gi, ' Transfer')
+    // Remove common suffixes
     .replace(/\s*#\d+/g, '')
     .replace(/\s*\*\d+/g, '')
     .replace(/\s*-\s*\d+/g, '')
     .replace(/\s+\d{4,}/g, '')
     .replace(/\s*(US|USA|CA|NY|TX|FL|IL)\s*$/i, '')
     .replace(/\s*\d{5}(-\d{4})?\s*$/g, '')
+    // Clean up abbreviations
+    .replace(/\bEnterta-edi\b/gi, 'Entertainment')
+    .replace(/\bPymnts?\b/gi, 'Payment')
+    .replace(/\bPmt\b/gi, 'Payment')
+    .replace(/\bXfer\b/gi, 'Transfer')
+    .replace(/\bDep\b/gi, 'Deposit')
+    .replace(/\bWdrl\b/gi, 'Withdrawal')
+    // Normalize whitespace
     .replace(/\s+/g, ' ')
     .trim();
-  
-  // Common merchant name cleanups
+
   const merchantMappings: Record<string, string> = {
     'amzn mktp': 'Amazon',
     'amazon.com': 'Amazon',
@@ -95,16 +111,17 @@ export const cleanMerchantName = (rawName: string): string => {
     'chick-fil-a': 'Chick-fil-A',
     'dd donut': "Dunkin'",
     'dunkin': "Dunkin'",
+    'capital one verification': 'Capital One (Verification)',
+    'capital one transfer': 'Capital One Transfer',
   };
-  
+
   const lowerCleaned = cleaned.toLowerCase();
   for (const [pattern, replacement] of Object.entries(merchantMappings)) {
     if (lowerCleaned.includes(pattern)) {
       return replacement;
     }
   }
-  
-  // Title case the result
+
   return cleaned
     .split(' ')
     .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())

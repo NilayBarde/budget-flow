@@ -15,12 +15,13 @@ interface SplitEntry {
   id: string;
   amount: string;
   description: string;
+  isMyShare: boolean;
 }
 
 export const SplitTransactionModal = ({ isOpen, onClose, transaction }: SplitTransactionModalProps) => {
   const [splits, setSplits] = useState<SplitEntry[]>([
-    { id: '1', amount: '', description: 'Your portion' },
-    { id: '2', amount: '', description: 'Others' },
+    { id: '1', amount: '', description: 'Your portion', isMyShare: true },
+    { id: '2', amount: '', description: 'Others', isMyShare: false },
   ]);
   
   const createSplit = useCreateSplit();
@@ -34,7 +35,8 @@ export const SplitTransactionModal = ({ isOpen, onClose, transaction }: SplitTra
     setSplits(prev => [...prev, { 
       id: Date.now().toString(), 
       amount: '', 
-      description: '' 
+      description: '',
+      isMyShare: false,
     }]);
   }, []);
 
@@ -42,7 +44,7 @@ export const SplitTransactionModal = ({ isOpen, onClose, transaction }: SplitTra
     setSplits(prev => prev.filter(s => s.id !== id));
   }, []);
 
-  const handleSplitChange = useCallback((id: string, field: 'amount' | 'description', value: string) => {
+  const handleSplitChange = useCallback((id: string, field: 'amount' | 'description' | 'isMyShare', value: string | boolean) => {
     setSplits(prev => prev.map(s => 
       s.id === id ? { ...s, [field]: value } : s
     ));
@@ -56,6 +58,7 @@ export const SplitTransactionModal = ({ isOpen, onClose, transaction }: SplitTra
       .map(s => ({
         amount: parseFloat(s.amount),
         description: s.description,
+        is_my_share: s.isMyShare,
       }));
 
     await createSplit.mutateAsync({
@@ -65,8 +68,8 @@ export const SplitTransactionModal = ({ isOpen, onClose, transaction }: SplitTra
 
     onClose();
     setSplits([
-      { id: '1', amount: '', description: 'Your portion' },
-      { id: '2', amount: '', description: 'Others' },
+      { id: '1', amount: '', description: 'Your portion', isMyShare: true },
+      { id: '2', amount: '', description: 'Others', isMyShare: false },
     ]);
   };
 
@@ -101,10 +104,31 @@ export const SplitTransactionModal = ({ isOpen, onClose, transaction }: SplitTra
             <h4 className="text-sm font-medium text-slate-300">Current Splits</h4>
             {transaction.splits?.map((split, index) => (
               <div key={split.id} className="flex justify-between items-center bg-midnight-900 rounded-lg p-3">
-                <span className="text-slate-300">{split.description || `Split ${index + 1}`}</span>
-                <span className="font-medium text-slate-100">{formatCurrency(split.amount)}</span>
+                <div className="flex items-center gap-2">
+                  <span className={split.is_my_share ? 'text-slate-100' : 'text-slate-500'}>
+                    {split.description || `Split ${index + 1}`}
+                  </span>
+                  {split.is_my_share && (
+                    <span className="text-xs bg-accent-500/20 text-accent-400 px-2 py-0.5 rounded">
+                      My share
+                    </span>
+                  )}
+                </div>
+                <span className={`font-medium ${split.is_my_share ? 'text-slate-100' : 'text-slate-500'}`}>
+                  {formatCurrency(split.amount)}
+                </span>
               </div>
             ))}
+            <div className="pt-2 border-t border-midnight-600">
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-400">Your total:</span>
+                <span className="text-accent-400 font-medium">
+                  {formatCurrency(
+                    transaction.splits?.filter(s => s.is_my_share).reduce((sum, s) => sum + s.amount, 0) || 0
+                  )}
+                </span>
+              </div>
+            </div>
             <Button
               variant="danger"
               onClick={handleRemoveAllSplits}
@@ -119,30 +143,43 @@ export const SplitTransactionModal = ({ isOpen, onClose, transaction }: SplitTra
           <>
             <div className="space-y-3">
               {splits.map((split, index) => (
-                <div key={split.id} className="flex gap-3 items-start">
-                  <div className="flex-1">
-                    <Input
-                      placeholder="Description"
-                      value={split.description}
-                      onChange={e => handleSplitChange(split.id, 'description', e.target.value)}
-                    />
+                <div key={split.id} className="space-y-2 p-3 bg-midnight-900 rounded-lg">
+                  <div className="flex gap-3 items-start">
+                    <div className="flex-1">
+                      <Input
+                        placeholder="Description"
+                        value={split.description}
+                        onChange={e => handleSplitChange(split.id, 'description', e.target.value)}
+                      />
+                    </div>
+                    <div className="w-32">
+                      <Input
+                        type="number"
+                        placeholder="0.00"
+                        value={split.amount}
+                        onChange={e => handleSplitChange(split.id, 'amount', e.target.value)}
+                      />
+                    </div>
+                    {index > 1 && (
+                      <button
+                        onClick={() => handleRemoveSplit(split.id)}
+                        className="p-2 text-slate-400 hover:text-rose-400 transition-colors"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
                   </div>
-                  <div className="w-32">
-                    <Input
-                      type="number"
-                      placeholder="0.00"
-                      value={split.amount}
-                      onChange={e => handleSplitChange(split.id, 'amount', e.target.value)}
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={split.isMyShare}
+                      onChange={e => handleSplitChange(split.id, 'isMyShare', e.target.checked)}
+                      className="w-4 h-4 rounded border-midnight-500 bg-midnight-800 text-accent-500 focus:ring-accent-500 focus:ring-offset-midnight-900"
                     />
-                  </div>
-                  {index > 1 && (
-                    <button
-                      onClick={() => handleRemoveSplit(split.id)}
-                      className="p-2 text-slate-400 hover:text-rose-400 transition-colors"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  )}
+                    <span className="text-sm text-slate-400">
+                      Count toward my expenses
+                    </span>
+                  </label>
                 </div>
               ))}
             </div>
