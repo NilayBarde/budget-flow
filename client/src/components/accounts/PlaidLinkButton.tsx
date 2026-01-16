@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { usePlaidLink } from 'react-plaid-link';
+import type { PlaidLinkOptions } from 'react-plaid-link';
 import { Plus } from 'lucide-react';
 import { Button } from '../ui';
 import { useCreatePlaidLinkToken, useExchangePlaidToken } from '../../hooks';
@@ -14,6 +15,33 @@ const getOAuthRedirectUri = () => {
   }
   // For localhost/HTTP, don't send redirect_uri (OAuth banks won't work locally anyway)
   return;
+};
+
+// Inner component that only renders when we have a token
+const PlaidLinkOpener = ({ 
+  linkToken, 
+  onSuccess,
+  isLoading 
+}: { 
+  linkToken: string; 
+  onSuccess: PlaidLinkOptions['onSuccess'];
+  isLoading: boolean;
+}) => {
+  const { open, ready } = usePlaidLink({
+    token: linkToken,
+    onSuccess,
+  });
+
+  return (
+    <Button
+      onClick={() => open()}
+      disabled={!ready}
+      isLoading={isLoading}
+    >
+      <Plus className="h-4 w-4 mr-2" />
+      Connect Account
+    </Button>
+  );
 };
 
 export const PlaidLinkButton = () => {
@@ -48,20 +76,23 @@ export const PlaidLinkButton = () => {
     }
   }, [exchangeToken]);
 
-  const { open, ready } = usePlaidLink({
-    token: linkToken,
-    onSuccess,
-  });
+  // Show loading button while fetching token
+  if (!linkToken) {
+    return (
+      <Button disabled isLoading={createLinkToken.isPending}>
+        <Plus className="h-4 w-4 mr-2" />
+        Connect Account
+      </Button>
+    );
+  }
 
+  // Only render PlaidLink when we have a token
   return (
-    <Button
-      onClick={() => open()}
-      disabled={!ready || createLinkToken.isPending}
-      isLoading={createLinkToken.isPending || exchangeToken.isPending}
-    >
-      <Plus className="h-4 w-4 mr-2" />
-      Connect Account
-    </Button>
+    <PlaidLinkOpener 
+      linkToken={linkToken} 
+      onSuccess={onSuccess}
+      isLoading={exchangeToken.isPending}
+    />
   );
 };
 
