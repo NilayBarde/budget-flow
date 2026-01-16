@@ -1,11 +1,46 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
 import * as plaidService from '../services/plaid.js';
+import { categorizeTransaction, cleanMerchantName } from '../services/categorizer.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
 const DEFAULT_USER_ID = 'default-user';
+
+// Helper to detect transaction type (same logic as accounts.ts)
+type TransactionType = 'income' | 'expense' | 'transfer' | 'investment';
+
+const TRANSFER_PATTERNS = [
+  /card[- ]?payment/i,
+  /payment.*thank\s*you/i,
+  /autopay/i,
+  /credit\s*card\s*payment/i,
+  /epayment/i,
+  /\btransfer\b/i,
+  /bill\s*pay/i,
+  /zelle/i,
+  /cash\s*app/i,
+  /acctverify/i,
+];
+
+const INVESTMENT_PATTERNS = [
+  /robinhood[- ]?debits?/i,
+  /fidelity/i,
+  /vanguard/i,
+  /schwab/i,
+  /coinbase/i,
+  /webull/i,
+  /acorns/i,
+  /betterment/i,
+];
+
+const detectTransactionType = (amount: number, texts: string[]): TransactionType => {
+  if (texts.some(t => TRANSFER_PATTERNS.some(p => p.test(t)))) return 'transfer';
+  if (texts.some(t => INVESTMENT_PATTERNS.some(p => p.test(t)))) return 'investment';
+  if (amount < 0) return 'income';
+  return 'expense';
+};
 
 // Create link token for Plaid Link
 router.post('/create-link-token', async (req, res) => {
@@ -15,8 +50,12 @@ router.post('/create-link-token', async (req, res) => {
     console.log('PLAID_SECRET:', process.env.PLAID_SECRET ? 'Set' : 'NOT SET');
     console.log('PLAID_ENV:', process.env.PLAID_ENV);
     
-    const { redirect_uri } = req.body;
-    const linkToken = await plaidService.createLinkToken(DEFAULT_USER_ID, redirect_uri);
+    const { redirect_uri, webhook_url } = req.body;
+    
+    // Use provided webhook URL or fall back to environment variable
+    const webhookUrl = webhook_url || process.env.PLAID_WEBHOOK_URL;
+    
+    const linkToken = await plaidService.createLinkToken(DEFAULT_USER_ID, redirect_uri, webhookUrl);
     
     res.json({
       link_token: linkToken.link_token,
@@ -51,8 +90,9 @@ router.post('/exchange-token', async (req, res) => {
     const plaidAccount = accountsResponse.accounts[0];
 
     // Store the account
+    const accountId = uuidv4();
     const account = {
-      id: uuidv4(),
+      id: accountId,
       user_id: DEFAULT_USER_ID,
       plaid_item_id: itemId,
       plaid_access_token: accessToken,
@@ -65,6 +105,62 @@ router.post('/exchange-token', async (req, res) => {
     const { data, error } = await supabase.from('accounts').insert(account).select().single();
 
     if (error) throw error;
+
+    // Auto-sync transactions after connecting using /transactions/sync
+    console.log('Auto-syncing transactions for new account...');
+    
+    try {
+      const syncResult = await plaidService.syncTransactions(accessToken, null);
+      
+      // Get categories for mapping
+      const { data: categories } = await supabase.from('categories').select('id, name');
+      const categoryMap = new Map(categories?.map(c => [c.name, c.id]) || []);
+      
+      let syncedCount = 0;
+      for (const tx of syncResult.added) {
+        const texts = [tx.merchant_name || '', tx.name || '', tx.original_description || ''];
+        const displayName = cleanMerchantName(tx.merchant_name || tx.name);
+        const transactionType = detectTransactionType(tx.amount, texts);
+        
+        // Auto-assign category based on type
+        let categoryId: string | null = null;
+        if (transactionType === 'expense') {
+          const categoryName = categorizeTransaction(tx.merchant_name || tx.name, tx.original_description);
+          categoryId = categoryMap.get(categoryName) || null;
+        } else if (transactionType === 'income') {
+          categoryId = categoryMap.get('Income') || null;
+        } else if (transactionType === 'investment') {
+          categoryId = categoryMap.get('Investment') || null;
+        }
+        
+        await supabase.from('transactions').insert({
+          id: uuidv4(),
+          account_id: accountId,
+          plaid_transaction_id: tx.transaction_id,
+          amount: tx.amount,
+          date: tx.date,
+          merchant_name: tx.merchant_name || tx.name,
+          original_description: tx.original_description || tx.name,
+          merchant_display_name: displayName,
+          category_id: categoryId,
+          transaction_type: transactionType,
+          is_split: false,
+          is_recurring: false,
+        });
+        syncedCount++;
+      }
+      
+      // Save the cursor for future syncs
+      await supabase
+        .from('accounts')
+        .update({ plaid_cursor: syncResult.nextCursor })
+        .eq('id', accountId);
+      
+      console.log(`Auto-synced ${syncedCount} transactions`);
+    } catch (syncError) {
+      console.error('Auto-sync failed (account created, but transactions need manual sync):', syncError);
+    }
+
     res.json(data);
   } catch (error) {
     console.error('Error exchanging token:', error);

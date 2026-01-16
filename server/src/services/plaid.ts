@@ -18,14 +18,23 @@ const configuration = new Configuration({
 
 export const plaidClient = new PlaidApi(configuration);
 
-export const createLinkToken = async (userId: string, redirectUri?: string) => {
+export const createLinkToken = async (userId: string, redirectUri?: string, webhookUrl?: string) => {
   const request: Parameters<typeof plaidClient.linkTokenCreate>[0] = {
     user: { client_user_id: userId },
     client_name: 'BudgetFlow',
     products: [Products.Transactions],
     country_codes: [CountryCode.Us],
     language: 'en',
+    transactions: {
+      days_requested: 730,  // Request 2 years of transaction history (max allowed)
+    },
   };
+  
+  // Add webhook URL if provided (required for SYNC_UPDATES_AVAILABLE notifications)
+  if (webhookUrl) {
+    request.webhook = webhookUrl;
+    console.log('Using webhook URL:', webhookUrl);
+  }
 
   // Add redirect_uri for OAuth institutions (required for production)
   if (redirectUri) {
@@ -56,21 +65,73 @@ export const exchangePublicToken = async (publicToken: string) => {
   return response.data;
 };
 
-export const getTransactions = async (
+// Sync transactions using Plaid's recommended /transactions/sync endpoint
+// Transaction type from Plaid sync response
+interface PlaidSyncTransaction {
+  transaction_id: string;
+  account_id: string;
+  amount: number;
+  date: string;
+  name: string;
+  merchant_name?: string | null;
+  category?: string[];
+  pending: boolean;
+  original_description?: string;
+  personal_finance_category?: {
+    primary?: string;
+    detailed?: string;
+  };
+}
+
+export interface SyncResult {
+  added: PlaidSyncTransaction[];
+  modified: PlaidSyncTransaction[];
+  removed: { transaction_id: string }[];
+  nextCursor: string;
+  hasMore: boolean;
+}
+
+export const syncTransactions = async (
   accessToken: string,
-  startDate: string,
-  endDate: string
-) => {
-  const response = await plaidClient.transactionsGet({
-    access_token: accessToken,
-    start_date: startDate,
-    end_date: endDate,
-    options: {
-      include_original_description: true,  // Get raw bank description (e.g., "robinhood-debits")
-    },
-  });
+  cursor?: string | null
+): Promise<SyncResult> => {
+  const allAdded: PlaidSyncTransaction[] = [];
+  const allModified: PlaidSyncTransaction[] = [];
+  const allRemoved: { transaction_id: string }[] = [];
+  let currentCursor = cursor || '';
+  let hasMore = true;
   
-  return response.data;
+  console.log(`Starting transactions sync${cursor ? ' from cursor' : ' (initial)'}...`);
+  
+  while (hasMore) {
+    const response = await plaidClient.transactionsSync({
+      access_token: accessToken,
+      cursor: currentCursor || undefined,
+      options: {
+        include_original_description: true,
+      },
+    });
+    
+    const data = response.data;
+    allAdded.push(...(data.added as PlaidSyncTransaction[]));
+    allModified.push(...(data.modified as PlaidSyncTransaction[]));
+    allRemoved.push(...data.removed);
+    
+    hasMore = data.has_more;
+    currentCursor = data.next_cursor;
+    
+    console.log(`Sync batch: +${data.added.length} added, ~${data.modified.length} modified, -${data.removed.length} removed`);
+  }
+  
+  console.log(`Sync complete: ${allAdded.length} added, ${allModified.length} modified, ${allRemoved.length} removed`);
+  
+  return {
+    added: allAdded,
+    modified: allModified,
+    removed: allRemoved,
+    nextCursor: currentCursor,
+    hasMore: false,
+  };
 };
 
 export const getAccounts = async (accessToken: string) => {

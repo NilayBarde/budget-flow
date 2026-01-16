@@ -151,10 +151,11 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Sync transactions for an account
+// Sync transactions for an account using Plaid's /transactions/sync (recommended)
 router.post('/:id/sync', async (req, res) => {
   try {
     const { id } = req.params;
+    const { use_legacy } = req.query; // Optional: use old /transactions/get method
 
     const { data: account, error: accountError } = await supabase
       .from('accounts')
@@ -166,14 +167,13 @@ router.post('/:id/sync', async (req, res) => {
       return res.status(404).json({ message: 'Account not found' });
     }
 
-    // Get transactions from Plaid (last 30 days)
-    const endDate = new Date().toISOString().split('T')[0];
-    const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    // Use new /transactions/sync method (recommended by Plaid)
+    console.log(`Syncing transactions for account ${id} using /transactions/sync...`);
+    console.log(`Current cursor: ${account.plaid_cursor ? 'exists' : 'none (initial sync)'}`);
 
-    const plaidData = await plaidService.getTransactions(
+    const syncResult = await plaidService.syncTransactions(
       account.plaid_access_token,
-      startDate,
-      endDate
+      account.plaid_cursor
     );
 
     // Get categories for mapping
@@ -190,10 +190,13 @@ router.post('/:id/sync', async (req, res) => {
 
     const mappingMap = new Map(mappings?.map(m => [m.original_name.toLowerCase(), m]) || []);
 
-    let syncedCount = 0;
+    let addedCount = 0;
+    let modifiedCount = 0;
+    let removedCount = 0;
 
-    for (const tx of plaidData.transactions) {
-      // Check if transaction already exists
+    // Handle added transactions
+    for (const tx of syncResult.added) {
+      // Check if already exists
       const { data: existing } = await supabase
         .from('transactions')
         .select('id')
@@ -202,34 +205,26 @@ router.post('/:id/sync', async (req, res) => {
 
       if (existing) continue;
 
-      // Apply merchant mapping if exists
+      const texts = [tx.merchant_name || '', tx.name || '', (tx as { original_description?: string }).original_description || ''];
       const mapping = mappingMap.get(tx.merchant_name?.toLowerCase() || '');
       const displayName = mapping?.display_name || cleanMerchantName(tx.merchant_name || tx.name);
       
-      // Detect transaction type (income, expense, transfer, or investment)
-      // Pass merchant_name, full name, and original_description for accurate detection
-      const originalDesc = (tx as { original_description?: string }).original_description;
-      const transactionType = detectTransactionType(
-        tx.amount,
-        tx.merchant_name ?? null,
-        tx.name, // Full transaction description from bank
-        tx.category ?? undefined,
-        tx.personal_finance_category as PlaidPersonalFinanceCategory | null,
-        originalDesc
-      );
-      
-      
-      // Categorize transaction (for expenses, income, and investments)
+      // Simple transaction type detection
+      const transactionType = (() => {
+        if (texts.some(t => TRANSFER_PATTERNS.some(p => p.test(t)))) return 'transfer';
+        if (texts.some(t => INVESTMENT_PATTERNS.some(p => p.test(t)))) return 'investment';
+        if (tx.amount < 0) return 'income';
+        return 'expense';
+      })() as TransactionType;
+
+      // Auto-assign category based on type
       let categoryId: string | null = null;
-      
       if (transactionType === 'expense') {
-        const categoryName = categorizeTransaction(tx.merchant_name || tx.name, originalDesc);
+        const categoryName = categorizeTransaction(tx.merchant_name || tx.name, (tx as { original_description?: string }).original_description);
         categoryId = mapping?.default_category_id || categoryMap.get(categoryName) || null;
       } else if (transactionType === 'income') {
-        // Auto-assign Income category to income transactions
         categoryId = categoryMap.get('Income') || null;
       } else if (transactionType === 'investment') {
-        // Auto-assign Investment category to investment transactions
         categoryId = categoryMap.get('Investment') || null;
       }
 
@@ -240,7 +235,6 @@ router.post('/:id/sync', async (req, res) => {
         amount: tx.amount,
         date: tx.date,
         merchant_name: tx.merchant_name || tx.name,
-        // Use raw bank description if available, otherwise fall back to Plaid's cleaned name
         original_description: (tx as { original_description?: string }).original_description || tx.name,
         merchant_display_name: displayName,
         category_id: categoryId,
@@ -249,10 +243,58 @@ router.post('/:id/sync', async (req, res) => {
         is_recurring: false,
       });
 
-      syncedCount++;
+      addedCount++;
     }
 
-    res.json({ synced: syncedCount });
+    // Handle modified transactions
+    for (const tx of syncResult.modified) {
+      const texts = [tx.merchant_name || '', tx.name || '', (tx as { original_description?: string }).original_description || ''];
+      const displayName = cleanMerchantName(tx.merchant_name || tx.name);
+      
+      const transactionType = (() => {
+        if (texts.some(t => TRANSFER_PATTERNS.some(p => p.test(t)))) return 'transfer';
+        if (texts.some(t => INVESTMENT_PATTERNS.some(p => p.test(t)))) return 'investment';
+        if (tx.amount < 0) return 'income';
+        return 'expense';
+      })() as TransactionType;
+
+      await supabase
+        .from('transactions')
+        .update({
+          amount: tx.amount,
+          date: tx.date,
+          merchant_name: tx.merchant_name || tx.name,
+          original_description: (tx as { original_description?: string }).original_description || tx.name,
+          merchant_display_name: displayName,
+          transaction_type: transactionType,
+        })
+        .eq('plaid_transaction_id', tx.transaction_id);
+      modifiedCount++;
+    }
+
+    // Handle removed transactions
+    for (const tx of syncResult.removed) {
+      await supabase
+        .from('transactions')
+        .delete()
+        .eq('plaid_transaction_id', tx.transaction_id);
+      removedCount++;
+    }
+
+    // Update the cursor for next sync
+    await supabase
+      .from('accounts')
+      .update({ plaid_cursor: syncResult.nextCursor })
+      .eq('id', id);
+
+    console.log(`Sync complete: +${addedCount} added, ~${modifiedCount} modified, -${removedCount} removed`);
+
+    res.json({ 
+      added: addedCount, 
+      modified: modifiedCount, 
+      removed: removedCount,
+      cursor_updated: true 
+    });
   } catch (error) {
     console.error('Error syncing account:', error);
     res.status(500).json({ message: 'Failed to sync account' });

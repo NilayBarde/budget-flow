@@ -27,6 +27,7 @@ const { default: tagsRouter } = await import('./routes/tags.js');
 const { default: recurringRouter } = await import('./routes/recurring.js');
 const { default: statsRouter } = await import('./routes/stats.js');
 const { default: merchantMappingsRouter } = await import('./routes/merchant-mappings.js');
+const { default: webhooksRouter } = await import('./routes/webhooks.js');
 
 console.log('Routes loaded successfully');
 
@@ -47,6 +48,7 @@ app.use('/api/tags', tagsRouter);
 app.use('/api/recurring-transactions', recurringRouter);
 app.use('/api/stats', statsRouter);
 app.use('/api/merchant-mappings', merchantMappingsRouter);
+app.use('/api/webhooks', webhooksRouter);
 
 console.log('Routes registered');
 

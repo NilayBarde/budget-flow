@@ -8,6 +8,8 @@ export interface Account {
   institution_name: string;
   account_name: string;
   account_type: string;
+  plaid_cursor?: string | null;
+  historical_sync_complete?: boolean;
   created_at: string;
 }
 
