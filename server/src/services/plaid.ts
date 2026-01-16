@@ -151,3 +151,23 @@ export const getAccounts = async (accessToken: string) => {
   return response.data;
 };
 
+// Update webhook URL on an existing Item (doesn't create a new Item!)
+export const updateWebhook = async (accessToken: string, webhookUrl: string) => {
+  const response = await plaidClient.itemWebhookUpdate({
+    access_token: accessToken,
+    webhook: webhookUrl,
+  });
+  
+  console.log(`Webhook updated to: ${webhookUrl}`);
+  return response.data;
+};
+
+// Remove an Item from Plaid (call this when deleting an account)
+export const removeItem = async (accessToken: string) => {
+  const response = await plaidClient.itemRemove({
+    access_token: accessToken,
+  });
+  
+  console.log('Item removed from Plaid');
+  return response.data;
+};
