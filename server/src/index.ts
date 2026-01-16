@@ -62,7 +62,7 @@ const clientDistPath = path.resolve(__dirname, '../../client/dist');
 app.use(express.static(clientDistPath));
 
 // SPA fallback - serve index.html for all non-API routes
-app.get('*', (req, res) => {
+app.get('/{*splat}', (req, res) => {
   // Don't serve index.html for API routes
   if (req.path.startsWith('/api')) {
     res.status(404).json({ message: 'API endpoint not found' });
