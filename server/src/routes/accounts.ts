@@ -50,7 +50,9 @@ const TRANSFER_PATTERNS = [
   /bank\s*xfer/i,            // Bank transfer (e.g., Apple Cash-Bank Xfer)
   /mobile\s*pmt/i,           // Mobile payment
   /-ach\s*pmt/i,             // ACH payment (e.g., "Amex Epayment-Ach Pmt")
-  // Note: Removed "money out/in" patterns - too broad for Wealthfront transactions
+  /money\s*out\s*cash/i,     // Wealthfront internal transfers (e.g., "Emergency Fund Money Out Cash")
+  /money\s*in\s*cash/i,      // Wealthfront internal transfers (e.g., "Emergency Fund Money In Cash")
+  /\bfund\b.*money\s*(out|in)/i,  // Wealthfront bucket transfers (e.g., "Emergency Fund Money Out")
   // Note: Venmo intentionally excluded - users often receive reimbursements via Venmo
 ];
 
@@ -281,19 +283,26 @@ router.post('/:id/sync', async (req, res) => {
       removedCount++;
     }
 
-    // Update the cursor for next sync
+    // Update the cursor and historical sync status
+    const historicalComplete = syncResult.transactionsUpdateStatus === 'HISTORICAL_UPDATE_COMPLETE';
     await supabase
       .from('accounts')
-      .update({ plaid_cursor: syncResult.nextCursor })
+      .update({ 
+        plaid_cursor: syncResult.nextCursor,
+        historical_sync_complete: historicalComplete || account.historical_sync_complete
+      })
       .eq('id', id);
 
     console.log(`Sync complete: +${addedCount} added, ~${modifiedCount} modified, -${removedCount} removed`);
+    console.log(`Historical sync status: ${syncResult.transactionsUpdateStatus || 'unknown'}`);
 
     res.json({ 
       added: addedCount, 
       modified: modifiedCount, 
       removed: removedCount,
-      cursor_updated: true 
+      cursor_updated: true,
+      transactions_update_status: syncResult.transactionsUpdateStatus,
+      historical_complete: historicalComplete || account.historical_sync_complete
     });
   } catch (error) {
     console.error('Error syncing account:', error);

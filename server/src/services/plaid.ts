@@ -89,6 +89,7 @@ export interface SyncResult {
   removed: { transaction_id: string }[];
   nextCursor: string;
   hasMore: boolean;
+  transactionsUpdateStatus?: string; // INITIAL_UPDATE_COMPLETE, HISTORICAL_UPDATE_COMPLETE, NOT_READY, etc.
 }
 
 export const syncTransactions = async (
@@ -100,6 +101,7 @@ export const syncTransactions = async (
   const allRemoved: { transaction_id: string }[] = [];
   let currentCursor = cursor || '';
   let hasMore = true;
+  let transactionsUpdateStatus: string | undefined;
   
   console.log(`Starting transactions sync${cursor ? ' from cursor' : ' (initial)'}...`);
   
@@ -120,10 +122,16 @@ export const syncTransactions = async (
     hasMore = data.has_more;
     currentCursor = data.next_cursor;
     
+    // Capture the transactions_update_status from first response
+    if (!transactionsUpdateStatus && data.transactions_update_status) {
+      transactionsUpdateStatus = data.transactions_update_status;
+    }
+    
     console.log(`Sync batch: +${data.added.length} added, ~${data.modified.length} modified, -${data.removed.length} removed`);
   }
   
   console.log(`Sync complete: ${allAdded.length} added, ${allModified.length} modified, ${allRemoved.length} removed`);
+  console.log(`Transactions update status: ${transactionsUpdateStatus || 'unknown'}`);
   
   return {
     added: allAdded,
@@ -131,6 +139,7 @@ export const syncTransactions = async (
     removed: allRemoved,
     nextCursor: currentCursor,
     hasMore: false,
+    transactionsUpdateStatus,
   };
 };
 
