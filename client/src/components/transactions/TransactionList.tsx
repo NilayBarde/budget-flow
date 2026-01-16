@@ -26,7 +26,7 @@ export const TransactionList = ({ transactions, isLoading, onEdit, onSplit }: Tr
   }
 
   return (
-    <div className="bg-midnight-800 border border-midnight-600 rounded-xl overflow-hidden">
+    <div className="bg-midnight-800 border border-midnight-600 rounded-xl">
       {transactions.map(transaction => (
         <TransactionRow
           key={transaction.id}
