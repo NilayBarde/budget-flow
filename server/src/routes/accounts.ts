@@ -8,10 +8,9 @@ const router = Router();
 
 type TransactionType = 'income' | 'expense' | 'transfer' | 'investment';
 
-// Investment detection patterns (checked BEFORE transfers)
+// Investment detection patterns (checked AFTER transfers)
 const INVESTMENT_PATTERNS = [
-  /robinhood-debit/i,        // Robinhood recurring investment debits
-  /robinhood debit/i,
+  /robinhood[- ]?debits?/i,  // Robinhood recurring investment debits (e.g., "Robinhood-Debits-123")
   /fidelity/i,
   /vanguard/i,
   /schwab/i,
@@ -26,6 +25,7 @@ const INVESTMENT_PATTERNS = [
 
 // Transfer detection patterns
 const TRANSFER_PATTERNS = [
+  /card[- ]?payment/i,       // Generic card payment (e.g., "Card-Payment", "Card Payment")
   /payment.*thank\s*you/i,
   /autopay/i,
   /credit\s*card\s*payment/i,
@@ -33,9 +33,7 @@ const TRANSFER_PATTERNS = [
   /crd\s*autopay/i,          // Abbreviated card autopay
   /epayment/i,               // Electronic payment
   /e-payment/i,
-  /transfer\s*(to|from)/i,
-  /online\s*transfer/i,
-  /ach\s*transfer/i,
+  /\btransfer\b/i,           // Any transfer (but not "Robinhood-transfer" investment patterns)
   /wire\s*transfer/i,
   /^payment$/i,
   /bill\s*pay/i,
@@ -44,21 +42,16 @@ const TRANSFER_PATTERNS = [
   /loan\s*payment/i,
   /mortgage\s*payment/i,
   /\bpmt\b/i,                // Common abbreviation for payment
-  /internet\s*transfer/i,
-  /mobile\s*transfer/i,
   /zelle/i,                  // Zelle transfers
   /cash\s*app/i,             // Cash App transfers
   /acctverify/i,             // Account verification micro-deposits
   /account\s*verification/i,
-  /-transfer-[a-z0-9]+/i,    // Transfer with ID hash (e.g., "Capital One-transfer-rt05b...")
   /credit\s*card.*auto\s*pay/i,  // Credit card auto pay
   /bank\s*xfer/i,            // Bank transfer (e.g., Apple Cash-Bank Xfer)
   /mobile\s*pmt/i,           // Mobile payment
   /-ach\s*pmt/i,             // ACH payment (e.g., "Amex Epayment-Ach Pmt")
-  /robinhood.*card.*payment/i, // Robinhood credit card payments (not investments)
+  // Note: Removed "money out/in" patterns - too broad for Wealthfront transactions
   // Note: Venmo intentionally excluded - users often receive reimbursements via Venmo
-  // and need to manually decide if it's income vs transfer
-  // Note: Robinhood-Debits excluded - they are investments, not transfers
 ];
 
 // Plaid categories that indicate transfers (legacy category field)
@@ -74,10 +67,10 @@ interface PlaidPersonalFinanceCategory {
 
 /**
  * Detect transaction type based on amount and patterns
- * Priority: investments > transfers > amount sign
+ * Priority: transfers > investments > amount sign
+ * - Transfer pattern match = transfer (most specific, checked first)
  * - Investment pattern match = investment
  * - Plaid says it's a transfer = transfer
- * - Transfer pattern match = transfer (regardless of amount sign)
  * - Negative amount = income
  * - Positive amount = expense
  */
@@ -89,9 +82,18 @@ const detectTransactionType = (
   personalFinanceCategory?: PlaidPersonalFinanceCategory | null,
   originalDescription?: string | null
 ): TransactionType => {
-  // Check for INVESTMENTS FIRST (before transfers)
-  // This ensures Robinhood-Debits are investments, not transfers
   const textsToCheck = [merchantName || '', fullName || '', originalDescription || ''];
+  
+  // Check for TRANSFERS FIRST - card payments, etc. should be transfers even from investment platforms
+  const matchesTransferPattern = textsToCheck.some(text => 
+    TRANSFER_PATTERNS.some(pattern => pattern.test(text))
+  );
+  
+  if (matchesTransferPattern) {
+    return 'transfer';
+  }
+  
+  // Check for INVESTMENTS (after transfers ruled out)
   const matchesInvestmentPattern = textsToCheck.some(text =>
     INVESTMENT_PATTERNS.some(pattern => pattern.test(text))
   );
@@ -109,28 +111,19 @@ const detectTransactionType = (
     return 'investment';
   }
   
+  // Check if Plaid says it's a transfer
   if (pfcPrimary && TRANSFER_PFC_PRIMARY.some(t => pfcPrimary.startsWith(t.split('_')[0]))) {
-    // TRANSFER_IN, TRANSFER_OUT, LOAN_PAYMENTS are all transfers
     if (pfcPrimary.startsWith('TRANSFER') || pfcPrimary.startsWith('LOAN')) {
       return 'transfer';
     }
   }
-
-  // Check BOTH merchant_name and full name for transfer patterns
-  const namesToCheck = [merchantName || '', fullName || ''];
-  
-  // Check if any transfer pattern matches either name
-  const matchesTransferPattern = namesToCheck.some(name => 
-    TRANSFER_PATTERNS.some(pattern => pattern.test(name))
-  );
   
   // Check if Plaid legacy category indicates transfer
   const hasTransferCategory = plaidCategories?.some(cat => 
     TRANSFER_CATEGORIES.some(tc => cat.includes(tc))
   ) || false;
 
-  // Transfers take priority - they can be money in OR out
-  if (matchesTransferPattern || hasTransferCategory) {
+  if (hasTransferCategory) {
     return 'transfer';
   }
 
@@ -226,13 +219,19 @@ router.post('/:id/sync', async (req, res) => {
       );
       
       
-      // Categorize transaction (only for expenses)
-      const categoryName = transactionType === 'expense' 
-        ? categorizeTransaction(tx.merchant_name || tx.name, originalDesc)
-        : null;
-      const categoryId = transactionType === 'expense'
-        ? (mapping?.default_category_id || categoryMap.get(categoryName || '') || null)
-        : null;
+      // Categorize transaction (for expenses, income, and investments)
+      let categoryId: string | null = null;
+      
+      if (transactionType === 'expense') {
+        const categoryName = categorizeTransaction(tx.merchant_name || tx.name, originalDesc);
+        categoryId = mapping?.default_category_id || categoryMap.get(categoryName) || null;
+      } else if (transactionType === 'income') {
+        // Auto-assign Income category to income transactions
+        categoryId = categoryMap.get('Income') || null;
+      } else if (transactionType === 'investment') {
+        // Auto-assign Investment category to investment transactions
+        categoryId = categoryMap.get('Investment') || null;
+      }
 
       await supabase.from('transactions').insert({
         id: uuidv4(),
@@ -340,6 +339,64 @@ router.post('/reclassify-transactions', async (req, res) => {
   } catch (error) {
     console.error('Error reclassifying transactions:', error);
     res.status(500).json({ message: 'Failed to reclassify transactions' });
+  }
+});
+
+// Assign categories to income and investment transactions
+// This updates existing transactions that have transaction_type but no category
+router.post('/assign-type-categories', async (req, res) => {
+  try {
+    console.log('Assigning categories to income/investment transactions...');
+    
+    // Get category IDs
+    const { data: categories } = await supabase
+      .from('categories')
+      .select('id, name')
+      .in('name', ['Income', 'Investment']);
+    
+    const incomeCategory = categories?.find(c => c.name === 'Income');
+    const investmentCategory = categories?.find(c => c.name === 'Investment');
+    
+    let incomeUpdated = 0;
+    let investmentUpdated = 0;
+    
+    // Update income transactions that don't have a category
+    if (incomeCategory) {
+      const { data: incomeResult } = await supabase
+        .from('transactions')
+        .update({ category_id: incomeCategory.id })
+        .eq('transaction_type', 'income')
+        .is('category_id', null)
+        .select('id');
+      
+      incomeUpdated = incomeResult?.length || 0;
+    }
+    
+    // Update investment transactions that don't have a category
+    if (investmentCategory) {
+      const { data: investmentResult } = await supabase
+        .from('transactions')
+        .update({ category_id: investmentCategory.id })
+        .eq('transaction_type', 'investment')
+        .is('category_id', null)
+        .select('id');
+      
+      investmentUpdated = investmentResult?.length || 0;
+    }
+    
+    res.json({
+      updated: {
+        income: incomeUpdated,
+        investment: investmentUpdated
+      },
+      categories_found: {
+        income: !!incomeCategory,
+        investment: !!investmentCategory
+      }
+    });
+  } catch (error) {
+    console.error('Error assigning type categories:', error);
+    res.status(500).json({ message: 'Failed to assign categories' });
   }
 });
 

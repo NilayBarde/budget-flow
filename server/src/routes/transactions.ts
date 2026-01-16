@@ -128,15 +128,33 @@ router.post('/', async (req, res) => {
     // Determine transaction type - default to expense for positive, income for negative
     const finalTransactionType = transaction_type || (amount < 0 ? 'income' : 'expense');
     
-    // Get category ID if not provided (only for expenses)
+    // Get category ID if not provided (for expenses, income, and investments)
     let finalCategoryId = category_id;
-    if (!finalCategoryId && finalTransactionType === 'expense') {
-      const { data: category } = await supabase
-        .from('categories')
-        .select('id')
-        .eq('name', autoCategoryName)
-        .single();
-      finalCategoryId = category?.id || null;
+    if (!finalCategoryId) {
+      if (finalTransactionType === 'expense') {
+        const { data: category } = await supabase
+          .from('categories')
+          .select('id')
+          .eq('name', autoCategoryName)
+          .single();
+        finalCategoryId = category?.id || null;
+      } else if (finalTransactionType === 'income') {
+        // Auto-assign Income category to income transactions
+        const { data: incomeCategory } = await supabase
+          .from('categories')
+          .select('id')
+          .eq('name', 'Income')
+          .single();
+        finalCategoryId = incomeCategory?.id || null;
+      } else if (finalTransactionType === 'investment') {
+        // Auto-assign Investment category to investment transactions
+        const { data: investmentCategory } = await supabase
+          .from('categories')
+          .select('id')
+          .eq('name', 'Investment')
+          .single();
+        finalCategoryId = investmentCategory?.id || null;
+      }
     }
 
     const transaction = {
@@ -176,12 +194,34 @@ router.patch('/:id', async (req, res) => {
     const updates = req.body;
     const applyToAll = req.query.applyToAll === 'true';
 
-    // Get the current transaction to know the merchant
+    // Get the current transaction to know the merchant and current type
     const { data: transaction } = await supabase
       .from('transactions')
-      .select('merchant_name, merchant_display_name')
+      .select('merchant_name, merchant_display_name, transaction_type, category_id')
       .eq('id', id)
       .single();
+
+    // If changing transaction_type to 'income' or 'investment' and no category_id provided,
+    // auto-assign the corresponding category
+    if (updates.transaction_type === 'income' && !updates.category_id) {
+      const { data: incomeCategory } = await supabase
+        .from('categories')
+        .select('id')
+        .eq('name', 'Income')
+        .single();
+      if (incomeCategory) {
+        updates.category_id = incomeCategory.id;
+      }
+    } else if (updates.transaction_type === 'investment' && !updates.category_id) {
+      const { data: investmentCategory } = await supabase
+        .from('categories')
+        .select('id')
+        .eq('name', 'Investment')
+        .single();
+      if (investmentCategory) {
+        updates.category_id = investmentCategory.id;
+      }
+    }
 
     // If updating category or merchant display name, create/update merchant mapping
     // This ensures the app "learns" your categorization preferences

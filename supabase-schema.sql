@@ -38,6 +38,7 @@ INSERT INTO categories (name, icon, color, is_default) VALUES
   ('Travel', 'plane', '#14b8a6', TRUE),
   ('Healthcare', 'heart-pulse', '#ef4444', TRUE),
   ('Income', 'wallet', '#10b981', TRUE),
+  ('Investment', 'trending-up', '#8b5cf6', TRUE),
   ('Other', 'more-horizontal', '#64748b', TRUE);
 
 -- Transactions table

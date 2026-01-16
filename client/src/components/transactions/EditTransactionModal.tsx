@@ -1,9 +1,16 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Modal, Button, Input, Select } from '../ui';
-import type { Transaction, Category, Tag } from '../../types';
+import type { Transaction, Category, Tag, TransactionType } from '../../types';
 import { useUpdateTransaction, useCategories, useTags, useAddTagToTransaction, useRemoveTagFromTransaction } from '../../hooks';
 import { Badge } from '../ui/Badge';
 import { formatCurrency, formatDate } from '../../utils/formatters';
+
+const TRANSACTION_TYPE_OPTIONS = [
+  { value: 'expense', label: 'Expense' },
+  { value: 'income', label: 'Income' },
+  { value: 'transfer', label: 'Transfer' },
+  { value: 'investment', label: 'Investment' },
+];
 
 interface EditTransactionModalProps {
   isOpen: boolean;
@@ -15,6 +22,7 @@ interface EditTransactionModalProps {
 export const EditTransactionModal = ({ isOpen, onClose, transaction, allTransactions = [] }: EditTransactionModalProps) => {
   const [merchantName, setMerchantName] = useState('');
   const [categoryId, setCategoryId] = useState('');
+  const [transactionType, setTransactionType] = useState<TransactionType>('expense');
   const [notes, setNotes] = useState('');
   const [selectedTags, setSelectedTags] = useState<Tag[]>([]);
   const [applyToAll, setApplyToAll] = useState(false);
@@ -40,6 +48,7 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction, allTransact
     if (isOpen && transaction) {
       setMerchantName(transaction.merchant_display_name || transaction.merchant_name);
       setCategoryId(transaction.category_id || '');
+      setTransactionType(transaction.transaction_type || 'expense');
       setNotes(transaction.notes || '');
       setSelectedTags(transaction.tags || []);
       setApplyToAll(false);
@@ -54,6 +63,7 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction, allTransact
       data: {
         merchant_display_name: merchantName,
         category_id: categoryId || null,
+        transaction_type: transactionType,
         notes: notes || null,
       },
       applyToAll,
@@ -115,6 +125,13 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction, allTransact
           value={categoryId}
           onChange={e => setCategoryId(e.target.value)}
           options={categoryOptions}
+        />
+
+        <Select
+          label="Transaction Type"
+          value={transactionType}
+          onChange={e => setTransactionType(e.target.value as TransactionType)}
+          options={TRANSACTION_TYPE_OPTIONS}
         />
 
         {/* Show apply to all option only if there are similar transactions and category changed */}
