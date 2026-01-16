@@ -30,11 +30,22 @@ export const createLinkToken = async (userId: string, redirectUri?: string) => {
   // Add redirect_uri for OAuth institutions (required for production)
   if (redirectUri) {
     request.redirect_uri = redirectUri;
+    console.log('Using redirect_uri:', redirectUri);
+  } else {
+    console.log('No redirect_uri provided (localhost/HTTP mode)');
   }
 
-  const response = await plaidClient.linkTokenCreate(request);
-  
-  return response.data;
+  try {
+    const response = await plaidClient.linkTokenCreate(request);
+    console.log('Link token created successfully');
+    return response.data;
+  } catch (error: unknown) {
+    const plaidError = error as { response?: { data?: unknown } };
+    if (plaidError.response?.data) {
+      console.error('Plaid API error:', JSON.stringify(plaidError.response.data, null, 2));
+    }
+    throw error;
+  }
 };
 
 export const exchangePublicToken = async (publicToken: string) => {
