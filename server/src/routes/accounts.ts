@@ -310,10 +310,56 @@ router.post('/:id/sync', async (req, res) => {
   }
 });
 
-// Delete an account
+// Update webhook URL on an existing account (doesn't use up an Item!)
+router.post('/:id/update-webhook', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const webhookUrl = process.env.PLAID_WEBHOOK_URL;
+
+    if (!webhookUrl) {
+      return res.status(400).json({ message: 'PLAID_WEBHOOK_URL not configured' });
+    }
+
+    const { data: account, error: accountError } = await supabase
+      .from('accounts')
+      .select('plaid_access_token')
+      .eq('id', id)
+      .single();
+
+    if (accountError || !account) {
+      return res.status(404).json({ message: 'Account not found' });
+    }
+
+    await plaidService.updateWebhook(account.plaid_access_token, webhookUrl);
+
+    res.json({ message: 'Webhook updated', webhook_url: webhookUrl });
+  } catch (error) {
+    console.error('Error updating webhook:', error);
+    res.status(500).json({ message: 'Failed to update webhook' });
+  }
+});
+
+// Delete an account (also removes from Plaid to keep things clean)
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
+
+    // Get the access token to remove from Plaid
+    const { data: account } = await supabase
+      .from('accounts')
+      .select('plaid_access_token')
+      .eq('id', id)
+      .single();
+
+    // Remove from Plaid (optional - helps keep Plaid dashboard clean)
+    if (account?.plaid_access_token) {
+      try {
+        await plaidService.removeItem(account.plaid_access_token);
+      } catch (plaidError) {
+        console.warn('Could not remove item from Plaid:', plaidError);
+        // Continue with local deletion even if Plaid removal fails
+      }
+    }
 
     // Delete all transactions for this account first
     await supabase.from('transactions').delete().eq('account_id', id);
