@@ -4,7 +4,6 @@ import type { PlaidLinkOptions } from 'react-plaid-link';
 import { Plus } from 'lucide-react';
 import { Button } from '../ui';
 import { useCreatePlaidLinkToken, useExchangePlaidToken } from '../../hooks';
-import { LINK_TOKEN_STORAGE_KEY } from '../../utils/constants';
 
 // Only use OAuth redirect URI on HTTPS (Plaid production requires HTTPS)
 const getOAuthRedirectUri = () => {
@@ -66,11 +65,12 @@ export const PlaidLinkButton = () => {
     const fetchToken = async () => {
       try {
         // Pass redirect_uri for OAuth support (only on HTTPS)
+        // Plaid can resume OAuth flow automatically without localStorage persistence
         const result = await createLinkToken.mutateAsync(getOAuthRedirectUri());
         const token = result.link_token;
         
-        // Store in localStorage for OAuth flow continuation
-        localStorage.setItem(LINK_TOKEN_STORAGE_KEY, token);
+        // Keep token in React state only - no localStorage persistence
+        // This maintains OAuth session continuity better, especially for OAuth banks like Amex
         setLinkToken(token);
         setError(null);
       } catch (error) {
@@ -85,8 +85,6 @@ export const PlaidLinkButton = () => {
   const onSuccess = useCallback(async (publicToken: string, metadata: unknown) => {
     try {
       await exchangeToken.mutateAsync({ publicToken, metadata });
-      // Clear stored token after successful connection
-      localStorage.removeItem(LINK_TOKEN_STORAGE_KEY);
       setError(null); // Clear any previous errors
     } catch (error) {
       console.error('Failed to exchange token:', error);
@@ -145,19 +143,12 @@ export const PlaidLinkButton = () => {
           : false;
         
         if (isAmex) {
+          // Known Plaid issue KI563877 - affects less than 1% of Amex connections
           errorMessage = 'American Express connection error (Known Plaid Issue KI563877)\n\n';
-          errorMessage += 'This is a known Plaid issue affecting less than 1% of Amex connections.\n\n';
-          errorMessage += 'Possible causes:\n';
-          errorMessage += '• Known Plaid integration issue with American Express\n';
-          errorMessage += '• Amex requires frequent MFA (Multi-Factor Authentication)\n';
-          errorMessage += '• Your security token may have expired\n\n';
-          errorMessage += 'Please try:\n';
+          errorMessage += 'This is a known Plaid issue. Please try:\n';
           errorMessage += '• Wait a few minutes and try connecting again\n';
-          errorMessage += '• Reconnect your Amex account through the Plaid flow\n';
-          errorMessage += '• Ensure your Amex credentials are correct\n';
-          errorMessage += '• Complete any required MFA steps during connection\n';
-          errorMessage += '• If it persists, try again later (this is a known Plaid issue)\n\n';
-          errorMessage += 'Note: Amex accounts often require daily re-authentication due to strict security protocols.';
+          errorMessage += '• Ensure you complete all MFA steps\n';
+          errorMessage += '• Plaid will usually resume automatically on retry';
         } else {
           errorMessage = 'Connection temporarily unavailable. This is usually a temporary issue on Plaid\'s side.\n\n';
           errorMessage += 'Please try:\n';
