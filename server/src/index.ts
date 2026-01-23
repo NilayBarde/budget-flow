@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { existsSync } from 'fs';
 import express from 'express';
 import cors from 'cors';
 
@@ -57,19 +58,51 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Serve static files from client/dist in production
+// Serve static files from client/dist only if they exist (for monolith deployments)
+// If client is deployed separately (e.g., Vercel), this will be skipped
 const clientDistPath = path.resolve(__dirname, '../../client/dist');
-app.use(express.static(clientDistPath));
 
-// SPA fallback - serve index.html for all non-API routes
-app.get('/{*splat}', (req, res) => {
-  // Don't serve index.html for API routes
-  if (req.path.startsWith('/api')) {
-    res.status(404).json({ message: 'API endpoint not found' });
-    return;
+try {
+  const distExists = existsSync(clientDistPath);
+  if (distExists) {
+    app.use(express.static(clientDistPath));
+    console.log(`Serving client from: ${clientDistPath}`);
+    
+    // SPA fallback - serve index.html for all non-API routes
+    app.get('/*', (req, res) => {
+      // Don't serve index.html for API routes
+      if (req.path.startsWith('/api')) {
+        res.status(404).json({ message: 'API endpoint not found' });
+        return;
+      }
+      res.sendFile(path.join(clientDistPath, 'index.html'));
+    });
+  } else {
+    console.log('Client dist not found - API-only mode (client deployed separately)');
+    // API-only mode - return 404 for non-API routes
+    app.get('/*', (req, res) => {
+      if (!req.path.startsWith('/api')) {
+        res.status(404).json({ 
+          message: 'Not found. This is an API server. Frontend is deployed separately.' 
+        });
+        return;
+      }
+      res.status(404).json({ message: 'API endpoint not found' });
+    });
   }
-  res.sendFile(path.join(clientDistPath, 'index.html'));
-});
+} catch (error) {
+  console.log('Could not check client dist - API-only mode');
+  // API-only mode
+  app.get('/*', (req, res) => {
+    if (!req.path.startsWith('/api')) {
+      res.status(404).json({ 
+        message: 'Not found. This is an API server. Frontend is deployed separately.' 
+      });
+      return;
+    }
+    res.status(404).json({ message: 'API endpoint not found' });
+  });
+}
 
 // Error handler
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -79,5 +112,4 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
-  console.log(`Serving client from: ${clientDistPath}`);
 });
