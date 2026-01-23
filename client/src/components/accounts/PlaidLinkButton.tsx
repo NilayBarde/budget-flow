@@ -1,9 +1,24 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePlaidLink } from 'react-plaid-link';
 import type { PlaidLinkOptions } from 'react-plaid-link';
 import { Plus } from 'lucide-react';
 import { Button } from '../ui';
 import { useCreatePlaidLinkToken, useExchangePlaidToken } from '../../hooks';
+
+// Type for Plaid metadata
+type PlaidMetadata = {
+  institution?: { name?: string };
+  [key: string]: unknown;
+};
+
+// Type for Plaid error
+type PlaidError = {
+  error_code?: string;
+  error_message?: string;
+  display_message?: string;
+  error_type?: string;
+  [key: string]: unknown;
+};
 
 // Only use OAuth redirect URI on HTTPS (Plaid production requires HTTPS)
 const getOAuthRedirectUri = () => {
@@ -23,6 +38,31 @@ const getOAuthRedirectUri = () => {
   // Note: To test OAuth locally, set VITE_OAUTH_REDIRECT_URI to an HTTPS URL (e.g., ngrok tunnel)
   return;
 };
+
+// Error message builders
+const getAmexErrorMessage = () =>
+  `American Express connection error (Known Plaid Issue KI563877)
+
+This is a known Plaid issue. Please try:
+• Wait a few minutes and try connecting again
+• Ensure you complete all MFA steps
+• Plaid will usually resume automatically on retry`;
+
+const getInternalServerErrorMessage = () =>
+  `Connection temporarily unavailable. This is usually a temporary issue on Plaid's side.
+
+Please try:
+• Wait a few minutes and try again
+• Check Plaid status page for service issues
+• Try connecting again later`;
+
+const getReauthErrorMessage = () =>
+  `Account re-authentication required.
+
+Please reconnect your account:
+• Your security token has expired
+• Complete the connection flow again
+• Note: American Express accounts often require daily re-authentication`;
 
 // Inner component that only renders when we have a token
 const PlaidLinkOpener = ({ 
@@ -60,13 +100,16 @@ export const PlaidLinkButton = () => {
   
   const createLinkToken = useCreatePlaidLinkToken();
   const exchangeToken = useExchangePlaidToken();
+  
+  // Memoize redirect URI to avoid recomputation
+  const oAuthRedirectUri = useMemo(() => getOAuthRedirectUri(), []);
 
   useEffect(() => {
     const fetchToken = async () => {
       try {
         // Pass redirect_uri for OAuth support (only on HTTPS)
         // Plaid can resume OAuth flow automatically without localStorage persistence
-        const result = await createLinkToken.mutateAsync(getOAuthRedirectUri());
+        const result = await createLinkToken.mutateAsync(oAuthRedirectUri);
         const token = result.link_token;
         
         // Keep token in React state only - no localStorage persistence
@@ -105,127 +148,80 @@ export const PlaidLinkButton = () => {
   const onExit = useCallback((err: unknown, metadata?: unknown) => {
     // Always log in production for debugging
     console.log('=== Plaid Link Exit ===');
-    console.log('Error:', err);
-    console.log('Error type:', typeof err);
-    console.log('Error stringified:', JSON.stringify(err, null, 2));
-    console.log('Metadata:', metadata);
-    console.log('Metadata stringified:', JSON.stringify(metadata, null, 2));
+    console.log('Error:', JSON.stringify(err, null, 2));
+    console.log('Metadata:', JSON.stringify(metadata, null, 2));
     console.log('Current URL:', window.location.href);
-    console.log('Link token exists:', !!linkToken);
     
-    if (err) {
-      console.error('Plaid Link error detected:', err);
-      // Check if it's a Plaid error object
-      const plaidError = err as { 
-        error_code?: string; 
-        error_message?: string; 
-        display_message?: string;
-        error_type?: string;
-        [key: string]: unknown;
-      };
-      
-      // Log all error properties
-      console.error('Error code:', plaidError.error_code);
-      console.error('Error message:', plaidError.error_message);
-      console.error('Display message:', plaidError.display_message);
-      console.error('Error type:', plaidError.error_type);
-      console.error('All error keys:', Object.keys(plaidError));
-      
-      // Build detailed error message
-      const isDevelopment = import.meta.env.DEV || window.location.hostname === 'localhost';
-      let errorMessage = '';
-      
-      // Handle specific error codes with helpful messages
-      if (plaidError.error_code === 'INTERNAL_SERVER_ERROR') {
-        // Check if this is American Express (from metadata or error context)
-        const isAmex = metadata && typeof metadata === 'object' && 'institution' in metadata 
-          ? (metadata as { institution?: { name?: string } }).institution?.name?.toLowerCase().includes('american express')
-          : false;
-        
-        if (isAmex) {
-          // Known Plaid issue KI563877 - affects less than 1% of Amex connections
-          errorMessage = 'American Express connection error (Known Plaid Issue KI563877)\n\n';
-          errorMessage += 'This is a known Plaid issue. Please try:\n';
-          errorMessage += '• Wait a few minutes and try connecting again\n';
-          errorMessage += '• Ensure you complete all MFA steps\n';
-          errorMessage += '• Plaid will usually resume automatically on retry';
-        } else {
-          errorMessage = 'Connection temporarily unavailable. This is usually a temporary issue on Plaid\'s side.\n\n';
-          errorMessage += 'Please try:\n';
-          errorMessage += '• Wait a few minutes and try again\n';
-          errorMessage += '• Check Plaid status page for service issues\n';
-          errorMessage += '• Try connecting again later';
-        }
-      } else if (plaidError.error_code === 'ITEM_LOGIN_REQUIRED' || plaidError.error_code === 'INVALID_CREDENTIALS') {
-        errorMessage = 'Account re-authentication required.\n\n';
-        errorMessage += 'Please reconnect your account:\n';
-        errorMessage += '• Your security token has expired\n';
-        errorMessage += '• Complete the connection flow again\n';
-        errorMessage += '• Note: American Express accounts often require daily re-authentication';
-      } else if (plaidError.display_message) {
-        errorMessage = plaidError.display_message;
-      } else if (plaidError.error_message) {
-        errorMessage = plaidError.error_message;
-      } else {
-        errorMessage = 'Bank connection was cancelled or failed. Please try again.';
-      }
-      
-      // Add debug info in development
-      if (isDevelopment && (plaidError.error_code || plaidError.error_type)) {
-        errorMessage += `\n\n[Debug] Error Code: ${plaidError.error_code || 'N/A'}, Type: ${plaidError.error_type || 'N/A'}`;
-        if (window.location.protocol === 'http:') {
-          errorMessage += '\n[Debug] OAuth banks require HTTPS. Use ngrok or test on production.';
-        }
-      }
-      
-      setError(errorMessage);
-    } else {
+    if (!err) {
       console.log('No error - user cancelled or exited normally');
+      return;
     }
-    // Don't clear the token on exit - user might want to retry
-  }, [linkToken]);
+    
+    const plaidError = err as PlaidError;
+    const md = metadata as PlaidMetadata | undefined;
+    const isAmex = md?.institution?.name?.toLowerCase().includes('american express') ?? false;
+    const isDevelopment = import.meta.env.DEV || window.location.hostname === 'localhost';
+    const errorCode = plaidError.error_code;
+    
+    console.error('Plaid Link error:', errorCode, plaidError.error_message);
+    
+    // Build error message based on error code
+    let errorMessage: string;
+    
+    if (errorCode === 'INTERNAL_SERVER_ERROR') {
+      errorMessage = isAmex ? getAmexErrorMessage() : getInternalServerErrorMessage();
+    } else if (errorCode === 'ITEM_LOGIN_REQUIRED' || errorCode === 'INVALID_CREDENTIALS') {
+      errorMessage = getReauthErrorMessage();
+    } else {
+      errorMessage = plaidError.display_message || plaidError.error_message || 'Bank connection was cancelled or failed. Please try again.';
+    }
+    
+    // Add debug info in development
+    if (isDevelopment && (errorCode || plaidError.error_type)) {
+      errorMessage += `\n\n[Debug] Error Code: ${errorCode || 'N/A'}, Type: ${plaidError.error_type || 'N/A'}`;
+      if (window.location.protocol === 'http:') {
+        errorMessage += '\n[Debug] OAuth banks require HTTPS. Use ngrok or test on production.';
+      }
+    }
+    
+    setError(errorMessage);
+  }, []);
 
-  // Show development mode warning
+  // Show development mode warning for HTTP
   const isDevelopment = import.meta.env.DEV || window.location.hostname === 'localhost';
   const isHttp = window.location.protocol === 'http:';
   const showOAuthWarning = isDevelopment && isHttp;
+  
+  // Determine if we're in a loading state (token fetching or exchange pending)
+  const isLoading = createLinkToken.isPending || exchangeToken.isPending;
 
-  // Show loading button while fetching token
-  if (!linkToken) {
-    return (
-      <div className="flex flex-col gap-2">
+  return (
+    <div className="flex flex-col gap-2">
+      {/* Button: either loading state or PlaidLinkOpener */}
+      {linkToken ? (
+        <PlaidLinkOpener 
+          linkToken={linkToken} 
+          onSuccess={onSuccess}
+          onExit={onExit}
+          isLoading={exchangeToken.isPending}
+        />
+      ) : (
         <Button disabled isLoading={createLinkToken.isPending}>
           <Plus className="h-4 w-4 mr-2" />
           Connect Account
         </Button>
-        {showOAuthWarning && (
-          <p className="text-xs text-amber-600 bg-amber-50 p-2 rounded">
-            ⚠️ OAuth banks (Amex, etc.) won't work on HTTP. Use sandbox banks like "First Platypus Bank" for testing, or set up HTTPS (ngrok).
-          </p>
-        )}
-        {error && (
-          <p className="mt-2 text-sm text-red-500 whitespace-pre-line">{error}</p>
-        )}
-      </div>
-    );
-  }
-
-  // Only render PlaidLink when we have a token
-  return (
-    <div className="flex flex-col gap-2">
-      <PlaidLinkOpener 
-        linkToken={linkToken} 
-        onSuccess={onSuccess}
-        onExit={onExit}
-        isLoading={exchangeToken.isPending}
-      />
+      )}
+      
+      {/* OAuth warning for HTTP development */}
       {showOAuthWarning && (
         <p className="text-xs text-amber-600 bg-amber-50 p-2 rounded">
           ⚠️ OAuth banks (Amex, etc.) won't work on HTTP. Use sandbox banks like "First Platypus Bank" for testing, or set up HTTPS (ngrok).
         </p>
       )}
-      {error && (
-        <p className="mt-2 text-sm text-red-500 whitespace-pre-line">{error}</p>
+      
+      {/* Only show errors when not in a loading state */}
+      {error && !isLoading && (
+        <p className="text-sm text-red-500 whitespace-pre-line">{error}</p>
       )}
     </div>
   );
