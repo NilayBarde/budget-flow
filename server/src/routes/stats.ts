@@ -40,6 +40,7 @@ router.get('/monthly', async (req, res) => {
     let totalIncome = 0;
     let totalInvested = 0;
     const categoryTotals = new Map<string, { category: CategoryData; amount: number }>();
+    const categoryIncome = new Map<string, number>();
 
     transactions?.forEach(t => {
       const transactionType = t.transaction_type || (t.amount > 0 ? 'expense' : 'income');
@@ -75,7 +76,23 @@ router.get('/monthly', async (req, res) => {
           }
         }
       } else if (transactionType === 'income') {
-        totalIncome += Math.abs(t.amount);
+        const incomeAmount = Math.abs(t.amount);
+        totalIncome += incomeAmount;
+        
+        // Track income per category to net out returns/refunds
+        const category = t.category as unknown as CategoryData | null;
+        if (category) {
+          const existingIncome = categoryIncome.get(category.id) || 0;
+          categoryIncome.set(category.id, existingIncome + incomeAmount);
+        }
+      }
+    });
+
+    // Net out income (returns/refunds) against category totals
+    categoryIncome.forEach((incomeAmount, categoryId) => {
+      const categoryTotal = categoryTotals.get(categoryId);
+      if (categoryTotal) {
+        categoryTotal.amount = Math.max(0, categoryTotal.amount - incomeAmount);
       }
     });
 
@@ -130,6 +147,7 @@ router.get('/yearly', async (req, res) => {
     let totalIncome = 0;
     let totalInvested = 0;
     const categoryTotals = new Map<string, { category: CategoryData; amount: number }>();
+    const categoryIncome = new Map<string, number>();
 
     transactions?.forEach(t => {
       const month = new Date(t.date).getMonth(); // 0-indexed
@@ -169,9 +187,24 @@ router.get('/yearly', async (req, res) => {
           }
         }
       } else if (transactionType === 'income') {
-        const amount = Math.abs(t.amount);
-        totalIncome += amount;
-        monthlyTotals[month].income += amount;
+        const incomeAmount = Math.abs(t.amount);
+        totalIncome += incomeAmount;
+        monthlyTotals[month].income += incomeAmount;
+        
+        // Track income per category to net out returns/refunds
+        const category = t.category as unknown as CategoryData | null;
+        if (category) {
+          const existingIncome = categoryIncome.get(category.id) || 0;
+          categoryIncome.set(category.id, existingIncome + incomeAmount);
+        }
+      }
+    });
+
+    // Net out income (returns/refunds) against category totals
+    categoryIncome.forEach((incomeAmount, categoryId) => {
+      const categoryTotal = categoryTotals.get(categoryId);
+      if (categoryTotal) {
+        categoryTotal.amount = Math.max(0, categoryTotal.amount - incomeAmount);
       }
     });
 

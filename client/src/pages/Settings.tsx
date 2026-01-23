@@ -1,7 +1,8 @@
 import { useState, useCallback } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { Card, CardHeader, Button, Modal, Input } from '../components/ui';
-import { useCategories, useCreateCategory } from '../hooks';
+import { useCategories, useCreateCategory, useUpdateCategory, useDeleteCategory } from '../hooks';
+import type { Category } from '../types';
 
 const DEFAULT_COLORS = [
   '#0ea5e9', '#f97316', '#22c55e', '#3b82f6', '#a855f7', '#ec4899',
@@ -12,7 +13,11 @@ const DEFAULT_COLORS = [
 export const Settings = () => {
   const { data: categories } = useCategories();
   const createCategory = useCreateCategory();
+  const updateCategory = useUpdateCategory();
+  const deleteCategory = useDeleteCategory();
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [categoryName, setCategoryName] = useState('');
   const [categoryColor, setCategoryColor] = useState(DEFAULT_COLORS[0]);
   const [categoryIcon, setCategoryIcon] = useState('');
@@ -34,6 +39,62 @@ export const Settings = () => {
       console.error('Failed to create category:', error);
     }
   }, [categoryName, categoryColor, categoryIcon, createCategory]);
+
+  const handleEditCategory = useCallback((category: Category) => {
+    setEditingCategory(category);
+    setCategoryName(category.name);
+    setCategoryColor(category.color);
+    setCategoryIcon(category.icon);
+    setIsEditModalOpen(true);
+  }, []);
+
+  const handleUpdateCategory = useCallback(async () => {
+    if (!categoryName.trim() || !editingCategory) return;
+
+    try {
+      await updateCategory.mutateAsync({
+        id: editingCategory.id,
+        data: {
+          name: categoryName.trim(),
+          color: categoryColor,
+          icon: categoryIcon || categoryName.trim().charAt(0).toLowerCase(),
+        },
+      });
+      setCategoryName('');
+      setCategoryIcon('');
+      setCategoryColor(DEFAULT_COLORS[0]);
+      setEditingCategory(null);
+      setIsEditModalOpen(false);
+    } catch (error) {
+      console.error('Failed to update category:', error);
+    }
+  }, [categoryName, categoryColor, categoryIcon, editingCategory, updateCategory]);
+
+  const handleDeleteCategory = useCallback(async (category: Category) => {
+    if (category.is_default) {
+      alert('Cannot delete default category');
+      return;
+    }
+
+    if (!confirm(`Are you sure you want to delete "${category.name}"?`)) {
+      return;
+    }
+
+    try {
+      await deleteCategory.mutateAsync(category.id);
+    } catch (error) {
+      console.error('Failed to delete category:', error);
+      alert('Failed to delete category');
+    }
+  }, [deleteCategory]);
+
+  const handleCloseEditModal = useCallback(() => {
+    setIsEditModalOpen(false);
+    setEditingCategory(null);
+    setCategoryName('');
+    setCategoryIcon('');
+    setCategoryColor(DEFAULT_COLORS[0]);
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -59,13 +120,33 @@ export const Settings = () => {
           {(categories || []).map(category => (
             <div 
               key={category.id}
-              className="flex items-center gap-2 bg-midnight-900 rounded-lg px-3 py-2"
+              className="flex items-center justify-between gap-2 bg-midnight-900 rounded-lg px-3 py-2 group"
             >
-              <div 
-                className="w-3 h-3 rounded-full"
-                style={{ backgroundColor: category.color }}
-              />
-              <span className="text-sm text-slate-200">{category.name}</span>
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                <div 
+                  className="w-3 h-3 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: category.color }}
+                />
+                <span className="text-sm text-slate-200 truncate">{category.name}</span>
+              </div>
+              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button
+                  onClick={() => handleEditCategory(category)}
+                  className="p-1 hover:bg-midnight-700 rounded text-slate-400 hover:text-slate-200 transition-colors"
+                  title="Edit category"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+                {!category.is_default && (
+                  <button
+                    onClick={() => handleDeleteCategory(category)}
+                    className="p-1 hover:bg-midnight-700 rounded text-slate-400 hover:text-rose-400 transition-colors"
+                    title="Delete category"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -120,6 +201,62 @@ export const Settings = () => {
             <Button
               variant="secondary"
               onClick={() => setIsModalOpen(false)}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Edit Category Modal */}
+      <Modal
+        isOpen={isEditModalOpen}
+        onClose={handleCloseEditModal}
+        title="Edit Category"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <Input
+            label="Category Name"
+            placeholder="e.g., Alcohol"
+            value={categoryName}
+            onChange={(e) => setCategoryName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                handleUpdateCategory();
+              }
+            }}
+          />
+          
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-2">
+              Color
+            </label>
+            <div className="grid grid-cols-8 gap-2">
+              {DEFAULT_COLORS.map((color) => (
+                <button
+                  key={color}
+                  onClick={() => setCategoryColor(color)}
+                  className={`w-8 h-8 rounded-full border-2 transition-all ${
+                    categoryColor === color ? 'border-slate-300 scale-110' : 'border-midnight-600'
+                  }`}
+                  style={{ backgroundColor: color }}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div className="flex gap-3 pt-2">
+            <Button
+              onClick={handleUpdateCategory}
+              disabled={!categoryName.trim() || updateCategory.isPending}
+              className="flex-1"
+            >
+              {updateCategory.isPending ? 'Updating...' : 'Update Category'}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={handleCloseEditModal}
             >
               Cancel
             </Button>

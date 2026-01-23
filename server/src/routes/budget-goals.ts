@@ -29,7 +29,7 @@ router.get('/', async (req, res) => {
     const startDate = new Date(Number(year), Number(month) - 1, 1).toISOString().split('T')[0];
     const endDate = new Date(Number(year), Number(month), 0).toISOString().split('T')[0];
 
-    // Only count expenses (exclude income and transfers)
+    // Count expenses and income (to net out returns/refunds)
     // Include splits to calculate "my share" for split transactions
     const { data: transactions } = await supabase
       .from('transactions')
@@ -42,9 +42,9 @@ router.get('/', async (req, res) => {
       `)
       .gte('date', startDate)
       .lte('date', endDate)
-      .eq('transaction_type', 'expense');
+      .in('transaction_type', ['expense', 'income']);
 
-    // Sum by category, accounting for splits
+    // Sum by category, accounting for splits and netting out income (returns/refunds)
     const spentByCategory = new Map<string, number>();
     transactions?.forEach(t => {
       if (t.category_id) {
@@ -60,7 +60,13 @@ router.get('/', async (req, res) => {
         }
         
         const current = spentByCategory.get(t.category_id) || 0;
-        spentByCategory.set(t.category_id, current + amountToCount);
+        if (t.transaction_type === 'expense') {
+          // Add expenses
+          spentByCategory.set(t.category_id, current + amountToCount);
+        } else if (t.transaction_type === 'income') {
+          // Subtract income (returns/refunds) to net out against expenses
+          spentByCategory.set(t.category_id, Math.max(0, current - amountToCount));
+        }
       }
     });
 
