@@ -119,12 +119,14 @@ export const YearOverview = () => {
               <Tooltip
                 formatter={(value) => formatCurrency(value as number)}
                 contentStyle={{
-                  backgroundColor: '#1c2030',
-                  border: '1px solid #252a3d',
+                  backgroundColor: '#252a3d',
+                  border: '1px solid #3a4160',
                   borderRadius: '8px',
                   fontSize: '12px',
+                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
                 }}
-                labelStyle={{ color: '#f1f5f9' }}
+                labelStyle={{ color: '#f1f5f9', fontWeight: 500 }}
+                itemStyle={{ color: '#cbd5e1' }}
               />
               <Bar dataKey="spent" fill="#f43f5e" radius={[4, 4, 0, 0]} name="Expenses" />
               <Bar dataKey="income" fill="#10b981" radius={[4, 4, 0, 0]} name="Income" />
@@ -160,10 +162,13 @@ export const YearOverview = () => {
                     <Tooltip
                       formatter={(value) => formatCurrency(value as number)}
                       contentStyle={{
-                        backgroundColor: '#1c2030',
-                        border: '1px solid #252a3d',
+                        backgroundColor: '#252a3d',
+                        border: '1px solid #3a4160',
                         borderRadius: '8px',
+                        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
                       }}
+                      labelStyle={{ color: '#f1f5f9', fontWeight: 500 }}
+                      itemStyle={{ color: '#cbd5e1' }}
                     />
                   </PieChart>
                 </ResponsiveContainer>
