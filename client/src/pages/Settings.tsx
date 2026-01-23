@@ -1,8 +1,39 @@
-import { Card, CardHeader, Button } from '../components/ui';
-import { useCategories } from '../hooks';
+import { useState, useCallback } from 'react';
+import { Plus } from 'lucide-react';
+import { Card, CardHeader, Button, Modal, Input } from '../components/ui';
+import { useCategories, useCreateCategory } from '../hooks';
+
+const DEFAULT_COLORS = [
+  '#0ea5e9', '#f97316', '#22c55e', '#3b82f6', '#a855f7', '#ec4899',
+  '#eab308', '#6366f1', '#14b8a6', '#ef4444', '#10b981', '#64748b',
+  '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'
+];
 
 export const Settings = () => {
   const { data: categories } = useCategories();
+  const createCategory = useCreateCategory();
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [categoryName, setCategoryName] = useState('');
+  const [categoryColor, setCategoryColor] = useState(DEFAULT_COLORS[0]);
+  const [categoryIcon, setCategoryIcon] = useState('');
+
+  const handleCreateCategory = useCallback(async () => {
+    if (!categoryName.trim()) return;
+
+    try {
+      await createCategory.mutateAsync({
+        name: categoryName.trim(),
+        color: categoryColor,
+        icon: categoryIcon || categoryName.trim().charAt(0).toLowerCase(),
+      });
+      setCategoryName('');
+      setCategoryIcon('');
+      setCategoryColor(DEFAULT_COLORS[0]);
+      setIsModalOpen(false);
+    } catch (error) {
+      console.error('Failed to create category:', error);
+    }
+  }, [categoryName, categoryColor, categoryIcon, createCategory]);
 
   return (
     <div className="space-y-6">
@@ -17,6 +48,12 @@ export const Settings = () => {
         <CardHeader 
           title="Categories" 
           subtitle="Default categories for organizing transactions"
+          action={
+            <Button onClick={() => setIsModalOpen(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add Category
+            </Button>
+          }
         />
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
           {(categories || []).map(category => (
@@ -33,6 +70,62 @@ export const Settings = () => {
           ))}
         </div>
       </Card>
+
+      {/* Create Category Modal */}
+      <Modal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        title="Create Category"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <Input
+            label="Category Name"
+            placeholder="e.g., Alcohol"
+            value={categoryName}
+            onChange={(e) => setCategoryName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                handleCreateCategory();
+              }
+            }}
+          />
+          
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-2">
+              Color
+            </label>
+            <div className="grid grid-cols-8 gap-2">
+              {DEFAULT_COLORS.map((color) => (
+                <button
+                  key={color}
+                  onClick={() => setCategoryColor(color)}
+                  className={`w-8 h-8 rounded-full border-2 transition-all ${
+                    categoryColor === color ? 'border-slate-300 scale-110' : 'border-midnight-600'
+                  }`}
+                  style={{ backgroundColor: color }}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div className="flex gap-3 pt-2">
+            <Button
+              onClick={handleCreateCategory}
+              disabled={!categoryName.trim() || createCategory.isPending}
+              className="flex-1"
+            >
+              {createCategory.isPending ? 'Creating...' : 'Create Category'}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => setIsModalOpen(false)}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Data Management */}
       <Card>

@@ -1,7 +1,8 @@
-import { Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react';
 import { Input, Select } from '../ui';
 import type { Category, Account, Tag, TransactionFilters as Filters } from '../../types';
 import { MONTHS } from '../../utils/constants';
+import clsx from 'clsx';
 
 interface TransactionFiltersProps {
   filters: Filters;
@@ -114,6 +115,23 @@ export const TransactionFilters = ({
             options={tagOptions}
           />
         </div>
+        
+        {/* Needs Review Toggle */}
+        <button
+          onClick={() => onFilterChange({ 
+            ...filters, 
+            needs_review: filters.needs_review ? undefined : true 
+          })}
+          className={clsx(
+            "flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors",
+            filters.needs_review
+              ? "bg-amber-500/20 border-amber-500 text-amber-400"
+              : "bg-midnight-800 border-midnight-600 text-slate-400 hover:text-slate-200 hover:border-midnight-500"
+          )}
+        >
+          <AlertCircle className="h-4 w-4" />
+          <span className="text-sm font-medium">Needs Review</span>
+        </button>
       </div>
     </div>
   );

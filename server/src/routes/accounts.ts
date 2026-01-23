@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
 import * as plaidService from '../services/plaid.js';
-import { categorizeTransaction, cleanMerchantName } from '../services/categorizer.js';
+import { categorizeWithPlaid, cleanMerchantName, PlaidPFC } from '../services/categorizer.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -211,20 +211,34 @@ router.post('/:id/sync', async (req, res) => {
       const texts = [tx.merchant_name || '', tx.name || '', (tx as { original_description?: string }).original_description || ''];
       const mapping = mappingMap.get(tx.merchant_name?.toLowerCase() || '');
       const displayName = mapping?.display_name || cleanMerchantName(tx.merchant_name || tx.name);
+      const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
       
-      // Simple transaction type detection
+      // Detect transaction type with Plaid PFC
       const transactionType = (() => {
         if (texts.some(t => TRANSFER_PATTERNS.some(p => p.test(t)))) return 'transfer';
         if (texts.some(t => INVESTMENT_PATTERNS.some(p => p.test(t)))) return 'investment';
+        if (plaidPFC?.primary?.startsWith('TRANSFER') || plaidPFC?.primary?.startsWith('LOAN_PAYMENTS')) return 'transfer';
+        if (plaidPFC?.primary === 'INCOME') return 'income';
         if (tx.amount < 0) return 'income';
         return 'expense';
       })() as TransactionType;
 
-      // Auto-assign category based on type
+      // Auto-assign category with Plaid-first approach
       let categoryId: string | null = null;
+      let needsReview = false;
+      
       if (transactionType === 'expense') {
-        const categoryName = categorizeTransaction(tx.merchant_name || tx.name, (tx as { original_description?: string }).original_description);
-        categoryId = mapping?.default_category_id || categoryMap.get(categoryName) || null;
+        if (mapping?.default_category_id) {
+          categoryId = mapping.default_category_id;
+        } else {
+          const result = categorizeWithPlaid(
+            tx.merchant_name || tx.name,
+            (tx as { original_description?: string }).original_description,
+            plaidPFC
+          );
+          categoryId = categoryMap.get(result.categoryName) || null;
+          needsReview = result.needsReview;
+        }
       } else if (transactionType === 'income') {
         categoryId = categoryMap.get('Income') || null;
       } else if (transactionType === 'investment') {
@@ -244,6 +258,8 @@ router.post('/:id/sync', async (req, res) => {
         transaction_type: transactionType,
         is_split: false,
         is_recurring: false,
+        needs_review: needsReview,
+        plaid_category: plaidPFC || null,
       });
 
       addedCount++;
@@ -521,6 +537,114 @@ router.post('/clear-transfer-categories', async (req, res) => {
   } catch (error) {
     console.error('Error clearing transfer categories:', error);
     res.status(500).json({ message: 'Failed to clear transfer categories' });
+  }
+});
+
+/**
+ * Recategorize all existing transactions using the new Plaid-first approach
+ * This preserves user corrections (merchant mappings) and re-applies categorization
+ * to transactions that weren't manually categorized
+ * 
+ * Options:
+ * - skip_manual: if true (default), skip transactions that have merchant mappings
+ * - force: if true, recategorize ALL transactions including those with existing categories
+ */
+router.post('/recategorize-all', async (req, res) => {
+  try {
+    const { skip_manual = true, force = false } = req.body;
+    
+    console.log('Starting full recategorization...');
+    console.log(`  skip_manual: ${skip_manual}, force: ${force}`);
+    
+    // Get categories for mapping
+    const { data: categories } = await supabase.from('categories').select('id, name');
+    const categoryMap = new Map(categories?.map(c => [c.name, c.id]) || []);
+    const categoryNameById = new Map(categories?.map(c => [c.id, c.name]) || []);
+    
+    // Get merchant mappings (user's corrections)
+    const { data: mappings } = await supabase.from('merchant_mappings').select('*');
+    const mappingMap = new Map(mappings?.map(m => [m.original_name.toLowerCase(), m]) || []);
+    
+    // Get all expense transactions
+    let query = supabase
+      .from('transactions')
+      .select('id, merchant_name, original_description, plaid_category, category_id, transaction_type')
+      .eq('transaction_type', 'expense');
+    
+    // If not forcing, only get transactions that need review or have no category
+    if (!force) {
+      query = query.or('needs_review.eq.true,category_id.is.null');
+    }
+    
+    const { data: transactions, error } = await query;
+    
+    if (error) throw error;
+    
+    let recategorized = 0;
+    let skipped = 0;
+    let markedForReview = 0;
+    const categoryBreakdown: Record<string, number> = {};
+    
+    for (const tx of transactions || []) {
+      // Skip if merchant has a mapping (user correction) and skip_manual is true
+      const mapping = mappingMap.get((tx.merchant_name || '').toLowerCase());
+      if (skip_manual && mapping?.default_category_id) {
+        skipped++;
+        continue;
+      }
+      
+      // Use merchant mapping if available
+      let categoryId: string | null = null;
+      let needsReview = false;
+      
+      if (mapping?.default_category_id) {
+        categoryId = mapping.default_category_id;
+      } else {
+        // Use Plaid-first categorization
+        const plaidPFC = tx.plaid_category as PlaidPFC | null;
+        const result = categorizeWithPlaid(
+          tx.merchant_name || '',
+          tx.original_description,
+          plaidPFC
+        );
+        
+        categoryId = categoryMap.get(result.categoryName) || null;
+        needsReview = result.needsReview;
+      }
+      
+      // Update the transaction
+      const { error: updateError } = await supabase
+        .from('transactions')
+        .update({ 
+          category_id: categoryId,
+          needs_review: needsReview
+        })
+        .eq('id', tx.id);
+      
+      if (updateError) {
+        console.error(`Error updating transaction ${tx.id}:`, updateError);
+        continue;
+      }
+      
+      recategorized++;
+      if (needsReview) markedForReview++;
+      
+      // Track category breakdown
+      const categoryName = categoryId ? (categoryNameById.get(categoryId) || 'Unknown') : 'Uncategorized';
+      categoryBreakdown[categoryName] = (categoryBreakdown[categoryName] || 0) + 1;
+    }
+    
+    console.log(`Recategorization complete: ${recategorized} transactions updated, ${skipped} skipped, ${markedForReview} marked for review`);
+    
+    res.json({
+      recategorized,
+      skipped,
+      markedForReview,
+      categoryBreakdown
+    });
+  } catch (error) {
+    console.error('Error recategorizing transactions:', error);
+    res.status(500).json({ message: 'Failed to recategorize transactions' });
   }
 });
 

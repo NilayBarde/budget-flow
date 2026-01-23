@@ -1,14 +1,14 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
 import { v4 as uuidv4 } from 'uuid';
-import { categorizeTransaction, cleanMerchantName } from '../services/categorizer.js';
+import { categorizeWithPlaid, cleanMerchantName } from '../services/categorizer.js';
 
 const router = Router();
 
 // Get transactions with filters
 router.get('/', async (req, res) => {
   try {
-    const { month, year, account_id, category_id, tag_id, search, is_recurring, transaction_type } = req.query;
+    const { month, year, account_id, category_id, tag_id, search, is_recurring, transaction_type, needs_review } = req.query;
 
     let query = supabase
       .from('transactions')
@@ -42,6 +42,11 @@ router.get('/', async (req, res) => {
     // Filter by transaction type (income, expense, transfer)
     if (transaction_type) {
       query = query.eq('transaction_type', transaction_type);
+    }
+
+    // Filter by needs_review flag
+    if (needs_review === 'true') {
+      query = query.eq('needs_review', true);
     }
 
     if (search) {
@@ -123,21 +128,25 @@ router.post('/', async (req, res) => {
     const { amount, date, merchant_name, category_id, notes, transaction_type } = req.body;
 
     const displayName = cleanMerchantName(merchant_name);
-    const autoCategoryName = categorizeTransaction(merchant_name);
     
     // Determine transaction type - default to expense for positive, income for negative
     const finalTransactionType = transaction_type || (amount < 0 ? 'income' : 'expense');
     
     // Get category ID if not provided (for expenses, income, and investments)
     let finalCategoryId = category_id;
+    let needsReview = false;
+    
     if (!finalCategoryId) {
       if (finalTransactionType === 'expense') {
+        // Use pattern-based categorization for manual transactions (no Plaid data)
+        const result = categorizeWithPlaid(merchant_name, null, null);
         const { data: category } = await supabase
           .from('categories')
           .select('id')
-          .eq('name', autoCategoryName)
+          .eq('name', result.categoryName)
           .single();
         finalCategoryId = category?.id || null;
+        needsReview = result.needsReview;
       } else if (finalTransactionType === 'income') {
         // Auto-assign Income category to income transactions
         const { data: incomeCategory } = await supabase
@@ -169,6 +178,7 @@ router.post('/', async (req, res) => {
       transaction_type: finalTransactionType,
       is_split: false,
       is_recurring: false,
+      needs_review: needsReview,
       notes,
       created_at: new Date().toISOString(),
     };
@@ -226,6 +236,9 @@ router.patch('/:id', async (req, res) => {
     // If updating category or merchant display name, create/update merchant mapping
     // This ensures the app "learns" your categorization preferences
     if (transaction && (updates.category_id || updates.merchant_display_name)) {
+      // Clear the needs_review flag since user is manually categorizing
+      updates.needs_review = false;
+      
       // Check if a mapping already exists for this merchant
       const { data: existingMapping } = await supabase
         .from('merchant_mappings')
@@ -256,6 +269,7 @@ router.patch('/:id', async (req, res) => {
         const bulkUpdates: Record<string, unknown> = {};
         if (updates.category_id) bulkUpdates.category_id = updates.category_id;
         if (updates.merchant_display_name) bulkUpdates.merchant_display_name = updates.merchant_display_name;
+        bulkUpdates.needs_review = false; // Clear review flag for all matching transactions
 
         if (Object.keys(bulkUpdates).length > 0) {
           await supabase

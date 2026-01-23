@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { MoreHorizontal, Split, Tag, Edit2 } from 'lucide-react';
+import { MoreHorizontal, Split, Tag, Edit2, AlertCircle } from 'lucide-react';
 import clsx from 'clsx';
 import type { Transaction } from '../../types';
 import { formatCurrency, formatDate } from '../../utils/formatters';
@@ -81,6 +81,12 @@ export const TransactionRow = ({ transaction, onEdit, onSplit }: TransactionRowP
           )}
           {transaction.is_recurring && (
             <Badge color="#10b981" size="sm">Recurring</Badge>
+          )}
+          {transaction.needs_review && (
+            <Badge color="#f59e0b" size="sm">
+              <AlertCircle className="h-3 w-3 mr-1 inline" />
+              Review
+            </Badge>
           )}
         </div>
         {/* Show original description if different from display name */}

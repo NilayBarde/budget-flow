@@ -1,23 +1,23 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
 import * as plaidService from '../services/plaid.js';
-import { categorizeTransaction, cleanMerchantName } from '../services/categorizer.js';
+import { categorizeWithPlaid, cleanMerchantName, PlaidPFC } from '../services/categorizer.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
 const DEFAULT_USER_ID = 'default-user';
 
-// Helper to detect transaction type (same logic as accounts.ts)
+// Helper to detect transaction type
 type TransactionType = 'income' | 'expense' | 'transfer' | 'investment';
 
 const TRANSFER_PATTERNS = [
-  /credit\s*card[- ]?auto[- ]?pay/i,  // Credit card auto pay (e.g., "Credit Card-auto Pay", "Credit Card Auto Pay")
-  /credit\s*card[- ]?payment/i,       // Credit card payment (e.g., "Credit Card-Payment")
-  /card[- ]?payment/i,                 // Generic card payment (e.g., "Card-Payment", "Card Payment")
+  /credit\s*card[- ]?auto[- ]?pay/i,
+  /credit\s*card[- ]?payment/i,
+  /card[- ]?payment/i,
   /payment.*thank\s*you/i,
   /autopay/i,
-  /auto[- ]?pay/i,                     // Auto pay or auto-pay (must come after credit card patterns)
+  /auto[- ]?pay/i,
   /epayment/i,
   /\btransfer\b/i,
   /bill\s*pay/i,
@@ -37,9 +37,22 @@ const INVESTMENT_PATTERNS = [
   /betterment/i,
 ];
 
-const detectTransactionType = (amount: number, texts: string[]): TransactionType => {
+const detectTransactionType = (amount: number, texts: string[], plaidPFC?: PlaidPFC | null): TransactionType => {
+  // Check text patterns first
   if (texts.some(t => TRANSFER_PATTERNS.some(p => p.test(t)))) return 'transfer';
   if (texts.some(t => INVESTMENT_PATTERNS.some(p => p.test(t)))) return 'investment';
+  
+  // Check Plaid's category for transfers
+  if (plaidPFC?.primary) {
+    if (plaidPFC.primary.startsWith('TRANSFER') || plaidPFC.primary.startsWith('LOAN_PAYMENTS')) {
+      return 'transfer';
+    }
+    if (plaidPFC.primary === 'INCOME') {
+      return 'income';
+    }
+  }
+  
+  // Negative amounts are income
   if (amount < 0) return 'income';
   return 'expense';
 };
@@ -133,17 +146,37 @@ router.post('/exchange-token', async (req, res) => {
       const { data: categories } = await supabase.from('categories').select('id, name');
       const categoryMap = new Map(categories?.map(c => [c.name, c.id]) || []);
       
+      // Get merchant mappings for user-defined categorizations
+      const { data: mappings } = await supabase.from('merchant_mappings').select('*');
+      const mappingMap = new Map(mappings?.map(m => [m.original_name.toLowerCase(), m]) || []);
+      
       let syncedCount = 0;
       for (const tx of syncResult.added) {
         const texts = [tx.merchant_name || '', tx.name || '', tx.original_description || ''];
         const displayName = cleanMerchantName(tx.merchant_name || tx.name);
-        const transactionType = detectTransactionType(tx.amount, texts);
+        const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
+        const transactionType = detectTransactionType(tx.amount, texts, plaidPFC);
         
-        // Auto-assign category based on type
+        // Check for existing merchant mapping (user's previous corrections)
+        const mapping = mappingMap.get((tx.merchant_name || '').toLowerCase());
+        
+        // Auto-assign category based on type and Plaid's categorization
         let categoryId: string | null = null;
+        let needsReview = false;
+        
         if (transactionType === 'expense') {
-          const categoryName = categorizeTransaction(tx.merchant_name || tx.name, tx.original_description);
-          categoryId = categoryMap.get(categoryName) || null;
+          // Priority: merchant mapping > Plaid PFC > pattern matching
+          if (mapping?.default_category_id) {
+            categoryId = mapping.default_category_id;
+          } else {
+            const result = categorizeWithPlaid(
+              tx.merchant_name || tx.name,
+              tx.original_description,
+              plaidPFC
+            );
+            categoryId = categoryMap.get(result.categoryName) || null;
+            needsReview = result.needsReview;
+          }
         } else if (transactionType === 'income') {
           categoryId = categoryMap.get('Income') || null;
         } else if (transactionType === 'investment') {
@@ -158,11 +191,13 @@ router.post('/exchange-token', async (req, res) => {
           date: tx.date,
           merchant_name: tx.merchant_name || tx.name,
           original_description: tx.original_description || tx.name,
-          merchant_display_name: displayName,
+          merchant_display_name: mapping?.display_name || displayName,
           category_id: categoryId,
           transaction_type: transactionType,
           is_split: false,
           is_recurring: false,
+          needs_review: needsReview,
+          plaid_category: plaidPFC || null,
         });
         syncedCount++;
       }

@@ -84,6 +84,23 @@ export const reclassifyTransactions = () =>
     { method: 'POST' }
   );
 
+export const recategorizeAllTransactions = (options?: { skipManual?: boolean; force?: boolean }) =>
+  fetchApi<{ 
+    recategorized: number; 
+    skipped: number; 
+    markedForReview: number;
+    categoryBreakdown: Record<string, number>;
+  }>(
+    '/accounts/recategorize-all',
+    { 
+      method: 'POST',
+      body: JSON.stringify({ 
+        skip_manual: options?.skipManual ?? true, 
+        force: options?.force ?? false 
+      }),
+    }
+  );
+
 // Transactions
 export const getTransactions = (filters: TransactionFilters = {}) => {
   const params = new URLSearchParams();

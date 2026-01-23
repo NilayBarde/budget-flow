@@ -13,6 +13,11 @@ export interface Account {
   created_at: string;
 }
 
+export interface PlaidPFC {
+  primary?: string;
+  detailed?: string;
+}
+
 export interface Transaction {
   id: string;
   account_id: string;
@@ -27,6 +32,8 @@ export interface Transaction {
   is_split: boolean;
   parent_transaction_id: string | null;
   is_recurring: boolean;
+  needs_review: boolean;  // Flag for transactions that need manual categorization
+  plaid_category: PlaidPFC | null;  // Plaid's personal_finance_category
   notes: string | null;
   created_at: string;
   // Joined fields
@@ -127,5 +134,6 @@ export type TransactionFilters = {
   search?: string;
   is_recurring?: boolean;
   transaction_type?: TransactionType;
+  needs_review?: boolean;
 };
 

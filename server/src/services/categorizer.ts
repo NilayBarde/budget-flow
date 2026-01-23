@@ -1,91 +1,155 @@
-// Patterns that indicate transfers/payments (should not be categorized)
-const TRANSFER_PAYMENT_PATTERNS = [
-  'credit card', 'card payment', 'autopay', 'auto pay', 'auto-pay',
-  'payment', 'transfer', 'bill pay', 'loan payment', 'mortgage payment'
-];
-
-const CATEGORY_PATTERNS: Record<string, string[]> = {
-  Housing: [
-    'rent', 'mortgage', 'landlord', 'property', 'apartment', 'lease',
-    'hoa', 'homeowner', 'housing', 'real estate', 'realty', 'zillow',
-    'bilt', 'condo', 'tenant', 'rental'
-  ],
-  Dining: [
-    'restaurant', 'cafe', 'coffee', 'starbucks', 'dunkin', 'mcdonald',
-    'chipotle', 'subway', 'pizza', 'burger', 'sushi', 'thai', 'chinese',
-    'indian', 'mexican', 'doordash', 'ubereats', 'grubhub', 'seamless',
-    'postmates', 'caviar', 'bar', 'pub', 'grill', 'kitchen', 'eatery',
-    'diner', 'bakery', 'taco', 'wing', 'noodle', 'ramen', 'pho'
-  ],
-  Groceries: [
-    'grocery', 'supermarket', 'whole foods', 'trader joe', 'safeway',
-    'kroger', 'walmart', 'target', 'costco', 'aldi', 'publix', 'wegmans',
-    'market', 'fresh', 'organic', 'instacart', 'amazon fresh'
-  ],
-  Transportation: [
-    'uber', 'lyft', 'taxi', 'cab', 'parking', 'gas', 'shell', 'chevron',
-    'exxon', 'mobil', 'bp', 'citgo', 'metro', 'transit', 'bus',
-    'train', 'amtrak', 'airline', 'toll', 'car wash'
-  ],
-  Entertainment: [
-    'netflix', 'hulu', 'disney', 'hbo', 'spotify', 'apple music', 'youtube',
-    'twitch', 'movie', 'theater', 'cinema', 'concert', 'ticket', 'game',
-    'steam', 'playstation', 'xbox', 'nintendo', 'arcade', 'bowling'
-  ],
-  Shopping: [
-    'amazon', 'ebay', 'etsy', 'best buy', 'apple store',
-    'nike', 'adidas', 'zara', 'h&m', 'uniqlo', 'nordstrom', 'macy', 'gap',
-    'old navy', 'tj maxx', 'marshall', 'ross', 'home depot', 'lowes', 'ikea'
-  ],
-  Utilities: [
-    'electric', 'water', 'internet', 'comcast', 'verizon', 'at&t',
-    't-mobile', 'sprint', 'phone', 'utility', 'power', 'energy', 'sewage'
-  ],
-  Subscriptions: [
-    'subscription', 'membership', 'monthly', 'annual', 'recurring', 'premium',
-    'plus', 'pro', 'patreon', 'substack', 'medium', 'gym', 'fitness'
-  ],
-  Travel: [
-    'hotel', 'airbnb', 'vrbo', 'expedia', 'booking', 'kayak', 'tripadvisor',
-    'united', 'delta', 'american', 'southwest', 'jetblue',
-    'spirit', 'frontier', 'rental car', 'hertz', 'enterprise', 'avis'
-  ],
-  Healthcare: [
-    'pharmacy', 'cvs', 'walgreens', 'rite aid', 'doctor', 'hospital', 'clinic',
-    'medical', 'dental', 'dentist', 'vision', 'eye', 'health', 'insurance',
-    'prescription', 'rx', 'urgent care', 'lab', 'therapy'
-  ],
-  Income: [
-    'payroll', 'direct deposit', 'salary', 'wage', 'bonus', 'refund',
-    'reimbursement', 'transfer from', 'deposit'
-  ],
+// Plaid Personal Finance Category (PFC) mapping to our categories
+// See: https://plaid.com/docs/api/products/transactions/#transactionspersonal_finance_category
+const PLAID_PFC_MAP: Record<string, string> = {
+  // Food & Drink
+  'FOOD_AND_DRINK_RESTAURANTS': 'Dining',
+  'FOOD_AND_DRINK_FAST_FOOD': 'Dining',
+  'FOOD_AND_DRINK_COFFEE': 'Dining',
+  'FOOD_AND_DRINK_BAR': 'Alcohol',
+  'FOOD_AND_DRINK_GROCERIES': 'Groceries',
+  'FOOD_AND_DRINK_OTHER_FOOD_AND_DRINK': 'Dining',
+  
+  // Transportation
+  'TRANSPORTATION_TAXIS_AND_RIDESHARES': 'Transportation',
+  'TRANSPORTATION_PUBLIC_TRANSIT': 'Transportation',
+  'TRANSPORTATION_GAS': 'Transportation',
+  'TRANSPORTATION_PARKING': 'Transportation',
+  'TRANSPORTATION_TOLLS': 'Transportation',
+  'TRANSPORTATION_CAR_SERVICE': 'Transportation',
+  'TRANSPORTATION_OTHER_TRANSPORTATION': 'Transportation',
+  'TRANSPORTATION_AIRLINES_AND_AVIATION_SERVICES': 'Travel',
+  
+  // Travel
+  'TRAVEL_FLIGHTS': 'Travel',
+  'TRAVEL_LODGING': 'Travel',
+  'TRAVEL_RENTAL_CARS': 'Travel',
+  'TRAVEL_OTHER_TRAVEL': 'Travel',
+  
+  // Shopping
+  'GENERAL_MERCHANDISE_ONLINE_MARKETPLACES': 'Shopping',
+  'GENERAL_MERCHANDISE_SUPERSTORES': 'Shopping',
+  'GENERAL_MERCHANDISE_CLOTHING_AND_ACCESSORIES': 'Shopping',
+  'GENERAL_MERCHANDISE_ELECTRONICS': 'Shopping',
+  'GENERAL_MERCHANDISE_SPORTING_GOODS': 'Shopping',
+  'GENERAL_MERCHANDISE_HOME_IMPROVEMENT': 'Shopping',
+  'GENERAL_MERCHANDISE_GIFT_AND_NOVELTY': 'Shopping',
+  'GENERAL_MERCHANDISE_BOOKSTORES_AND_NEWSSTANDS': 'Shopping',
+  'GENERAL_MERCHANDISE_DEPARTMENT_STORES': 'Shopping',
+  'GENERAL_MERCHANDISE_DISCOUNT_STORES': 'Shopping',
+  'GENERAL_MERCHANDISE_OTHER_GENERAL_MERCHANDISE': 'Shopping',
+  
+  // Entertainment
+  'ENTERTAINMENT_TV_AND_MOVIES': 'Entertainment',
+  'ENTERTAINMENT_MUSIC_AND_AUDIO': 'Entertainment',
+  'ENTERTAINMENT_SPORTING_EVENTS_AMUSEMENT_PARKS_AND_MUSEUMS': 'Entertainment',
+  'ENTERTAINMENT_CASINOS_AND_GAMBLING': 'Entertainment',
+  'ENTERTAINMENT_VIDEO_GAMES': 'Entertainment',
+  'ENTERTAINMENT_OTHER_ENTERTAINMENT': 'Entertainment',
+  
+  // Subscriptions & Bills
+  'RENT_AND_UTILITIES_RENT': 'Housing',
+  'RENT_AND_UTILITIES_GAS_AND_ELECTRICITY': 'Utilities',
+  'RENT_AND_UTILITIES_WATER': 'Utilities',
+  'RENT_AND_UTILITIES_INTERNET_AND_CABLE': 'Utilities',
+  'RENT_AND_UTILITIES_TELEPHONE': 'Utilities',
+  'RENT_AND_UTILITIES_OTHER_UTILITIES': 'Utilities',
+  
+  // Healthcare
+  'MEDICAL_PHARMACIES_AND_SUPPLEMENTS': 'Healthcare',
+  'MEDICAL_DOCTOR': 'Healthcare',
+  'MEDICAL_DENTISTS_AND_ORTHODONTISTS': 'Healthcare',
+  'MEDICAL_EYECARE': 'Healthcare',
+  'MEDICAL_HOSPITALS_AND_CLINICS': 'Healthcare',
+  'MEDICAL_MENTAL_HEALTH': 'Healthcare',
+  'MEDICAL_OTHER_MEDICAL': 'Healthcare',
+  
+  // Personal Care
+  'PERSONAL_CARE_GYMS_AND_FITNESS_CENTERS': 'Subscriptions',
+  'PERSONAL_CARE_HAIR_AND_BEAUTY': 'Shopping',
+  'PERSONAL_CARE_LAUNDRY_AND_DRY_CLEANING': 'Shopping',
+  'PERSONAL_CARE_OTHER_PERSONAL_CARE': 'Shopping',
+  
+  // Income
+  'INCOME_WAGES': 'Income',
+  'INCOME_DIVIDENDS': 'Income',
+  'INCOME_INTEREST_EARNED': 'Income',
+  'INCOME_RETIREMENT_PENSION': 'Income',
+  'INCOME_TAX_REFUND': 'Income',
+  'INCOME_UNEMPLOYMENT': 'Income',
+  'INCOME_OTHER_INCOME': 'Income',
+  
+  // Government & Non-profit
+  'GOVERNMENT_AND_NON_PROFIT_TAX_PAYMENT': 'Other',
+  'GOVERNMENT_AND_NON_PROFIT_DONATIONS': 'Other',
+  'GOVERNMENT_AND_NON_PROFIT_GOVERNMENT_DEPARTMENTS_AND_AGENCIES': 'Other',
+  
+  // Loan Payments (transfers - no category)
+  'LOAN_PAYMENTS_CAR_PAYMENT': 'Other',
+  'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT': 'Other',
+  'LOAN_PAYMENTS_PERSONAL_LOAN_PAYMENT': 'Other',
+  'LOAN_PAYMENTS_MORTGAGE_PAYMENT': 'Housing',
+  'LOAN_PAYMENTS_STUDENT_LOAN_PAYMENT': 'Other',
+  'LOAN_PAYMENTS_OTHER_PAYMENT': 'Other',
 };
 
-export const categorizeTransaction = (merchantName: string, originalDescription?: string | null): string => {
-  const normalizedName = merchantName.toLowerCase();
-  const normalizedDescription = originalDescription?.toLowerCase() || '';
-  // Check both merchant name and original description for pattern matches
-  const textsToCheck = [normalizedName, normalizedDescription];
+// Plaid primary category fallback (when detailed isn't specific enough)
+const PLAID_PRIMARY_MAP: Record<string, string> = {
+  'FOOD_AND_DRINK': 'Dining',
+  'TRANSPORTATION': 'Transportation',
+  'TRAVEL': 'Travel',
+  'GENERAL_MERCHANDISE': 'Shopping',
+  'ENTERTAINMENT': 'Entertainment',
+  'RENT_AND_UTILITIES': 'Utilities',
+  'MEDICAL': 'Healthcare',
+  'PERSONAL_CARE': 'Shopping',
+  'INCOME': 'Income',
+};
 
-  // First check if this is a transfer/payment - don't categorize these
-  const isTransferPayment = textsToCheck.some(text =>
-    TRANSFER_PAYMENT_PATTERNS.some(pattern => text.includes(pattern.toLowerCase()))
-  );
-  
-  if (isTransferPayment) {
-    return 'Other';
-  }
+// Plaid Personal Finance Category type
+export interface PlaidPFC {
+  primary?: string;
+  detailed?: string;
+}
 
-  for (const [category, patterns] of Object.entries(CATEGORY_PATTERNS)) {
-    for (const pattern of patterns) {
-      const lowerPattern = pattern.toLowerCase();
-      if (textsToCheck.some(text => text.includes(lowerPattern))) {
-        return category;
-      }
+// Result of categorization with confidence info
+export interface CategorizationResult {
+  categoryName: string | null;
+  needsReview: boolean;
+  source: 'plaid' | 'none';
+}
+
+/**
+ * Categorize using Plaid's Personal Finance Category only
+ * If Plaid doesn't provide a category, mark for manual review
+ * 
+ * Priority:
+ * 1. Plaid detailed category (most specific)
+ * 2. Plaid primary category (fallback)
+ * 3. No category - mark for review
+ */
+export const categorizeWithPlaid = (
+  _merchantName: string,
+  _originalDescription: string | null | undefined,
+  plaidPFC: PlaidPFC | null | undefined
+): CategorizationResult => {
+  // Try Plaid detailed category first (most specific)
+  if (plaidPFC?.detailed) {
+    const category = PLAID_PFC_MAP[plaidPFC.detailed];
+    if (category) {
+      return { categoryName: category, needsReview: false, source: 'plaid' };
     }
   }
-
-  return 'Other';
+  
+  // Try Plaid primary category
+  if (plaidPFC?.primary) {
+    const category = PLAID_PRIMARY_MAP[plaidPFC.primary];
+    if (category) {
+      return { categoryName: category, needsReview: false, source: 'plaid' };
+    }
+  }
+  
+  // No Plaid category - leave uncategorized and mark for manual review
+  return { categoryName: null, needsReview: true, source: 'none' };
 };
 
 export const cleanMerchantName = (rawName: string): string => {

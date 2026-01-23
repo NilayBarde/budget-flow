@@ -1,21 +1,20 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
 import * as plaidService from '../services/plaid.js';
-import { categorizeTransaction, cleanMerchantName } from '../services/categorizer.js';
+import { categorizeWithPlaid, cleanMerchantName, PlaidPFC } from '../services/categorizer.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
 type TransactionType = 'income' | 'expense' | 'transfer' | 'investment';
 
-// Patterns for transaction type detection (same as accounts.ts)
 const TRANSFER_PATTERNS = [
-  /credit\s*card[- ]?auto[- ]?pay/i,  // Credit card auto pay (e.g., "Credit Card-auto Pay", "Credit Card Auto Pay")
-  /credit\s*card[- ]?payment/i,       // Credit card payment (e.g., "Credit Card-Payment")
-  /card[- ]?payment/i,                 // Generic card payment (e.g., "Card-Payment", "Card Payment")
+  /credit\s*card[- ]?auto[- ]?pay/i,
+  /credit\s*card[- ]?payment/i,
+  /card[- ]?payment/i,
   /payment.*thank\s*you/i,
   /autopay/i,
-  /auto[- ]?pay/i,                     // Auto pay or auto-pay (must come after credit card patterns)
+  /auto[- ]?pay/i,
   /epayment/i,
   /\btransfer\b/i,
   /bill\s*pay/i,
@@ -35,9 +34,19 @@ const INVESTMENT_PATTERNS = [
   /betterment/i,
 ];
 
-const detectTransactionType = (amount: number, texts: string[]): TransactionType => {
+const detectTransactionType = (amount: number, texts: string[], plaidPFC?: PlaidPFC | null): TransactionType => {
   if (texts.some(t => TRANSFER_PATTERNS.some(p => p.test(t)))) return 'transfer';
   if (texts.some(t => INVESTMENT_PATTERNS.some(p => p.test(t)))) return 'investment';
+  
+  if (plaidPFC?.primary) {
+    if (plaidPFC.primary.startsWith('TRANSFER') || plaidPFC.primary.startsWith('LOAN_PAYMENTS')) {
+      return 'transfer';
+    }
+    if (plaidPFC.primary === 'INCOME') {
+      return 'income';
+    }
+  }
+  
   if (amount < 0) return 'income';
   return 'expense';
 };
@@ -73,13 +82,26 @@ const processSyncedTransactions = async (
     const texts = [tx.merchant_name || '', tx.name || '', (tx as { original_description?: string }).original_description || ''];
     const mapping = mappingMap.get(tx.merchant_name?.toLowerCase() || '');
     const displayName = mapping?.display_name || cleanMerchantName(tx.merchant_name || tx.name);
-    const transactionType = detectTransactionType(tx.amount, texts);
+    const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
+    const transactionType = detectTransactionType(tx.amount, texts, plaidPFC);
 
-    // Auto-assign category based on type
+    // Auto-assign category based on type with Plaid-first approach
     let categoryId: string | null = null;
+    let needsReview = false;
+    
     if (transactionType === 'expense') {
-      const categoryName = categorizeTransaction(tx.merchant_name || tx.name, (tx as { original_description?: string }).original_description);
-      categoryId = mapping?.default_category_id || categoryMap.get(categoryName) || null;
+      // Priority: merchant mapping > Plaid PFC > pattern matching
+      if (mapping?.default_category_id) {
+        categoryId = mapping.default_category_id;
+      } else {
+        const result = categorizeWithPlaid(
+          tx.merchant_name || tx.name,
+          (tx as { original_description?: string }).original_description,
+          plaidPFC
+        );
+        categoryId = categoryMap.get(result.categoryName) || null;
+        needsReview = result.needsReview;
+      }
     } else if (transactionType === 'income') {
       categoryId = categoryMap.get('Income') || null;
     } else if (transactionType === 'investment') {
@@ -99,6 +121,8 @@ const processSyncedTransactions = async (
       transaction_type: transactionType,
       is_split: false,
       is_recurring: false,
+      needs_review: needsReview,
+      plaid_category: plaidPFC || null,
     });
     addedCount++;
   }
