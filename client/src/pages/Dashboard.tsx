@@ -1,17 +1,26 @@
 import { useState, useMemo } from 'react';
-import { ArrowUpRight, ArrowDownRight, TrendingUp, Wallet, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, TrendingUp, Wallet, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
-import { Card, CardHeader, Spinner } from '../components/ui';
+import { Card, CardHeader, Spinner, Button } from '../components/ui';
 import { useMonthlyStats, useBudgetGoals } from '../hooks';
 import { formatCurrency, getMonthYear } from '../utils/formatters';
 import { ProgressBar } from '../components/ui/ProgressBar';
 import { MONTHS } from '../utils/constants';
+import { useQueryClient } from '@tanstack/react-query';
 
 export const Dashboard = () => {
   const [currentDate, setCurrentDate] = useState(getMonthYear());
+  const queryClient = useQueryClient();
   
-  const { data: stats, isLoading: statsLoading } = useMonthlyStats(currentDate.month, currentDate.year);
-  const { data: budgetGoals, isLoading: goalsLoading } = useBudgetGoals(currentDate.month, currentDate.year);
+  const { data: stats, isLoading: statsLoading, refetch: refetchStats } = useMonthlyStats(currentDate.month, currentDate.year);
+  const { data: budgetGoals, isLoading: goalsLoading, refetch: refetchGoals } = useBudgetGoals(currentDate.month, currentDate.year);
+  
+  const handleRefresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['stats'] });
+    queryClient.invalidateQueries({ queryKey: ['budget-goals'] });
+    refetchStats();
+    refetchGoals();
+  };
 
   const handlePrevMonth = () => {
     setCurrentDate(prev => {
@@ -75,23 +84,37 @@ export const Dashboard = () => {
           <p className="text-slate-400 mt-1">Your financial overview</p>
         </div>
         
-        {/* Month Selector */}
-        <div className="flex items-center gap-2 bg-midnight-800 border border-midnight-600 rounded-xl p-2">
-          <button
-            onClick={handlePrevMonth}
-            className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 rounded-lg transition-colors"
+        <div className="flex items-center gap-3">
+          {/* Refresh Button */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleRefresh}
+            disabled={statsLoading || goalsLoading}
+            className="text-slate-400 hover:text-slate-200"
+            title="Refresh data"
           >
-            <ChevronLeft className="h-5 w-5" />
-          </button>
-          <span className="text-lg font-semibold text-slate-100 px-4 min-w-[160px] text-center">
-            {MONTHS[currentDate.month - 1]} {currentDate.year}
-          </span>
-          <button
-            onClick={handleNextMonth}
-            className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 rounded-lg transition-colors"
-          >
-            <ChevronRight className="h-5 w-5" />
-          </button>
+            <RefreshCw className={`h-4 w-4 ${(statsLoading || goalsLoading) ? 'animate-spin' : ''}`} />
+          </Button>
+          
+          {/* Month Selector */}
+          <div className="flex items-center gap-2 bg-midnight-800 border border-midnight-600 rounded-xl p-2">
+            <button
+              onClick={handlePrevMonth}
+              className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 rounded-lg transition-colors"
+            >
+              <ChevronLeft className="h-5 w-5" />
+            </button>
+            <span className="text-lg font-semibold text-slate-100 px-4 min-w-[160px] text-center">
+              {MONTHS[currentDate.month - 1]} {currentDate.year}
+            </span>
+            <button
+              onClick={handleNextMonth}
+              className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 rounded-lg transition-colors"
+            >
+              <ChevronRight className="h-5 w-5" />
+            </button>
+          </div>
         </div>
       </div>
 
