@@ -7,7 +7,9 @@ import { useCreatePlaidLinkToken, useExchangePlaidToken } from '../../hooks';
 
 // Type for Plaid metadata
 type PlaidMetadata = {
-  institution?: { name?: string };
+  institution?: { name?: string; institution_id?: string };
+  link_session_id?: string;
+  request_id?: string;
   [key: string]: unknown;
 };
 
@@ -69,17 +71,20 @@ const PlaidLinkOpener = ({
   linkToken, 
   onSuccess,
   onExit,
+  onEvent,
   isLoading 
 }: { 
   linkToken: string; 
   onSuccess: PlaidLinkOptions['onSuccess'];
   onExit?: PlaidLinkOptions['onExit'];
+  onEvent?: PlaidLinkOptions['onEvent'];
   isLoading: boolean;
 }) => {
   const { open, ready } = usePlaidLink({
     token: linkToken,
     onSuccess,
     onExit,
+    onEvent,
   });
 
   return (
@@ -97,6 +102,7 @@ const PlaidLinkOpener = ({
 export const PlaidLinkButton = () => {
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [linkSessionId, setLinkSessionId] = useState<string | null>(null);
   
   const createLinkToken = useCreatePlaidLinkToken();
   const exchangeToken = useExchangePlaidToken();
@@ -145,6 +151,14 @@ export const PlaidLinkButton = () => {
     }
   }, [exchangeToken]);
 
+  const onEvent = useCallback((eventName: string, metadata: unknown) => {
+    console.log('Plaid Link event:', eventName, metadata);
+    const md = metadata as unknown as PlaidMetadata | undefined;
+    if (eventName === 'ERROR' && md?.link_session_id) {
+      setLinkSessionId(md.link_session_id);
+    }
+  }, []);
+
   const onExit = useCallback((err: unknown, metadata?: unknown) => {
     // Always log in production for debugging
     console.log('=== Plaid Link Exit ===');
@@ -184,6 +198,10 @@ export const PlaidLinkButton = () => {
       }
     }
     
+    if (md?.link_session_id) {
+      setLinkSessionId(md.link_session_id);
+    }
+
     setError(errorMessage);
   }, []);
 
@@ -203,6 +221,7 @@ export const PlaidLinkButton = () => {
           linkToken={linkToken} 
           onSuccess={onSuccess}
           onExit={onExit}
+          onEvent={onEvent}
           isLoading={exchangeToken.isPending}
         />
       ) : (
@@ -221,7 +240,14 @@ export const PlaidLinkButton = () => {
       
       {/* Only show errors when not in a loading state */}
       {error && !isLoading && (
-        <p className="text-sm text-red-500 whitespace-pre-line">{error}</p>
+        <div className="text-sm text-red-500 whitespace-pre-line">
+          {error}
+          {linkSessionId && (
+            <div className="mt-2 text-xs text-slate-400">
+              Plaid Link session: {linkSessionId}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
