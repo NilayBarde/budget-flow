@@ -6,6 +6,10 @@ import { Button } from '../ui';
 import { logPlaidLinkEvent } from '../../services/api';
 import { useCreatePlaidLinkToken, useExchangePlaidToken } from '../../hooks';
 
+const AMEX_INSTITUTION_NAME = 'american express';
+const AMEX_TOKEN_STORAGE_KEY = 'plaid_link_token_amex';
+const AMEX_TOKEN_TTL_MS = 30 * 60 * 1000;
+
 // Type for Plaid metadata
 type PlaidMetadata = {
   institution?: { name?: string; institution_id?: string };
@@ -21,6 +25,13 @@ type PlaidError = {
   display_message?: string;
   error_type?: string;
   [key: string]: unknown;
+};
+
+type StoredLinkToken = {
+  token: string;
+  expiration?: string;
+  storedAt: string;
+  institution?: string;
 };
 
 // Only use OAuth redirect URI on HTTPS (Plaid production requires HTTPS)
@@ -67,6 +78,55 @@ Please reconnect your account:
 • Complete the connection flow again
 • Note: American Express accounts often require daily re-authentication`;
 
+const isAmexInstitution = (institutionName?: string) =>
+  institutionName?.toLowerCase().includes(AMEX_INSTITUTION_NAME) ?? false;
+
+const getStoredAmexLinkToken = () => {
+  try {
+    const storedValue = localStorage.getItem(AMEX_TOKEN_STORAGE_KEY);
+    if (!storedValue) return;
+
+    const parsed = JSON.parse(storedValue) as StoredLinkToken;
+    const { token, expiration, storedAt } = parsed;
+
+    if (!token || !storedAt) return;
+
+    if (expiration) {
+      const expirationDate = new Date(expiration);
+      if (Number.isNaN(expirationDate.getTime()) || expirationDate <= new Date()) {
+        localStorage.removeItem(AMEX_TOKEN_STORAGE_KEY);
+        return;
+      }
+    } else {
+      const storedAtDate = new Date(storedAt);
+      if (Number.isNaN(storedAtDate.getTime()) || Date.now() - storedAtDate.getTime() > AMEX_TOKEN_TTL_MS) {
+        localStorage.removeItem(AMEX_TOKEN_STORAGE_KEY);
+        return;
+      }
+    }
+
+    return parsed;
+  } catch {
+    localStorage.removeItem(AMEX_TOKEN_STORAGE_KEY);
+    return;
+  }
+};
+
+const persistAmexLinkToken = (token: string, expiration?: string, institution?: string) => {
+  const payload: StoredLinkToken = {
+    token,
+    expiration,
+    storedAt: new Date().toISOString(),
+    institution,
+  };
+
+  localStorage.setItem(AMEX_TOKEN_STORAGE_KEY, JSON.stringify(payload));
+};
+
+const clearAmexLinkToken = () => {
+  localStorage.removeItem(AMEX_TOKEN_STORAGE_KEY);
+};
+
 // Inner component that only renders when we have a token
 const PlaidLinkOpener = ({ 
   linkToken, 
@@ -104,6 +164,7 @@ export const PlaidLinkButton = () => {
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [linkSessionId, setLinkSessionId] = useState<string | null>(null);
+  const [tokenExpiration, setTokenExpiration] = useState<string | undefined>(undefined);
   
   const createLinkToken = useCreatePlaidLinkToken();
   const exchangeToken = useExchangePlaidToken();
@@ -114,6 +175,14 @@ export const PlaidLinkButton = () => {
   useEffect(() => {
     const fetchToken = async () => {
       try {
+        const storedToken = getStoredAmexLinkToken();
+        if (storedToken?.token) {
+          setLinkToken(storedToken.token);
+          setTokenExpiration(storedToken.expiration);
+          setError(null);
+          return;
+        }
+
         // Pass redirect_uri for OAuth support (only on HTTPS)
         // Plaid can resume OAuth flow automatically without localStorage persistence
         const result = await createLinkToken.mutateAsync(oAuthRedirectUri);
@@ -122,6 +191,7 @@ export const PlaidLinkButton = () => {
         // Keep token in React state only - no localStorage persistence
         // This maintains OAuth session continuity better, especially for OAuth banks like Amex
         setLinkToken(token);
+        setTokenExpiration(result.expiration);
         setError(null);
       } catch (error) {
         console.error('Failed to create link token:', error);
@@ -135,6 +205,7 @@ export const PlaidLinkButton = () => {
   const onSuccess = useCallback(async (publicToken: string, metadata: unknown) => {
     try {
       await exchangeToken.mutateAsync({ publicToken, metadata });
+      clearAmexLinkToken();
       setError(null); // Clear any previous errors
     } catch (error) {
       console.error('Failed to exchange token:', error);
@@ -156,6 +227,8 @@ export const PlaidLinkButton = () => {
     console.log('Plaid Link event:', eventName, metadata);
     const md = metadata as unknown as PlaidMetadata | undefined;
     const nextLinkSessionId = md?.link_session_id || null;
+    const institutionName = md?.institution?.name;
+    const isAmex = isAmexInstitution(institutionName);
 
     if (eventName === 'ERROR') {
       if (nextLinkSessionId) {
@@ -169,7 +242,10 @@ export const PlaidLinkButton = () => {
         user_agent: navigator.userAgent,
       }).catch(() => {});
     }
-  }, []);
+    if (eventName === 'SELECT_INSTITUTION' && isAmex && linkToken) {
+      persistAmexLinkToken(linkToken, tokenExpiration, institutionName);
+    }
+  }, [linkToken, tokenExpiration]);
 
   const onExit = useCallback((err: unknown, metadata?: unknown) => {
     // Always log in production for debugging
@@ -185,8 +261,8 @@ export const PlaidLinkButton = () => {
     
     const plaidError = err as PlaidError;
     const md = metadata as PlaidMetadata | undefined;
-    const institutionName = md?.institution?.name?.toLowerCase();
-    const isAmex = institutionName?.includes('american express') ?? false;
+    const institutionName = md?.institution?.name;
+    const isAmex = isAmexInstitution(institutionName);
     const isDevelopment = import.meta.env.DEV || window.location.hostname === 'localhost';
     const errorCode = plaidError.error_code;
     
