@@ -117,6 +117,11 @@ router.post('/exchange-token', async (req, res) => {
 
     // Get account info
     const accountsResponse = await plaidService.getAccounts(accessToken);
+    
+    if (!accountsResponse.accounts || accountsResponse.accounts.length === 0) {
+      throw new Error('No accounts found. Please ensure your account is accessible and try again.');
+    }
+    
     const plaidAccount = accountsResponse.accounts[0];
 
     // Store the account
@@ -216,7 +221,30 @@ router.post('/exchange-token', async (req, res) => {
     res.json(data);
   } catch (error) {
     console.error('Error exchanging token:', error);
-    res.status(500).json({ message: 'Failed to connect account' });
+    
+    // Extract Plaid error details if available
+    const plaidError = error as { response?: { data?: { error_code?: string; error_message?: string; display_message?: string } } };
+    const errorDetails = plaidError.response?.data;
+    
+    // Log detailed error for debugging
+    if (errorDetails) {
+      console.error('Plaid error details:', JSON.stringify(errorDetails, null, 2));
+    }
+    
+    // Return more helpful error message
+    const isDevelopment = process.env.NODE_ENV !== 'production';
+    if (isDevelopment && errorDetails) {
+      return res.status(500).json({ 
+        message: 'Failed to connect account',
+        error: errorDetails.error_message || errorDetails.display_message,
+        error_code: errorDetails.error_code,
+        details: errorDetails
+      });
+    }
+    
+    // In production, return user-friendly message
+    const userMessage = errorDetails?.display_message || errorDetails?.error_message || 'Failed to connect account. Please try again.';
+    res.status(500).json({ message: userMessage });
   }
 });
 

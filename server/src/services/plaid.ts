@@ -58,11 +58,19 @@ export const createLinkToken = async (userId: string, redirectUri?: string, webh
 };
 
 export const exchangePublicToken = async (publicToken: string) => {
-  const response = await plaidClient.itemPublicTokenExchange({
-    public_token: publicToken,
-  });
-  
-  return response.data;
+  try {
+    const response = await plaidClient.itemPublicTokenExchange({
+      public_token: publicToken,
+    });
+    
+    return response.data;
+  } catch (error: unknown) {
+    const plaidError = error as { response?: { data?: unknown } };
+    if (plaidError.response?.data) {
+      console.error('Plaid exchange token error:', JSON.stringify(plaidError.response.data, null, 2));
+    }
+    throw error;
+  }
 };
 
 // Sync transactions using Plaid's recommended /transactions/sync endpoint
@@ -144,11 +152,19 @@ export const syncTransactions = async (
 };
 
 export const getAccounts = async (accessToken: string) => {
-  const response = await plaidClient.accountsGet({
-    access_token: accessToken,
-  });
-  
-  return response.data;
+  try {
+    const response = await plaidClient.accountsGet({
+      access_token: accessToken,
+    });
+    
+    return response.data;
+  } catch (error: unknown) {
+    const plaidError = error as { response?: { data?: unknown } };
+    if (plaidError.response?.data) {
+      console.error('Plaid get accounts error:', JSON.stringify(plaidError.response.data, null, 2));
+    }
+    throw error;
+  }
 };
 
 // Update webhook URL on an existing Item (doesn't create a new Item!)

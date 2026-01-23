@@ -167,6 +167,26 @@ router.post('/plaid', async (req, res) => {
     console.log(`Plaid webhook received: ${webhook_type} - ${webhook_code}`);
     console.log('Webhook body:', JSON.stringify(req.body, null, 2));
 
+    // Handle ITEM webhooks (authentication issues)
+    if (webhook_type === 'ITEM') {
+      // Find the account by item_id
+      const { data: account } = await supabase
+        .from('accounts')
+        .select('*')
+        .eq('plaid_item_id', item_id)
+        .single();
+
+      if (account) {
+        if (webhook_code === 'ITEM_LOGIN_REQUIRED' || webhook_code === 'ERROR') {
+          console.log(`⚠️ Account ${account.id} (${account.institution_name}) requires re-authentication`);
+          console.log(`   Webhook code: ${webhook_code}`);
+          console.log(`   This is common for American Express accounts due to frequent MFA requirements`);
+          // Note: We don't delete the account, but user will need to reconnect
+          // Future: Could add a flag to mark account as needing re-auth
+        }
+      }
+    }
+
     // Handle TRANSACTIONS webhooks
     if (webhook_type === 'TRANSACTIONS') {
       // Find the account by item_id

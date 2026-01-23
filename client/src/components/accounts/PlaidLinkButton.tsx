@@ -87,9 +87,20 @@ export const PlaidLinkButton = () => {
       await exchangeToken.mutateAsync({ publicToken, metadata });
       // Clear stored token after successful connection
       localStorage.removeItem(LINK_TOKEN_STORAGE_KEY);
+      setError(null); // Clear any previous errors
     } catch (error) {
       console.error('Failed to exchange token:', error);
-      setError('Failed to complete bank connection. Please try again.');
+      
+      // Extract error message from API response
+      const apiError = error as { message?: string; error?: string; error_code?: string };
+      let errorMessage = apiError.message || apiError.error || 'Failed to complete bank connection. Please try again.';
+      
+      // Add error code if available (helpful for debugging)
+      if (apiError.error_code) {
+        errorMessage += ` (Error: ${apiError.error_code})`;
+      }
+      
+      setError(errorMessage);
     }
   }, [exchangeToken]);
 
@@ -126,7 +137,41 @@ export const PlaidLinkButton = () => {
       const isDevelopment = import.meta.env.DEV || window.location.hostname === 'localhost';
       let errorMessage = '';
       
-      if (plaidError.display_message) {
+      // Handle specific error codes with helpful messages
+      if (plaidError.error_code === 'INTERNAL_SERVER_ERROR') {
+        // Check if this is American Express (from metadata or error context)
+        const isAmex = metadata && typeof metadata === 'object' && 'institution' in metadata 
+          ? (metadata as { institution?: { name?: string } }).institution?.name?.toLowerCase().includes('american express')
+          : false;
+        
+        if (isAmex) {
+          errorMessage = 'American Express connection error (Known Plaid Issue KI563877)\n\n';
+          errorMessage += 'This is a known Plaid issue affecting less than 1% of Amex connections.\n\n';
+          errorMessage += 'Possible causes:\n';
+          errorMessage += '• Known Plaid integration issue with American Express\n';
+          errorMessage += '• Amex requires frequent MFA (Multi-Factor Authentication)\n';
+          errorMessage += '• Your security token may have expired\n\n';
+          errorMessage += 'Please try:\n';
+          errorMessage += '• Wait a few minutes and try connecting again\n';
+          errorMessage += '• Reconnect your Amex account through the Plaid flow\n';
+          errorMessage += '• Ensure your Amex credentials are correct\n';
+          errorMessage += '• Complete any required MFA steps during connection\n';
+          errorMessage += '• If it persists, try again later (this is a known Plaid issue)\n\n';
+          errorMessage += 'Note: Amex accounts often require daily re-authentication due to strict security protocols.';
+        } else {
+          errorMessage = 'Connection temporarily unavailable. This is usually a temporary issue on Plaid\'s side.\n\n';
+          errorMessage += 'Please try:\n';
+          errorMessage += '• Wait a few minutes and try again\n';
+          errorMessage += '• Check Plaid status page for service issues\n';
+          errorMessage += '• Try connecting again later';
+        }
+      } else if (plaidError.error_code === 'ITEM_LOGIN_REQUIRED' || plaidError.error_code === 'INVALID_CREDENTIALS') {
+        errorMessage = 'Account re-authentication required.\n\n';
+        errorMessage += 'Please reconnect your account:\n';
+        errorMessage += '• Your security token has expired\n';
+        errorMessage += '• Complete the connection flow again\n';
+        errorMessage += '• Note: American Express accounts often require daily re-authentication';
+      } else if (plaidError.display_message) {
         errorMessage = plaidError.display_message;
       } else if (plaidError.error_message) {
         errorMessage = plaidError.error_message;

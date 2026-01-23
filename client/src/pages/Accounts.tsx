@@ -23,12 +23,20 @@ export const Accounts = () => {
           <div className="p-3 bg-accent-500/20 rounded-xl">
             <CreditCard className="h-6 w-6 text-accent-400" />
           </div>
-          <div>
+          <div className="flex-1">
             <h3 className="font-semibold text-slate-100">Connect Your Banks</h3>
             <p className="text-sm text-slate-400 mt-1">
               Securely connect your American Express, Discover, Capital One, Robinhood, Bilt, 
               and Venmo accounts to automatically import transactions.
             </p>
+            <div className="mt-3 pt-3 border-t border-midnight-700">
+              <p className="text-xs text-amber-400/80">
+                <strong>Note:</strong> American Express has known integration issues with Plaid 
+                (including INTERNAL_SERVER_ERROR affecting ~1% of connections). Amex accounts also 
+                require frequent re-authentication (often daily) due to strict security protocols. 
+                If you encounter connection errors, wait a few minutes and try reconnecting.
+              </p>
+            </div>
           </div>
         </div>
       </Card>
