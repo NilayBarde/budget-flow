@@ -25,15 +25,17 @@ const INVESTMENT_PATTERNS = [
 
 // Transfer detection patterns
 const TRANSFER_PATTERNS = [
-  /card[- ]?payment/i,       // Generic card payment (e.g., "Card-Payment", "Card Payment")
+  /credit\s*card[- ]?auto[- ]?pay/i,  // Credit card auto pay (e.g., "Credit Card-auto Pay", "Credit Card Auto Pay")
+  /credit\s*card[- ]?payment/i,       // Credit card payment (e.g., "Credit Card-Payment")
+  /card[- ]?payment/i,                 // Generic card payment (e.g., "Card-Payment", "Card Payment")
   /payment.*thank\s*you/i,
   /autopay/i,
-  /credit\s*card\s*payment/i,
-  /credit\s*crd/i,           // "CREDIT CRD AUTOPAY"
-  /crd\s*autopay/i,          // Abbreviated card autopay
-  /epayment/i,               // Electronic payment
+  /auto[- ]?pay/i,                     // Auto pay or auto-pay (must come after credit card patterns)
+  /credit\s*crd/i,                     // "CREDIT CRD AUTOPAY"
+  /crd\s*autopay/i,                    // Abbreviated card autopay
+  /epayment/i,                         // Electronic payment
   /e-payment/i,
-  /\btransfer\b/i,           // Any transfer (but not "Robinhood-transfer" investment patterns)
+  /\btransfer\b/i,                     // Any transfer (but not "Robinhood-transfer" investment patterns)
   /wire\s*transfer/i,
   /^payment$/i,
   /bill\s*pay/i,
@@ -41,18 +43,17 @@ const TRANSFER_PATTERNS = [
   /direct\s*debit/i,
   /loan\s*payment/i,
   /mortgage\s*payment/i,
-  /\bpmt\b/i,                // Common abbreviation for payment
-  /zelle/i,                  // Zelle transfers
-  /cash\s*app/i,             // Cash App transfers
-  /acctverify/i,             // Account verification micro-deposits
+  /\bpmt\b/i,                          // Common abbreviation for payment
+  /zelle/i,                            // Zelle transfers
+  /cash\s*app/i,                       // Cash App transfers
+  /acctverify/i,                       // Account verification micro-deposits
   /account\s*verification/i,
-  /credit\s*card.*auto\s*pay/i,  // Credit card auto pay
-  /bank\s*xfer/i,            // Bank transfer (e.g., Apple Cash-Bank Xfer)
-  /mobile\s*pmt/i,           // Mobile payment
-  /-ach\s*pmt/i,             // ACH payment (e.g., "Amex Epayment-Ach Pmt")
-  /money\s*out\s*cash/i,     // Wealthfront internal transfers (e.g., "Emergency Fund Money Out Cash")
-  /money\s*in\s*cash/i,      // Wealthfront internal transfers (e.g., "Emergency Fund Money In Cash")
-  /\bfund\b.*money\s*(out|in)/i,  // Wealthfront bucket transfers (e.g., "Emergency Fund Money Out")
+  /bank\s*xfer/i,                      // Bank transfer (e.g., Apple Cash-Bank Xfer)
+  /mobile\s*pmt/i,                     // Mobile payment
+  /-ach\s*pmt/i,                       // ACH payment (e.g., "Amex Epayment-Ach Pmt")
+  /money\s*out\s*cash/i,               // Wealthfront internal transfers (e.g., "Emergency Fund Money Out Cash")
+  /money\s*in\s*cash/i,                // Wealthfront internal transfers (e.g., "Emergency Fund Money In Cash")
+  /\bfund\b.*money\s*(out|in)/i,       // Wealthfront bucket transfers (e.g., "Emergency Fund Money Out")
   // Note: Venmo intentionally excluded - users often receive reimbursements via Venmo
 ];
 
@@ -494,6 +495,32 @@ router.post('/assign-type-categories', async (req, res) => {
   } catch (error) {
     console.error('Error assigning type categories:', error);
     res.status(500).json({ message: 'Failed to assign categories' });
+  }
+});
+
+// Clear categories for transfer transactions (transfers shouldn't have expense categories)
+router.post('/clear-transfer-categories', async (req, res) => {
+  try {
+    console.log('Clearing categories for transfer transactions...');
+    
+    const { data: result, error } = await supabase
+      .from('transactions')
+      .update({ category_id: null })
+      .eq('transaction_type', 'transfer')
+      .not('category_id', 'is', null)
+      .select('id');
+    
+    if (error) throw error;
+    
+    const clearedCount = result?.length || 0;
+    
+    res.json({
+      cleared: clearedCount,
+      message: `Cleared categories for ${clearedCount} transfer transactions`
+    });
+  } catch (error) {
+    console.error('Error clearing transfer categories:', error);
+    res.status(500).json({ message: 'Failed to clear transfer categories' });
   }
 });
 

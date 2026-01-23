@@ -1,3 +1,9 @@
+// Patterns that indicate transfers/payments (should not be categorized)
+const TRANSFER_PAYMENT_PATTERNS = [
+  'credit card', 'card payment', 'autopay', 'auto pay', 'auto-pay',
+  'payment', 'transfer', 'bill pay', 'loan payment', 'mortgage payment'
+];
+
 const CATEGORY_PATTERNS: Record<string, string[]> = {
   Housing: [
     'rent', 'mortgage', 'landlord', 'property', 'apartment', 'lease',
@@ -19,7 +25,7 @@ const CATEGORY_PATTERNS: Record<string, string[]> = {
   Transportation: [
     'uber', 'lyft', 'taxi', 'cab', 'parking', 'gas', 'shell', 'chevron',
     'exxon', 'mobil', 'bp', 'citgo', 'metro', 'transit', 'bus',
-    'train', 'amtrak', 'airline', 'toll', 'car wash', 'auto'
+    'train', 'amtrak', 'airline', 'toll', 'car wash'
   ],
   Entertainment: [
     'netflix', 'hulu', 'disney', 'hbo', 'spotify', 'apple music', 'youtube',
@@ -57,6 +63,15 @@ const CATEGORY_PATTERNS: Record<string, string[]> = {
 
 export const categorizeTransaction = (merchantName: string): string => {
   const normalizedName = merchantName.toLowerCase();
+  
+  // First check if this is a transfer/payment - don't categorize these
+  const isTransferPayment = TRANSFER_PAYMENT_PATTERNS.some(pattern => 
+    normalizedName.includes(pattern.toLowerCase())
+  );
+  
+  if (isTransferPayment) {
+    return 'Other';
+  }
   
   for (const [category, patterns] of Object.entries(CATEGORY_PATTERNS)) {
     for (const pattern of patterns) {

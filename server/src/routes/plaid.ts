@@ -12,10 +12,12 @@ const DEFAULT_USER_ID = 'default-user';
 type TransactionType = 'income' | 'expense' | 'transfer' | 'investment';
 
 const TRANSFER_PATTERNS = [
-  /card[- ]?payment/i,
+  /credit\s*card[- ]?auto[- ]?pay/i,  // Credit card auto pay (e.g., "Credit Card-auto Pay", "Credit Card Auto Pay")
+  /credit\s*card[- ]?payment/i,       // Credit card payment (e.g., "Credit Card-Payment")
+  /card[- ]?payment/i,                 // Generic card payment (e.g., "Card-Payment", "Card Payment")
   /payment.*thank\s*you/i,
   /autopay/i,
-  /credit\s*card\s*payment/i,
+  /auto[- ]?pay/i,                     // Auto pay or auto-pay (must come after credit card patterns)
   /epayment/i,
   /\btransfer\b/i,
   /bill\s*pay/i,
