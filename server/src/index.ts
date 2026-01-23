@@ -69,38 +69,34 @@ try {
     console.log(`Serving client from: ${clientDistPath}`);
     
     // SPA fallback - serve index.html for all non-API routes
-    app.get('/*', (req, res) => {
-      // Don't serve index.html for API routes
+    app.use((req, res, next) => {
       if (req.path.startsWith('/api')) {
-        res.status(404).json({ message: 'API endpoint not found' });
-        return;
+        return next();
       }
       res.sendFile(path.join(clientDistPath, 'index.html'));
     });
   } else {
     console.log('Client dist not found - API-only mode (client deployed separately)');
     // API-only mode - return 404 for non-API routes
-    app.get('/*', (req, res) => {
-      if (!req.path.startsWith('/api')) {
-        res.status(404).json({ 
-          message: 'Not found. This is an API server. Frontend is deployed separately.' 
-        });
-        return;
+    app.use((req, res, next) => {
+      if (req.path.startsWith('/api')) {
+        return next();
       }
-      res.status(404).json({ message: 'API endpoint not found' });
+      res.status(404).json({ 
+        message: 'Not found. This is an API server. Frontend is deployed separately.' 
+      });
     });
   }
 } catch (error) {
   console.log('Could not check client dist - API-only mode');
   // API-only mode
-  app.get('/*', (req, res) => {
-    if (!req.path.startsWith('/api')) {
-      res.status(404).json({ 
-        message: 'Not found. This is an API server. Frontend is deployed separately.' 
-      });
-      return;
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api')) {
+      return next();
     }
-    res.status(404).json({ message: 'API endpoint not found' });
+    res.status(404).json({ 
+      message: 'Not found. This is an API server. Frontend is deployed separately.' 
+    });
   });
 }
 
