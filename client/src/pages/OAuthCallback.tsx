@@ -45,16 +45,41 @@ export const OAuthCallback = () => {
   }, [navigate]);
 
   const onExit = useCallback((err: unknown, metadata?: unknown) => {
-    console.log('Plaid Link exited from OAuth callback', { err, metadata });
+    // Always log in production for debugging
+    console.log('=== Plaid OAuth Callback Exit ===');
+    console.log('Error:', err);
+    console.log('Error type:', typeof err);
+    console.log('Error stringified:', JSON.stringify(err, null, 2));
+    console.log('Metadata:', metadata);
+    console.log('Metadata stringified:', JSON.stringify(metadata, null, 2));
+    console.log('Current URL:', window.location.href);
+    console.log('OAuth state ID:', oauthStateId);
+    console.log('Link token exists:', !!linkToken);
+    
     if (err) {
-      console.error('Plaid Link error:', err);
-      const plaidError = err as { error_code?: string; error_message?: string; display_message?: string };
+      console.error('Plaid Link error detected:', err);
+      const plaidError = err as { 
+        error_code?: string; 
+        error_message?: string; 
+        display_message?: string;
+        error_type?: string;
+        [key: string]: unknown;
+      };
+      
+      // Log all error properties
+      console.error('Error code:', plaidError.error_code);
+      console.error('Error message:', plaidError.error_message);
+      console.error('Display message:', plaidError.display_message);
+      console.error('Error type:', plaidError.error_type);
+      console.error('All error keys:', Object.keys(plaidError));
+      
       setError(plaidError.display_message || plaidError.error_message || 'Bank connection failed. Please try connecting again.');
     } else {
       // User cancelled or exited without error
+      console.log('No error - user cancelled or exited normally');
       navigate('/accounts', { replace: true });
     }
-  }, [navigate]);
+  }, [navigate, oauthStateId, linkToken]);
 
   const { open, ready } = usePlaidLink({
     token: linkToken || '',

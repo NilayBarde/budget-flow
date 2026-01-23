@@ -94,20 +94,35 @@ export const PlaidLinkButton = () => {
   }, [exchangeToken]);
 
   const onExit = useCallback((err: unknown, metadata?: unknown) => {
-    console.log('Plaid Link exited', { err, metadata });
-    console.log('Full error details:', JSON.stringify({ err, metadata }, null, 2));
+    // Always log in production for debugging
+    console.log('=== Plaid Link Exit ===');
+    console.log('Error:', err);
+    console.log('Error type:', typeof err);
+    console.log('Error stringified:', JSON.stringify(err, null, 2));
+    console.log('Metadata:', metadata);
+    console.log('Metadata stringified:', JSON.stringify(metadata, null, 2));
+    console.log('Current URL:', window.location.href);
+    console.log('Link token exists:', !!linkToken);
     
     if (err) {
-      console.error('Plaid Link error:', err);
+      console.error('Plaid Link error detected:', err);
       // Check if it's a Plaid error object
       const plaidError = err as { 
         error_code?: string; 
         error_message?: string; 
         display_message?: string;
         error_type?: string;
+        [key: string]: unknown;
       };
       
-      // Build detailed error message for development
+      // Log all error properties
+      console.error('Error code:', plaidError.error_code);
+      console.error('Error message:', plaidError.error_message);
+      console.error('Display message:', plaidError.display_message);
+      console.error('Error type:', plaidError.error_type);
+      console.error('All error keys:', Object.keys(plaidError));
+      
+      // Build detailed error message
       const isDevelopment = import.meta.env.DEV || window.location.hostname === 'localhost';
       let errorMessage = '';
       
@@ -128,9 +143,11 @@ export const PlaidLinkButton = () => {
       }
       
       setError(errorMessage);
+    } else {
+      console.log('No error - user cancelled or exited normally');
     }
     // Don't clear the token on exit - user might want to retry
-  }, []);
+  }, [linkToken]);
 
   // Show development mode warning
   const isDevelopment = import.meta.env.DEV || window.location.hostname === 'localhost';
