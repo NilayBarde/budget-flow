@@ -5,6 +5,7 @@ interface TransactionForRecurring {
   merchant_name: string;
   amount: number;
   date: string;
+  category_id: string | null;
 }
 
 interface RecurringCandidate {
@@ -15,13 +16,23 @@ interface RecurringCandidate {
 }
 
 export const detectRecurringTransactions = async () => {
-  // Get all transactions from the last year
+  // Get the Subscriptions category ID
+  const { data: subscriptionCategory } = await supabase
+    .from('categories')
+    .select('id')
+    .eq('name', 'Subscriptions')
+    .single();
+  
+  const subscriptionCategoryId = subscriptionCategory?.id;
+
+  // Get all EXPENSE transactions from the last year (exclude income, transfers, investments)
   const oneYearAgo = new Date();
   oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
 
   const { data: transactions, error } = await supabase
     .from('transactions')
-    .select('merchant_name, merchant_display_name, amount, date')
+    .select('merchant_name, merchant_display_name, amount, date, category_id')
+    .eq('transaction_type', 'expense')  // Only expenses, not income/transfers
     .gte('date', oneYearAgo.toISOString().split('T')[0])
     .order('date', { ascending: true });
 
@@ -44,14 +55,19 @@ export const detectRecurringTransactions = async () => {
   const recurringCandidates: RecurringCandidate[] = [];
 
   for (const [merchant, txs] of merchantGroups) {
-    if (txs.length < 2) continue;
+    // Check if any transaction is categorized as "Subscriptions" - auto-include these
+    const hasSubscriptionCategory = subscriptionCategoryId && 
+      txs.some(t => t.category_id === subscriptionCategoryId);
+    
+    if (txs.length < 2 && !hasSubscriptionCategory) continue;
 
     // Check if amounts are similar (within 10%)
     const amounts = txs.map(t => Math.abs(t.amount));
     const avgAmount = amounts.reduce((a, b) => a + b, 0) / amounts.length;
     const amountVariance = amounts.every(a => Math.abs(a - avgAmount) / avgAmount < 0.1);
 
-    if (!amountVariance) continue;
+    // For subscription-categorized items, be more lenient with amount variance
+    if (!amountVariance && !hasSubscriptionCategory) continue;
 
     // Check interval between transactions
     const dates = txs.map(t => new Date(t.date).getTime()).sort((a, b) => a - b);
@@ -62,19 +78,24 @@ export const detectRecurringTransactions = async () => {
       intervals.push(daysDiff);
     }
 
-    if (intervals.length === 0) continue;
-
-    const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
-
     // Determine frequency
     let frequency: 'weekly' | 'monthly' | 'yearly' | null = null;
     
-    if (avgInterval >= 5 && avgInterval <= 10) {
-      frequency = 'weekly';
-    } else if (avgInterval >= 25 && avgInterval <= 35) {
+    if (intervals.length > 0) {
+      const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+      
+      if (avgInterval >= 5 && avgInterval <= 10) {
+        frequency = 'weekly';
+      } else if (avgInterval >= 25 && avgInterval <= 35) {
+        frequency = 'monthly';
+      } else if (avgInterval >= 350 && avgInterval <= 380) {
+        frequency = 'yearly';
+      }
+    }
+    
+    // For subscription-categorized items with only 1 transaction, default to monthly
+    if (!frequency && hasSubscriptionCategory) {
       frequency = 'monthly';
-    } else if (avgInterval >= 350 && avgInterval <= 380) {
-      frequency = 'yearly';
     }
 
     if (frequency) {

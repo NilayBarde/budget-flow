@@ -1,12 +1,18 @@
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, X } from 'lucide-react';
 import { Card, Button, Spinner, EmptyState, Badge } from '../components/ui';
-import { useRecurringTransactions, useDetectRecurringTransactions } from '../hooks';
+import { useRecurringTransactions, useDetectRecurringTransactions, useUpdateRecurringTransaction } from '../hooks';
 import { formatCurrency } from '../utils/formatters';
 import { Repeat } from 'lucide-react';
+import { useCallback } from 'react';
 
 export const Subscriptions = () => {
   const { data: recurring, isLoading } = useRecurringTransactions();
   const detectRecurring = useDetectRecurringTransactions();
+  const updateRecurring = useUpdateRecurringTransaction();
+
+  const handleHide = useCallback((id: string) => {
+    updateRecurring.mutate({ id, data: { is_active: false } });
+  }, [updateRecurring]);
 
   const activeSubscriptions = recurring?.filter(r => r.is_active) || [];
   const monthlyTotal = activeSubscriptions
@@ -108,6 +114,14 @@ export const Subscriptions = () => {
                     /{sub.frequency === 'monthly' ? 'mo' : 'yr'}
                   </p>
                 </div>
+                
+                <button
+                  onClick={() => handleHide(sub.id)}
+                  className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                  title="Hide this subscription"
+                >
+                  <X className="h-4 w-4" />
+                </button>
               </div>
             ))}
           </div>
