@@ -101,6 +101,37 @@ router.post('/create-link-token', async (req, res) => {
   }
 });
 
+// Log Plaid Link events for debugging (errors, exits, etc.)
+router.post('/log-link-event', async (req, res) => {
+  try {
+    const {
+      event_name,
+      error,
+      metadata,
+      link_session_id,
+      url,
+      user_agent,
+    } = req.body || {};
+
+    console.log('=== Plaid Link Event Log ===');
+    console.log('Event:', event_name);
+    console.log('Link session ID:', link_session_id || 'N/A');
+    console.log('URL:', url || 'N/A');
+    console.log('User agent:', user_agent || 'N/A');
+    if (error) {
+      console.log('Error:', JSON.stringify(error, null, 2));
+    }
+    if (metadata) {
+      console.log('Metadata:', JSON.stringify(metadata, null, 2));
+    }
+
+    res.status(204).send();
+  } catch (err) {
+    console.error('Failed to log Plaid Link event:', err);
+    res.status(500).json({ message: 'Failed to log Plaid Link event' });
+  }
+});
+
 // Exchange public token for access token
 router.post('/exchange-token', async (req, res) => {
   try {

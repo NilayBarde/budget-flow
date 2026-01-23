@@ -3,6 +3,7 @@ import { usePlaidLink } from 'react-plaid-link';
 import type { PlaidLinkOptions } from 'react-plaid-link';
 import { Plus } from 'lucide-react';
 import { Button } from '../ui';
+import { logPlaidLinkEvent } from '../../services/api';
 import { useCreatePlaidLinkToken, useExchangePlaidToken } from '../../hooks';
 
 // Type for Plaid metadata
@@ -154,8 +155,19 @@ export const PlaidLinkButton = () => {
   const onEvent = useCallback((eventName: string, metadata: unknown) => {
     console.log('Plaid Link event:', eventName, metadata);
     const md = metadata as unknown as PlaidMetadata | undefined;
-    if (eventName === 'ERROR' && md?.link_session_id) {
-      setLinkSessionId(md.link_session_id);
+    const nextLinkSessionId = md?.link_session_id || null;
+
+    if (eventName === 'ERROR') {
+      if (nextLinkSessionId) {
+        setLinkSessionId(nextLinkSessionId);
+      }
+      void logPlaidLinkEvent({
+        event_name: eventName,
+        metadata,
+        link_session_id: nextLinkSessionId,
+        url: window.location.href,
+        user_agent: navigator.userAgent,
+      }).catch(() => {});
     }
   }, []);
 
@@ -173,7 +185,8 @@ export const PlaidLinkButton = () => {
     
     const plaidError = err as PlaidError;
     const md = metadata as PlaidMetadata | undefined;
-    const isAmex = md?.institution?.name?.toLowerCase().includes('american express') ?? false;
+    const institutionName = md?.institution?.name?.toLowerCase();
+    const isAmex = institutionName?.includes('american express') ?? false;
     const isDevelopment = import.meta.env.DEV || window.location.hostname === 'localhost';
     const errorCode = plaidError.error_code;
     
@@ -198,11 +211,21 @@ export const PlaidLinkButton = () => {
       }
     }
     
-    if (md?.link_session_id) {
-      setLinkSessionId(md.link_session_id);
+    const nextLinkSessionId = md?.link_session_id || null;
+    if (nextLinkSessionId) {
+      setLinkSessionId(nextLinkSessionId);
     }
 
     setError(errorMessage);
+
+    void logPlaidLinkEvent({
+      event_name: 'EXIT',
+      error: plaidError,
+      metadata,
+      link_session_id: nextLinkSessionId,
+      url: window.location.href,
+      user_agent: navigator.userAgent,
+    }).catch(() => {});
   }, []);
 
   // Show development mode warning for HTTP

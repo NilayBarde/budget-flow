@@ -72,6 +72,21 @@ export const exchangePlaidToken = (publicToken: string, metadata: unknown) =>
     body: JSON.stringify({ public_token: publicToken, metadata }),
   });
 
+type PlaidLinkEventPayload = {
+  event_name: string;
+  error?: unknown;
+  metadata?: unknown;
+  link_session_id?: string | null;
+  url?: string;
+  user_agent?: string;
+};
+
+export const logPlaidLinkEvent = (payload: PlaidLinkEventPayload) =>
+  fetchApi<void>('/plaid/log-link-event', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
 export const syncAccount = (accountId: string) =>
   fetchApi<{ synced: number }>(`/accounts/${accountId}/sync`, { method: 'POST' });
 
