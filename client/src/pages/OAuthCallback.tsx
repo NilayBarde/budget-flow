@@ -44,12 +44,20 @@ export const OAuthCallback = () => {
     }
   }, [navigate]);
 
-  const onExit = useCallback(() => {
-    navigate('/accounts', { replace: true });
+  const onExit = useCallback((err: unknown, metadata?: unknown) => {
+    console.log('Plaid Link exited from OAuth callback', { err, metadata });
+    if (err) {
+      console.error('Plaid Link error:', err);
+      const plaidError = err as { error_code?: string; error_message?: string; display_message?: string };
+      setError(plaidError.display_message || plaidError.error_message || 'Bank connection failed. Please try connecting again.');
+    } else {
+      // User cancelled or exited without error
+      navigate('/accounts', { replace: true });
+    }
   }, [navigate]);
 
   const { open, ready } = usePlaidLink({
-    token: linkToken,
+    token: linkToken || '',
     onSuccess,
     onExit,
     receivedRedirectUri: window.location.href,

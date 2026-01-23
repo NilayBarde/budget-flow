@@ -54,10 +54,17 @@ router.post('/create-link-token', async (req, res) => {
     
     const { redirect_uri, webhook_url } = req.body;
     
+    console.log('Request details:', {
+      redirect_uri: redirect_uri || 'none (OAuth banks will not work)',
+      webhook_url: webhook_url ? 'provided' : 'not provided',
+    });
+    
     // Use provided webhook URL or fall back to environment variable
     const webhookUrl = webhook_url || process.env.PLAID_WEBHOOK_URL;
     
     const linkToken = await plaidService.createLinkToken(DEFAULT_USER_ID, redirect_uri, webhookUrl);
+    
+    console.log('Link token created successfully');
     
     res.json({
       link_token: linkToken.link_token,
@@ -67,7 +74,15 @@ router.post('/create-link-token', async (req, res) => {
     console.error('Error creating link token:', error);
     const plaidError = error as { response?: { data?: unknown } };
     if (plaidError.response?.data) {
-      console.error('Plaid error details:', plaidError.response.data);
+      console.error('Plaid error details:', JSON.stringify(plaidError.response.data, null, 2));
+      // Return more detailed error in development
+      const isDevelopment = process.env.NODE_ENV !== 'production';
+      if (isDevelopment) {
+        return res.status(500).json({ 
+          message: 'Failed to create link token',
+          error: plaidError.response.data 
+        });
+      }
     }
     res.status(500).json({ message: 'Failed to create link token' });
   }
