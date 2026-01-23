@@ -36,81 +36,85 @@ export const YearOverview = () => {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-4 md:space-y-6">
+      {/* Header - Stacked on mobile */}
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-slate-100">Year Overview</h1>
+          <h1 className="text-2xl md:text-3xl font-bold text-slate-100">Year Overview</h1>
           <p className="text-slate-400 mt-1">Your spending across the entire year</p>
         </div>
         
         {/* Year Selector */}
-        <div className="flex items-center gap-2 bg-midnight-800 border border-midnight-600 rounded-xl p-2">
+        <div className="flex items-center gap-1 md:gap-2 bg-midnight-800 border border-midnight-600 rounded-xl p-1.5 md:p-2 w-fit">
           <button
             onClick={() => setYear(y => y - 1)}
-            className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 rounded-lg transition-colors"
+            className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 active:bg-midnight-600 rounded-lg transition-colors touch-target"
+            aria-label="Previous year"
           >
             <ChevronLeft className="h-5 w-5" />
           </button>
-          <span className="text-lg font-semibold text-slate-100 px-4">{year}</span>
+          <span className="text-base md:text-lg font-semibold text-slate-100 px-3 md:px-4 min-w-[60px] text-center">{year}</span>
           <button
             onClick={() => setYear(y => y + 1)}
-            className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 rounded-lg transition-colors"
+            className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 active:bg-midnight-600 rounded-lg transition-colors touch-target"
+            aria-label="Next year"
           >
             <ChevronRight className="h-5 w-5" />
           </button>
         </div>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
-        <Card>
-          <p className="text-sm text-slate-400">Total Spent</p>
-          <p className="text-2xl font-bold text-slate-100 mt-1">
+      {/* Summary Cards - 2x2 on mobile, row on desktop */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 md:gap-4">
+        <Card padding="sm">
+          <p className="text-xs md:text-sm text-slate-400">Total Spent</p>
+          <p className="text-lg md:text-2xl font-bold text-slate-100 mt-0.5 md:mt-1">
             {formatCurrency(totalSpent)}
           </p>
         </Card>
-        <Card>
-          <p className="text-sm text-slate-400">Total Income</p>
-          <p className="text-2xl font-bold text-emerald-400 mt-1">
+        <Card padding="sm">
+          <p className="text-xs md:text-sm text-slate-400">Total Income</p>
+          <p className="text-lg md:text-2xl font-bold text-emerald-400 mt-0.5 md:mt-1">
             {formatCurrency(totalIncome)}
           </p>
         </Card>
-        <Card>
-          <p className="text-sm text-slate-400">Total Invested</p>
-          <p className="text-2xl font-bold text-violet-400 mt-1">
+        <Card padding="sm">
+          <p className="text-xs md:text-sm text-slate-400">Total Invested</p>
+          <p className="text-lg md:text-2xl font-bold text-violet-400 mt-0.5 md:mt-1">
             {formatCurrency(totalInvested)}
           </p>
         </Card>
-        <Card>
-          <p className="text-sm text-slate-400">Net Savings</p>
-          <p className={`text-2xl font-bold mt-1 ${netSavings >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+        <Card padding="sm">
+          <p className="text-xs md:text-sm text-slate-400">Net Savings</p>
+          <p className={`text-lg md:text-2xl font-bold mt-0.5 md:mt-1 ${netSavings >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
             {formatCurrency(netSavings)}
           </p>
         </Card>
-        <Card>
-          <p className="text-sm text-slate-400">Avg. Monthly</p>
-          <p className="text-2xl font-bold text-slate-100 mt-1">
+        <Card padding="sm" className="col-span-2 md:col-span-1">
+          <p className="text-xs md:text-sm text-slate-400">Avg. Monthly</p>
+          <p className="text-lg md:text-2xl font-bold text-slate-100 mt-0.5 md:mt-1">
             {formatCurrency(avgMonthly)}
           </p>
         </Card>
       </div>
 
-      {/* Monthly Chart */}
-      <Card>
+      {/* Monthly Chart - Horizontal scroll on mobile */}
+      <Card padding="sm">
         <CardHeader title="Monthly Overview" subtitle="Expenses, income, and investments by month" />
-        <div className="h-80">
+        <div className="h-64 md:h-80 -mx-2 md:mx-0">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={monthlyData}>
               <XAxis 
                 dataKey="name" 
                 stroke="#64748b" 
-                tick={{ fill: '#94a3b8' }}
+                tick={{ fill: '#94a3b8', fontSize: 12 }}
+                interval={0}
               />
               <YAxis 
                 stroke="#64748b" 
-                tick={{ fill: '#94a3b8' }}
+                tick={{ fill: '#94a3b8', fontSize: 11 }}
                 tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
+                width={45}
               />
               <Tooltip
                 formatter={(value) => formatCurrency(value as number)}
@@ -118,6 +122,7 @@ export const YearOverview = () => {
                   backgroundColor: '#1c2030',
                   border: '1px solid #252a3d',
                   borderRadius: '8px',
+                  fontSize: '12px',
                 }}
                 labelStyle={{ color: '#f1f5f9' }}
               />
@@ -130,12 +135,12 @@ export const YearOverview = () => {
       </Card>
 
       {/* Category Breakdown */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+        <Card padding="sm">
           <CardHeader title="Spending by Category" subtitle="Where your money went" />
           {categoryData.length > 0 ? (
-            <div className="flex items-center gap-6">
-              <div className="w-48 h-48">
+            <div className="flex flex-col md:flex-row md:items-center gap-4 md:gap-6">
+              <div className="w-full md:w-48 h-40 md:h-48 mx-auto md:mx-0">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
@@ -144,8 +149,8 @@ export const YearOverview = () => {
                       nameKey="category.name"
                       cx="50%"
                       cy="50%"
-                      innerRadius={50}
-                      outerRadius={80}
+                      innerRadius={35}
+                      outerRadius={60}
                       paddingAngle={2}
                     >
                       {categoryData.map((entry, index) => (
@@ -168,12 +173,12 @@ export const YearOverview = () => {
                   <div key={item.category.id} className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <div 
-                        className="w-3 h-3 rounded-full"
+                        className="w-3 h-3 rounded-full flex-shrink-0"
                         style={{ backgroundColor: item.category.color }}
                       />
-                      <span className="text-sm text-slate-300">{item.category.name}</span>
+                      <span className="text-sm text-slate-300 truncate">{item.category.name}</span>
                     </div>
-                    <span className="text-sm font-medium text-slate-100">
+                    <span className="text-sm font-medium text-slate-100 ml-2">
                       {formatCurrency(item.amount)}
                     </span>
                   </div>
@@ -185,17 +190,17 @@ export const YearOverview = () => {
           )}
         </Card>
 
-        {/* Monthly Cards */}
-        <Card>
+        {/* Monthly Cards - 2x6 grid on mobile */}
+        <Card padding="sm">
           <CardHeader title="Monthly Breakdown" subtitle="Click to view details" />
-          <div className="grid grid-cols-3 gap-3 max-h-80 overflow-y-auto">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2 md:gap-3 max-h-64 md:max-h-80 overflow-y-auto">
             {monthlyData.map((month, index) => (
               <div 
                 key={month.name}
-                className="bg-midnight-900 rounded-lg p-3 hover:bg-midnight-700 transition-colors cursor-pointer"
+                className="bg-midnight-900 rounded-lg p-2.5 md:p-3 hover:bg-midnight-700 active:bg-midnight-600 transition-colors cursor-pointer"
               >
                 <p className="text-xs text-slate-400">{MONTHS[index]}</p>
-                <p className="text-lg font-semibold text-slate-100 mt-1">
+                <p className="text-base md:text-lg font-semibold text-slate-100 mt-0.5 md:mt-1">
                   {formatCurrency(month.spent)}
                 </p>
                 {month.income > 0 && (
@@ -205,7 +210,7 @@ export const YearOverview = () => {
                 )}
                 {month.invested > 0 && (
                   <p className="text-xs text-violet-400">
-                    {formatCurrency(month.invested)} invested
+                    {formatCurrency(month.invested)} inv.
                   </p>
                 )}
               </div>
@@ -216,4 +221,3 @@ export const YearOverview = () => {
     </div>
   );
 };
-

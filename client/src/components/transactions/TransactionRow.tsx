@@ -45,137 +45,207 @@ export const TransactionRow = ({ transaction, onEdit, onSplit }: TransactionRowP
     onSplit(transaction);
   }, [onSplit, transaction]);
 
+  // Get category display color
+  const categoryColor = isIncome ? '#10b981' : isInvestment ? '#8b5cf6' : isTransfer ? '#64748b' : transaction.category?.color || '#64748b';
+  const categoryBgColor = `${categoryColor}20`;
+
   return (
     <div className={clsx(
-      "flex items-center gap-4 px-4 py-3 hover:bg-midnight-700/50 transition-colors border-b border-midnight-700 last:border-b-0",
+      "px-3 py-3 md:px-4 hover:bg-midnight-700/50 transition-colors border-b border-midnight-700 last:border-b-0",
       isTransfer && "opacity-60"
     )}>
-      {/* Category Icon */}
-      <div 
-        className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
-        style={{ backgroundColor: isIncome ? '#10b98120' : isInvestment ? '#8b5cf620' : isTransfer ? '#64748b20' : `${transaction.category?.color || '#64748b'}20` }}
-      >
-        <span 
-          className="text-sm"
-          style={{ color: isIncome ? '#10b981' : isInvestment ? '#8b5cf6' : isTransfer ? '#64748b' : transaction.category?.color || '#64748b' }}
+      {/* Desktop Layout */}
+      <div className="hidden md:flex items-center gap-4">
+        {/* Category Icon */}
+        <div 
+          className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
+          style={{ backgroundColor: categoryBgColor }}
         >
-          {isIncome ? '$' : isInvestment ? '📈' : isTransfer ? '↔' : transaction.category?.name?.charAt(0) || '?'}
-        </span>
-      </div>
-      
-      {/* Merchant & Details */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="font-medium text-slate-100 truncate">{displayName}</span>
-          {isTransfer && (
-            <Badge color="#64748b" size="sm">Transfer</Badge>
-          )}
-          {isIncome && (
-            <Badge color="#10b981" size="sm">Income</Badge>
-          )}
-          {isInvestment && (
-            <Badge color="#8b5cf6" size="sm">Investment</Badge>
-          )}
-          {transaction.is_split && (
-            <Badge color="#6366f1" size="sm">Split</Badge>
-          )}
-          {transaction.is_recurring && (
-            <Badge color="#10b981" size="sm">Recurring</Badge>
-          )}
-          {transaction.needs_review && (
-            <Badge color="#f59e0b" size="sm">
-              <AlertCircle className="h-3 w-3 mr-1 inline" />
-              Review
-            </Badge>
-          )}
+          <span className="text-sm" style={{ color: categoryColor }}>
+            {isIncome ? '$' : isInvestment ? '📈' : isTransfer ? '↔' : transaction.category?.name?.charAt(0) || '?'}
+          </span>
         </div>
-        {/* Show original description if different from display name */}
-        {transaction.original_description && 
-         transaction.original_description.toLowerCase() !== displayName.toLowerCase() && (
-          <div className="text-xs text-slate-500 truncate">
-            {transaction.original_description}
+        
+        {/* Merchant & Details */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-medium text-slate-100 truncate">{displayName}</span>
+            {isTransfer && <Badge color="#64748b" size="sm">Transfer</Badge>}
+            {isIncome && <Badge color="#10b981" size="sm">Income</Badge>}
+            {isInvestment && <Badge color="#8b5cf6" size="sm">Investment</Badge>}
+            {transaction.is_split && <Badge color="#6366f1" size="sm">Split</Badge>}
+            {transaction.is_recurring && <Badge color="#10b981" size="sm">Recurring</Badge>}
+            {transaction.needs_review && (
+              <Badge color="#f59e0b" size="sm">
+                <AlertCircle className="h-3 w-3 mr-1 inline" />
+                Review
+              </Badge>
+            )}
           </div>
-        )}
-        <div className="flex items-center gap-2 text-sm text-slate-400">
-          <span>{formatDate(transaction.date)}</span>
-          {transaction.category && (
-            <>
-              <span>•</span>
-              <span>{transaction.category.name}</span>
-            </>
+          {transaction.original_description && 
+           transaction.original_description.toLowerCase() !== displayName.toLowerCase() && (
+            <div className="text-xs text-slate-500 truncate">
+              {transaction.original_description}
+            </div>
           )}
-          {transaction.account && (
+          <div className="flex items-center gap-2 text-sm text-slate-400">
+            <span>{formatDate(transaction.date)}</span>
+            {transaction.category && (
+              <>
+                <span>•</span>
+                <span>{transaction.category.name}</span>
+              </>
+            )}
+            {transaction.account && (
+              <>
+                <span>•</span>
+                <span>{transaction.account.institution_name}</span>
+              </>
+            )}
+          </div>
+          {transaction.tags && transaction.tags.length > 0 && (
+            <div className="flex gap-1 mt-1">
+              {transaction.tags.map(tag => (
+                <Badge key={tag.id} color={tag.color} size="sm">
+                  {tag.name}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </div>
+        
+        {/* Amount */}
+        <div className={clsx(
+          'font-semibold tabular-nums',
+          isIncome ? 'text-emerald-400' : isInvestment ? 'text-violet-400' : isTransfer ? 'text-slate-500' : 'text-slate-100'
+        )}>
+          {isIncome ? '+' : '-'}{formatCurrency(Math.abs(transaction.amount))}
+        </div>
+        
+        {/* Actions */}
+        <div className="relative">
+          <button
+            ref={menuButtonRef}
+            onClick={handleToggleMenu}
+            className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-600 rounded-lg transition-colors"
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </button>
+          
+          {showMenu && (
             <>
-              <span>•</span>
-              <span>{transaction.account.institution_name}</span>
+              <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
+              <div className={clsx(
+                "absolute right-0 w-40 bg-midnight-700 border border-midnight-600 rounded-lg shadow-xl z-20 py-1",
+                openUpward ? "bottom-full mb-1" : "top-full mt-1"
+              )}>
+                <button
+                  onClick={handleEdit}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-midnight-600 transition-colors"
+                >
+                  <Edit2 className="h-4 w-4" />
+                  Edit
+                </button>
+                <button
+                  onClick={handleSplit}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-midnight-600 transition-colors"
+                >
+                  <Split className="h-4 w-4" />
+                  Split
+                </button>
+                <button
+                  onClick={handleEdit}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-midnight-600 transition-colors"
+                >
+                  <Tag className="h-4 w-4" />
+                  Add Tag
+                </button>
+              </div>
             </>
           )}
         </div>
-        {transaction.tags && transaction.tags.length > 0 && (
-          <div className="flex gap-1 mt-1">
-            {transaction.tags.map(tag => (
+      </div>
+
+      {/* Mobile Layout - Card Style */}
+      <div className="md:hidden">
+        {/* Top row: Icon, Merchant, Amount */}
+        <div className="flex items-start gap-3">
+          {/* Category Icon */}
+          <div 
+            className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
+            style={{ backgroundColor: categoryBgColor }}
+          >
+            <span className="text-sm" style={{ color: categoryColor }}>
+              {isIncome ? '$' : isInvestment ? '📈' : isTransfer ? '↔' : transaction.category?.name?.charAt(0) || '?'}
+            </span>
+          </div>
+          
+          {/* Merchant info */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between gap-2">
+              <span className="font-medium text-slate-100 truncate">{displayName}</span>
+              {/* Amount - top right on mobile for quick scanning */}
+              <span className={clsx(
+                'font-semibold tabular-nums text-right flex-shrink-0',
+                isIncome ? 'text-emerald-400' : isInvestment ? 'text-violet-400' : isTransfer ? 'text-slate-500' : 'text-slate-100'
+              )}>
+                {isIncome ? '+' : '-'}{formatCurrency(Math.abs(transaction.amount))}
+              </span>
+            </div>
+            
+            {/* Date and category */}
+            <div className="flex items-center gap-2 text-sm text-slate-400 mt-0.5">
+              <span>{formatDate(transaction.date)}</span>
+              {transaction.category && (
+                <>
+                  <span>•</span>
+                  <span className="truncate">{transaction.category.name}</span>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Badges row */}
+        {(isTransfer || isIncome || isInvestment || transaction.is_split || transaction.is_recurring || transaction.needs_review || (transaction.tags && transaction.tags.length > 0)) && (
+          <div className="flex flex-wrap gap-1.5 mt-2 ml-13">
+            {isTransfer && <Badge color="#64748b" size="sm">Transfer</Badge>}
+            {isIncome && <Badge color="#10b981" size="sm">Income</Badge>}
+            {isInvestment && <Badge color="#8b5cf6" size="sm">Investment</Badge>}
+            {transaction.is_split && <Badge color="#6366f1" size="sm">Split</Badge>}
+            {transaction.is_recurring && <Badge color="#10b981" size="sm">Recurring</Badge>}
+            {transaction.needs_review && (
+              <Badge color="#f59e0b" size="sm">
+                <AlertCircle className="h-3 w-3 mr-1 inline" />
+                Review
+              </Badge>
+            )}
+            {transaction.tags?.map(tag => (
               <Badge key={tag.id} color={tag.color} size="sm">
                 {tag.name}
               </Badge>
             ))}
           </div>
         )}
-      </div>
-      
-      {/* Amount */}
-      <div className={clsx(
-        'font-semibold tabular-nums',
-        isIncome ? 'text-emerald-400' : isInvestment ? 'text-violet-400' : isTransfer ? 'text-slate-500' : 'text-slate-100'
-      )}>
-        {isIncome ? '+' : '-'}{formatCurrency(Math.abs(transaction.amount))}
-      </div>
-      
-      {/* Actions */}
-      <div className="relative">
-        <button
-          ref={menuButtonRef}
-          onClick={handleToggleMenu}
-          className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-600 rounded-lg transition-colors"
-        >
-          <MoreHorizontal className="h-4 w-4" />
-        </button>
-        
-        {showMenu && (
-          <>
-            <div 
-              className="fixed inset-0 z-10" 
-              onClick={() => setShowMenu(false)} 
-            />
-            <div className={clsx(
-              "absolute right-0 w-40 bg-midnight-700 border border-midnight-600 rounded-lg shadow-xl z-20 py-1",
-              openUpward ? "bottom-full mb-1" : "top-full mt-1"
-            )}>
-              <button
-                onClick={handleEdit}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-midnight-600 transition-colors"
-              >
-                <Edit2 className="h-4 w-4" />
-                Edit
-              </button>
-              <button
-                onClick={handleSplit}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-midnight-600 transition-colors"
-              >
-                <Split className="h-4 w-4" />
-                Split
-              </button>
-              <button
-                onClick={handleEdit}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-midnight-600 transition-colors"
-              >
-                <Tag className="h-4 w-4" />
-                Add Tag
-              </button>
-            </div>
-          </>
-        )}
+
+        {/* Mobile action buttons - swipe hint or tap to expand could be added later */}
+        <div className="flex justify-end gap-1 mt-2 -mr-1">
+          <button
+            onClick={handleEdit}
+            className="p-2.5 text-slate-400 hover:text-slate-200 active:bg-midnight-600 rounded-lg transition-colors touch-target"
+            aria-label="Edit transaction"
+          >
+            <Edit2 className="h-4 w-4" />
+          </button>
+          <button
+            onClick={handleSplit}
+            className="p-2.5 text-slate-400 hover:text-slate-200 active:bg-midnight-600 rounded-lg transition-colors touch-target"
+            aria-label="Split transaction"
+          >
+            <Split className="h-4 w-4" />
+          </button>
+        </div>
       </div>
     </div>
   );
 };
-

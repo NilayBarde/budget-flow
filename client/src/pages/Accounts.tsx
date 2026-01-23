@@ -7,21 +7,21 @@ export const Accounts = () => {
   const { data: accounts, isLoading } = useAccounts();
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-4 md:space-y-6">
+      {/* Header - Stacked on mobile */}
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-slate-100">Accounts</h1>
+          <h1 className="text-2xl md:text-3xl font-bold text-slate-100">Accounts</h1>
           <p className="text-slate-400 mt-1">Manage your connected bank accounts</p>
         </div>
         <PlaidLinkButton />
       </div>
 
       {/* Info Card */}
-      <Card className="bg-gradient-to-r from-accent-500/10 to-midnight-800 border-accent-500/30">
-        <div className="flex items-start gap-4">
-          <div className="p-3 bg-accent-500/20 rounded-xl">
-            <CreditCard className="h-6 w-6 text-accent-400" />
+      <Card className="bg-gradient-to-r from-accent-500/10 to-midnight-800 border-accent-500/30" padding="sm">
+        <div className="flex flex-col md:flex-row md:items-start gap-3 md:gap-4">
+          <div className="p-2 md:p-3 bg-accent-500/20 rounded-xl w-fit">
+            <CreditCard className="h-5 w-5 md:h-6 md:w-6 text-accent-400" />
           </div>
           <div className="flex-1">
             <h3 className="font-semibold text-slate-100">Connect Your Banks</h3>
@@ -45,7 +45,7 @@ export const Accounts = () => {
       {isLoading ? (
         <Spinner className="py-12" />
       ) : accounts && accounts.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
           {accounts.map(account => (
             <AccountCard key={account.id} account={account} />
           ))}
@@ -61,4 +61,3 @@ export const Accounts = () => {
     </div>
   );
 };
-

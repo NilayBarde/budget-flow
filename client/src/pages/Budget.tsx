@@ -64,55 +64,57 @@ export const Budget = () => {
   const remaining = totalBudgeted - totalSpent;
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-4 md:space-y-6">
+      {/* Header - Stacked on mobile */}
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-slate-100">Budget</h1>
+          <h1 className="text-2xl md:text-3xl font-bold text-slate-100">Budget</h1>
           <p className="text-slate-400 mt-1">Set and track your spending limits</p>
         </div>
-        <Button onClick={handleAddGoal}>
+        <Button onClick={handleAddGoal} className="w-full md:w-auto">
           <Plus className="h-4 w-4 mr-2" />
           Add Budget
         </Button>
       </div>
 
       {/* Month Selector */}
-      <div className="flex items-center justify-between bg-midnight-800 border border-midnight-600 rounded-xl p-4">
+      <div className="flex items-center justify-between bg-midnight-800 border border-midnight-600 rounded-xl p-3 md:p-4">
         <button
           onClick={handlePrevMonth}
-          className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 rounded-lg transition-colors"
+          className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 active:bg-midnight-600 rounded-lg transition-colors touch-target"
+          aria-label="Previous month"
         >
           <ChevronLeft className="h-5 w-5" />
         </button>
-        <h2 className="text-xl font-semibold text-slate-100">
+        <h2 className="text-lg md:text-xl font-semibold text-slate-100">
           {MONTHS[currentDate.month - 1]} {currentDate.year}
         </h2>
         <button
           onClick={handleNextMonth}
-          className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 rounded-lg transition-colors"
+          className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 active:bg-midnight-600 rounded-lg transition-colors touch-target"
+          aria-label="Next month"
         >
           <ChevronRight className="h-5 w-5" />
         </button>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card>
-          <p className="text-sm text-slate-400">Total Budgeted</p>
-          <p className="text-2xl font-bold text-slate-100 mt-1">
+      {/* Summary Cards - Stack vertically on very small screens */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
+        <Card padding="sm">
+          <p className="text-xs md:text-sm text-slate-400">Total Budgeted</p>
+          <p className="text-xl md:text-2xl font-bold text-slate-100 mt-0.5 md:mt-1">
             {formatCurrency(totalBudgeted)}
           </p>
         </Card>
-        <Card>
-          <p className="text-sm text-slate-400">Total Spent</p>
-          <p className="text-2xl font-bold text-slate-100 mt-1">
+        <Card padding="sm">
+          <p className="text-xs md:text-sm text-slate-400">Total Spent</p>
+          <p className="text-xl md:text-2xl font-bold text-slate-100 mt-0.5 md:mt-1">
             {formatCurrency(totalSpent)}
           </p>
         </Card>
-        <Card>
-          <p className="text-sm text-slate-400">Remaining</p>
-          <p className={`text-2xl font-bold mt-1 ${remaining >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+        <Card padding="sm">
+          <p className="text-xs md:text-sm text-slate-400">Remaining</p>
+          <p className={`text-xl md:text-2xl font-bold mt-0.5 md:mt-1 ${remaining >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
             {formatCurrency(remaining)}
           </p>
         </Card>
@@ -122,7 +124,7 @@ export const Budget = () => {
       {isLoading ? (
         <Spinner className="py-12" />
       ) : goals && goals.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
           {goals.map(goal => (
             <BudgetCard key={goal.id} goal={goal} onEdit={handleEditGoal} />
           ))}
@@ -151,4 +153,3 @@ export const Budget = () => {
     </div>
   );
 };
-

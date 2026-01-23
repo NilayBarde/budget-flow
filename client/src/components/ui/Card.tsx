@@ -17,7 +17,7 @@ export const Card = ({ children, className, padding = 'md', ...props }: CardProp
   return (
     <div 
       className={clsx(
-        'bg-midnight-800 border border-midnight-600 rounded-xl',
+        'bg-midnight-800 border border-midnight-600 rounded-xl relative',
         paddingStyles[padding],
         className
       )}
@@ -35,10 +35,10 @@ interface CardHeaderProps {
 }
 
 export const CardHeader = ({ title, subtitle, action }: CardHeaderProps) => (
-  <div className="flex items-center justify-between mb-4">
+  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between mb-4">
     <div>
-      <h3 className="text-lg font-semibold text-slate-100">{title}</h3>
-      {subtitle && <p className="text-sm text-slate-400">{subtitle}</p>}
+      <h3 className="text-base md:text-lg font-semibold text-slate-100">{title}</h3>
+      {subtitle && <p className="text-xs md:text-sm text-slate-400">{subtitle}</p>}
     </div>
     {action}
   </div>

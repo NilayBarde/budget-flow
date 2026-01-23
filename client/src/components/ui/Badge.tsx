@@ -30,8 +30,9 @@ export const Badge = ({ children, color = '#6366f1', variant = 'filled', size = 
       {onRemove && (
         <button 
           onClick={onRemove}
-          className="ml-0.5 hover:opacity-70 transition-opacity"
+          className="ml-0.5 hover:opacity-70 active:opacity-50 transition-opacity p-0.5 -mr-1"
           type="button"
+          aria-label="Remove"
         >
           ×
         </button>

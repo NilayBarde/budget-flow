@@ -137,12 +137,12 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction, allTransact
         {/* Show apply to all option only if there are similar transactions and category changed */}
         {similarTransactions.length > 0 && categoryChanged && (
           <div className="rounded-lg border border-midnight-600 bg-midnight-800/50 p-3 space-y-3">
-            <label className="flex items-center gap-2 cursor-pointer">
+            <label className="flex items-start gap-2 cursor-pointer">
               <input
                 type="checkbox"
                 checked={applyToAll}
                 onChange={e => setApplyToAll(e.target.checked)}
-                className="w-4 h-4 rounded border-slate-600 bg-midnight-700 text-cyan-500 focus:ring-cyan-500/20"
+                className="w-5 h-5 md:w-4 md:h-4 mt-0.5 rounded border-slate-600 bg-midnight-700 text-cyan-500 focus:ring-cyan-500/20"
               />
               <span className="text-sm text-slate-300">
                 Also recategorize {similarTransactions.length} other{' '}
@@ -154,7 +154,7 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction, allTransact
             </label>
             
             {applyToAll && (
-              <div className="pl-6 space-y-1 max-h-32 overflow-y-auto">
+              <div className="pl-7 md:pl-6 space-y-1 max-h-32 overflow-y-auto">
                 {similarTransactions.slice(0, 5).map(t => (
                   <div key={t.id} className="flex justify-between text-xs text-slate-400">
                     <span>{formatDate(t.date)}</span>
@@ -202,7 +202,7 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction, allTransact
           placeholder="Add notes..."
         />
 
-        <div className="flex gap-3 pt-4">
+        <div className="flex flex-col-reverse md:flex-row gap-3 pt-4">
           <Button variant="secondary" onClick={onClose} className="flex-1">
             Cancel
           </Button>
@@ -218,4 +218,3 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction, allTransact
     </Modal>
   );
 };
-

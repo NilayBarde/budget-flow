@@ -76,32 +76,35 @@ export const Transactions = () => {
   }, [transactions]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 md:space-y-6">
+      {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-slate-100">Transactions</h1>
-        <p className="text-slate-400 mt-1">
-          {transactions?.length || 0} transactions • 
-          <span className="text-rose-400 ml-1">-${totals.expenses.toFixed(2)}</span>
+        <h1 className="text-2xl md:text-3xl font-bold text-slate-100">Transactions</h1>
+        <p className="text-slate-400 mt-1 text-sm md:text-base">
+          <span>{transactions?.length || 0} transactions</span>
+          <span className="hidden sm:inline"> • </span>
+          <br className="sm:hidden" />
+          <span className="text-rose-400">-${totals.expenses.toFixed(2)}</span>
           <span className="text-emerald-400 ml-2">+${totals.income.toFixed(2)}</span>
           {totals.investments > 0 && (
-            <span className="text-violet-400 ml-2">(${totals.investments.toFixed(2)} invested)</span>
+            <span className="text-violet-400 ml-2 hidden md:inline">(${totals.investments.toFixed(2)} invested)</span>
           )}
           {totals.transfers > 0 && (
-            <span className="text-slate-500 ml-2">(${totals.transfers.toFixed(2)} transfers)</span>
+            <span className="text-slate-500 ml-2 hidden md:inline">(${totals.transfers.toFixed(2)} transfers)</span>
           )}
         </p>
       </div>
 
-      {/* Transaction Type Tabs */}
-      <div className="flex gap-2 bg-midnight-800 rounded-xl p-1 w-fit">
+      {/* Transaction Type Tabs - Horizontally scrollable on mobile */}
+      <div className="scroll-x-mobile gap-1 md:gap-2 bg-midnight-800 rounded-xl p-1 md:w-fit">
         {TYPE_TABS.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setTypeFilter(tab.id)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            className={`flex-shrink-0 px-3 md:px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
               typeFilter === tab.id
                 ? 'bg-primary-600 text-white'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-midnight-700'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-midnight-700 active:bg-midnight-600'
             }`}
           >
             {tab.label}
@@ -139,4 +142,3 @@ export const Transactions = () => {
     </div>
   );
 };
-

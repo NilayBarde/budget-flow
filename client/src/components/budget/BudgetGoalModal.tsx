@@ -111,12 +111,12 @@ export const BudgetGoalModal = ({ isOpen, onClose, goal, month, year }: BudgetGo
         />
 
         {!isEditing && (
-          <label className="flex items-center gap-2 cursor-pointer">
+          <label className="flex items-center gap-2 cursor-pointer py-1">
             <input
               type="checkbox"
               checked={applyToAllMonths}
               onChange={e => setApplyToAllMonths(e.target.checked)}
-              className="w-4 h-4 rounded border-slate-600 bg-midnight-700 text-cyan-500 focus:ring-cyan-500/20"
+              className="w-5 h-5 md:w-4 md:h-4 rounded border-slate-600 bg-midnight-700 text-cyan-500 focus:ring-cyan-500/20"
             />
             <span className="text-sm text-slate-300">
               Apply to all months in {year}
@@ -124,12 +124,13 @@ export const BudgetGoalModal = ({ isOpen, onClose, goal, month, year }: BudgetGo
           </label>
         )}
 
-        <div className="flex gap-3 pt-4">
+        <div className="flex flex-col-reverse md:flex-row gap-3 pt-4">
           {isEditing && (
             <Button
               variant="danger"
               onClick={handleDelete}
               isLoading={deleteGoal.isPending}
+              className="md:flex-none"
             >
               Delete
             </Button>
@@ -150,4 +151,3 @@ export const BudgetGoalModal = ({ isOpen, onClose, goal, month, year }: BudgetGo
     </Modal>
   );
 };
-

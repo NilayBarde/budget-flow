@@ -76,15 +76,15 @@ export const Dashboard = () => {
   }
 
   return (
-    <div className="space-y-8">
-      {/* Header with Month Selector */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-6 md:space-y-8">
+      {/* Header with Month Selector - Stacked on mobile */}
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-slate-100">Dashboard</h1>
+          <h1 className="text-2xl md:text-3xl font-bold text-slate-100">Dashboard</h1>
           <p className="text-slate-400 mt-1">Your financial overview</p>
         </div>
         
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 md:gap-3">
           {/* Refresh Button */}
           <Button
             variant="ghost"
@@ -98,19 +98,21 @@ export const Dashboard = () => {
           </Button>
           
           {/* Month Selector */}
-          <div className="flex items-center gap-2 bg-midnight-800 border border-midnight-600 rounded-xl p-2">
+          <div className="flex items-center gap-1 md:gap-2 bg-midnight-800 border border-midnight-600 rounded-xl p-1.5 md:p-2">
             <button
               onClick={handlePrevMonth}
-              className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 rounded-lg transition-colors"
+              className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 active:bg-midnight-600 rounded-lg transition-colors touch-target"
+              aria-label="Previous month"
             >
               <ChevronLeft className="h-5 w-5" />
             </button>
-            <span className="text-lg font-semibold text-slate-100 px-4 min-w-[160px] text-center">
+            <span className="text-base md:text-lg font-semibold text-slate-100 px-2 md:px-4 min-w-[120px] md:min-w-[160px] text-center">
               {MONTHS[currentDate.month - 1]} {currentDate.year}
             </span>
             <button
               onClick={handleNextMonth}
-              className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 rounded-lg transition-colors"
+              className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 active:bg-midnight-600 rounded-lg transition-colors touch-target"
+              aria-label="Next month"
             >
               <ChevronRight className="h-5 w-5" />
             </button>
@@ -118,76 +120,93 @@ export const Dashboard = () => {
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <Card className="bg-gradient-to-br from-midnight-800 to-midnight-900">
-          <div className="flex items-center justify-between">
+      {/* Stats Cards - 2x2 grid on mobile, 4 across on desktop */}
+      <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6">
+        <Card className="bg-gradient-to-br from-midnight-800 to-midnight-900" padding="sm">
+          <div className="flex items-center justify-between md:block">
             <div>
-              <p className="text-sm text-slate-400">Total Spent</p>
-              <p className="text-2xl font-bold text-slate-100 mt-1">
+              <p className="text-xs md:text-sm text-slate-400">Total Spent</p>
+              <p className="text-lg md:text-2xl font-bold text-slate-100 mt-0.5 md:mt-1">
                 {formatCurrency(totalSpent)}
               </p>
             </div>
+            <div className="p-2 md:p-3 bg-rose-500/20 rounded-xl md:hidden">
+              <ArrowUpRight className="h-5 w-5 text-rose-400" />
+            </div>
+          </div>
+          <div className="hidden md:block absolute top-6 right-6">
             <div className="p-3 bg-rose-500/20 rounded-xl">
               <ArrowUpRight className="h-6 w-6 text-rose-400" />
             </div>
           </div>
         </Card>
 
-        <Card className="bg-gradient-to-br from-midnight-800 to-midnight-900">
-          <div className="flex items-center justify-between">
+        <Card className="bg-gradient-to-br from-midnight-800 to-midnight-900" padding="sm">
+          <div className="flex items-center justify-between md:block">
             <div>
-              <p className="text-sm text-slate-400">Total Income</p>
-              <p className="text-2xl font-bold text-slate-100 mt-1">
+              <p className="text-xs md:text-sm text-slate-400">Total Income</p>
+              <p className="text-lg md:text-2xl font-bold text-slate-100 mt-0.5 md:mt-1">
                 {formatCurrency(totalIncome)}
               </p>
             </div>
+            <div className="p-2 md:p-3 bg-emerald-500/20 rounded-xl md:hidden">
+              <ArrowDownRight className="h-5 w-5 text-emerald-400" />
+            </div>
+          </div>
+          <div className="hidden md:block absolute top-6 right-6">
             <div className="p-3 bg-emerald-500/20 rounded-xl">
               <ArrowDownRight className="h-6 w-6 text-emerald-400" />
             </div>
           </div>
         </Card>
 
-        <Card className="bg-gradient-to-br from-midnight-800 to-midnight-900">
-          <div className="flex items-center justify-between">
+        <Card className="bg-gradient-to-br from-midnight-800 to-midnight-900" padding="sm">
+          <div className="flex items-center justify-between md:block">
             <div>
-              <p className="text-sm text-slate-400">Total Invested</p>
-              <p className="text-2xl font-bold text-violet-400 mt-1">
+              <p className="text-xs md:text-sm text-slate-400">Total Invested</p>
+              <p className="text-lg md:text-2xl font-bold text-violet-400 mt-0.5 md:mt-1">
                 {formatCurrency(totalInvested)}
               </p>
             </div>
+            <div className="p-2 md:p-3 bg-violet-500/20 rounded-xl md:hidden">
+              <TrendingUp className="h-5 w-5 text-violet-400" />
+            </div>
+          </div>
+          <div className="hidden md:block absolute top-6 right-6">
             <div className="p-3 bg-violet-500/20 rounded-xl">
               <TrendingUp className="h-6 w-6 text-violet-400" />
             </div>
           </div>
         </Card>
 
-        <Card className="bg-gradient-to-br from-midnight-800 to-midnight-900">
-          <div className="flex items-center justify-between">
+        <Card className="bg-gradient-to-br from-midnight-800 to-midnight-900" padding="sm">
+          <div className="flex items-center justify-between md:block">
             <div>
-              <p className="text-sm text-slate-400">Net Savings</p>
-              <p className={`text-2xl font-bold mt-1 ${netSavings >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+              <p className="text-xs md:text-sm text-slate-400">Net Savings</p>
+              <p className={`text-lg md:text-2xl font-bold mt-0.5 md:mt-1 ${netSavings >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                 {formatCurrency(netSavings)}
               </p>
             </div>
+            <div className={`p-2 md:p-3 rounded-xl md:hidden ${netSavings >= 0 ? 'bg-emerald-500/20' : 'bg-rose-500/20'}`}>
+              <Wallet className={`h-5 w-5 ${netSavings >= 0 ? 'text-emerald-400' : 'text-rose-400'}`} />
+            </div>
+          </div>
+          <div className="hidden md:block absolute top-6 right-6">
             <div className={`p-3 rounded-xl ${netSavings >= 0 ? 'bg-emerald-500/20' : 'bg-rose-500/20'}`}>
-              {netSavings >= 0 
-                ? <Wallet className="h-6 w-6 text-emerald-400" />
-                : <Wallet className="h-6 w-6 text-rose-400" />
-              }
+              <Wallet className={`h-6 w-6 ${netSavings >= 0 ? 'text-emerald-400' : 'text-rose-400'}`} />
             </div>
           </div>
         </Card>
       </div>
 
-      {/* Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* Charts Row - Full width stacked on mobile */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
         {/* Spending by Category */}
-        <Card>
+        <Card padding="sm">
           <CardHeader title="Spending by Category" subtitle={`${MONTHS[currentDate.month - 1]} ${currentDate.year}`} />
           {categoryData.length > 0 ? (
-            <div className="flex items-center gap-6">
-              <div className="w-40 h-40">
+            <div className="flex flex-col md:flex-row md:items-center gap-4 md:gap-6">
+              <div className="w-full md:w-40 h-40 mx-auto md:mx-0">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
@@ -196,8 +215,8 @@ export const Dashboard = () => {
                       nameKey="category.name"
                       cx="50%"
                       cy="50%"
-                      innerRadius={40}
-                      outerRadius={70}
+                      innerRadius={35}
+                      outerRadius={60}
                       paddingAngle={2}
                     >
                       {categoryData.map((entry, index) => (
@@ -223,12 +242,12 @@ export const Dashboard = () => {
                   <div key={item.category.id} className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <div 
-                        className="w-3 h-3 rounded-full"
+                        className="w-3 h-3 rounded-full flex-shrink-0"
                         style={{ backgroundColor: item.category.color }}
                       />
-                      <span className="text-sm text-slate-300">{item.category.name}</span>
+                      <span className="text-sm text-slate-300 truncate">{item.category.name}</span>
                     </div>
-                    <span className="text-sm font-medium text-slate-100">
+                    <span className="text-sm font-medium text-slate-100 ml-2">
                       {formatCurrency(item.amount)}
                     </span>
                   </div>
@@ -241,17 +260,17 @@ export const Dashboard = () => {
         </Card>
 
         {/* Budget Status */}
-        <Card>
+        <Card padding="sm">
           <CardHeader title="Budget Status" subtitle="Categories to watch" />
           {topOverBudget.length > 0 ? (
             <div className="space-y-4">
               {topOverBudget.map((goal) => (
                 <div key={goal.id}>
                   <div className="flex justify-between items-center mb-2">
-                    <span className="text-sm font-medium text-slate-200">
+                    <span className="text-sm font-medium text-slate-200 truncate">
                       {goal.category?.name}
                     </span>
-                    <span className="text-sm text-slate-400">
+                    <span className="text-xs md:text-sm text-slate-400 ml-2 flex-shrink-0">
                       {formatCurrency(goal.spent || 0)} / {formatCurrency(goal.limit_amount)}
                     </span>
                   </div>

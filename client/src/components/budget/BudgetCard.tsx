@@ -13,27 +13,28 @@ export const BudgetCard = ({ goal, onEdit }: BudgetCardProps) => {
   
   return (
     <Card 
-      className="hover:border-midnight-500 transition-colors cursor-pointer"
+      className="hover:border-midnight-500 active:bg-midnight-700/50 transition-colors cursor-pointer"
       onClick={() => onEdit(goal)}
+      padding="sm"
     >
       <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 md:gap-3 min-w-0">
           <div 
-            className="w-10 h-10 rounded-full flex items-center justify-center"
+            className="w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center flex-shrink-0"
             style={{ backgroundColor: `${goal.category?.color || '#64748b'}20` }}
           >
-            <span style={{ color: goal.category?.color || '#64748b' }}>
+            <span className="text-sm" style={{ color: goal.category?.color || '#64748b' }}>
               {goal.category?.name?.charAt(0) || '?'}
             </span>
           </div>
-          <div>
-            <h3 className="font-medium text-slate-100">{goal.category?.name || 'Unknown'}</h3>
-            <p className="text-sm text-slate-400">
-              {formatCurrency(spent)} of {formatCurrency(goal.limit_amount)}
+          <div className="min-w-0">
+            <h3 className="font-medium text-slate-100 truncate">{goal.category?.name || 'Unknown'}</h3>
+            <p className="text-xs md:text-sm text-slate-400 truncate">
+              {formatCurrency(spent)} / {formatCurrency(goal.limit_amount)}
             </p>
           </div>
         </div>
-        <span className="text-lg font-semibold text-slate-100">
+        <span className="text-base md:text-lg font-semibold text-slate-100 flex-shrink-0 ml-2">
           {percentage.toFixed(0)}%
         </span>
       </div>
@@ -41,4 +42,3 @@ export const BudgetCard = ({ goal, onEdit }: BudgetCardProps) => {
     </Card>
   );
 };
-

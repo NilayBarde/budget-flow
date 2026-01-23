@@ -1,5 +1,6 @@
-import { Search, ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react';
-import { Input, Select } from '../ui';
+import { useState, useCallback } from 'react';
+import { Search, ChevronLeft, ChevronRight, AlertCircle, Filter, X } from 'lucide-react';
+import { Input, Select, Button } from '../ui';
 import type { Category, Account, Tag, TransactionFilters as Filters } from '../../types';
 import { MONTHS } from '../../utils/constants';
 import clsx from 'clsx';
@@ -19,10 +20,12 @@ export const TransactionFilters = ({
   accounts,
   tags,
 }: TransactionFiltersProps) => {
+  const [showFilters, setShowFilters] = useState(false);
+  
   const currentMonth = filters.month || new Date().getMonth() + 1;
   const currentYear = filters.year || new Date().getFullYear();
 
-  const handlePrevMonth = () => {
+  const handlePrevMonth = useCallback(() => {
     let newMonth = currentMonth - 1;
     let newYear = currentYear;
     if (newMonth < 1) {
@@ -30,9 +33,9 @@ export const TransactionFilters = ({
       newYear -= 1;
     }
     onFilterChange({ ...filters, month: newMonth, year: newYear });
-  };
+  }, [currentMonth, currentYear, filters, onFilterChange]);
 
-  const handleNextMonth = () => {
+  const handleNextMonth = useCallback(() => {
     let newMonth = currentMonth + 1;
     let newYear = currentYear;
     if (newMonth > 12) {
@@ -40,7 +43,11 @@ export const TransactionFilters = ({
       newYear += 1;
     }
     onFilterChange({ ...filters, month: newMonth, year: newYear });
-  };
+  }, [currentMonth, currentYear, filters, onFilterChange]);
+
+  const toggleFilters = useCallback(() => {
+    setShowFilters(prev => !prev);
+  }, []);
 
   const categoryOptions = [
     { value: '', label: 'All Categories' },
@@ -57,29 +64,121 @@ export const TransactionFilters = ({
     ...tags.map(t => ({ value: t.id, label: t.name })),
   ];
 
+  // Count active filters
+  const activeFilterCount = [
+    filters.category_id,
+    filters.account_id,
+    filters.tag_id,
+    filters.needs_review,
+  ].filter(Boolean).length;
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {/* Month Selector */}
-      <div className="flex items-center justify-between bg-midnight-800 border border-midnight-600 rounded-xl p-4">
+      <div className="flex items-center justify-between bg-midnight-800 border border-midnight-600 rounded-xl p-3 md:p-4">
         <button
           onClick={handlePrevMonth}
-          className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 rounded-lg transition-colors"
+          className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 active:bg-midnight-600 rounded-lg transition-colors touch-target"
+          aria-label="Previous month"
         >
           <ChevronLeft className="h-5 w-5" />
         </button>
-        <h2 className="text-xl font-semibold text-slate-100">
+        <h2 className="text-lg md:text-xl font-semibold text-slate-100">
           {MONTHS[currentMonth - 1]} {currentYear}
         </h2>
         <button
           onClick={handleNextMonth}
-          className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 rounded-lg transition-colors"
+          className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 active:bg-midnight-600 rounded-lg transition-colors touch-target"
+          aria-label="Next month"
         >
           <ChevronRight className="h-5 w-5" />
         </button>
       </div>
 
-      {/* Filter Bar */}
-      <div className="flex flex-wrap gap-4">
+      {/* Search and Filter Toggle - Mobile */}
+      <div className="flex gap-2 md:hidden">
+        <div className="flex-1 relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+          <Input
+            placeholder="Search..."
+            value={filters.search || ''}
+            onChange={e => onFilterChange({ ...filters, search: e.target.value })}
+            className="pl-10 w-full"
+          />
+        </div>
+        <Button
+          variant="secondary"
+          onClick={toggleFilters}
+          className={clsx(
+            "relative flex-shrink-0",
+            showFilters && "bg-accent-500/20 border-accent-500"
+          )}
+        >
+          <Filter className="h-4 w-4" />
+          {activeFilterCount > 0 && (
+            <span className="absolute -top-1 -right-1 w-5 h-5 bg-accent-500 text-white text-xs rounded-full flex items-center justify-center">
+              {activeFilterCount}
+            </span>
+          )}
+        </Button>
+      </div>
+
+      {/* Mobile Filters Panel */}
+      {showFilters && (
+        <div className="md:hidden bg-midnight-800 border border-midnight-600 rounded-xl p-4 space-y-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="font-medium text-slate-200">Filters</span>
+            <button
+              onClick={toggleFilters}
+              className="p-1 text-slate-400 hover:text-slate-200"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          
+          <div className="space-y-3">
+            <Select
+              value={filters.category_id || ''}
+              onChange={e => onFilterChange({ ...filters, category_id: e.target.value })}
+              options={categoryOptions}
+              className="w-full"
+            />
+            
+            <Select
+              value={filters.account_id || ''}
+              onChange={e => onFilterChange({ ...filters, account_id: e.target.value })}
+              options={accountOptions}
+              className="w-full"
+            />
+            
+            <Select
+              value={filters.tag_id || ''}
+              onChange={e => onFilterChange({ ...filters, tag_id: e.target.value })}
+              options={tagOptions}
+              className="w-full"
+            />
+            
+            <button
+              onClick={() => onFilterChange({ 
+                ...filters, 
+                needs_review: filters.needs_review ? undefined : true 
+              })}
+              className={clsx(
+                "w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border transition-colors",
+                filters.needs_review
+                  ? "bg-amber-500/20 border-amber-500 text-amber-400"
+                  : "bg-midnight-900 border-midnight-600 text-slate-400"
+              )}
+            >
+              <AlertCircle className="h-4 w-4" />
+              <span className="text-sm font-medium">Needs Review</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Desktop Filter Bar */}
+      <div className="hidden md:flex flex-wrap gap-4">
         <div className="flex-1 min-w-[200px]">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
@@ -136,4 +235,3 @@ export const TransactionFilters = ({
     </div>
   );
 };
-

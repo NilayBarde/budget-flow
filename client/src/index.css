@@ -40,10 +40,17 @@
     @apply bg-midnight-950 text-slate-100 font-body antialiased;
     margin: 0;
     min-height: 100vh;
+    /* Prevent pull-to-refresh on mobile */
+    overscroll-behavior: none;
   }
   
   h1, h2, h3, h4, h5, h6 {
     @apply font-display font-semibold;
+  }
+
+  /* Safe area support for notched devices */
+  html {
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   }
 }
 
@@ -67,4 +74,59 @@
   .badge {
     @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
   }
+
+  /* Safe area bottom padding for fixed bottom elements */
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+
+  /* Touch-friendly minimum tap target */
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+}
+
+@layer utilities {
+  /* Horizontal scroll container for tabs/pills on mobile */
+  .scroll-x-mobile {
+    @apply flex overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0 md:overflow-visible md:flex-wrap;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scroll-x-mobile::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Animations */
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-slideUp {
+  animation: slideUp 0.3s ease-out;
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.2s ease-out;
 }

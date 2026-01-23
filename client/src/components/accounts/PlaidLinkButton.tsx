@@ -153,6 +153,7 @@ const PlaidLinkOpener = ({
       onClick={() => open()}
       disabled={!ready}
       isLoading={isLoading}
+      className="w-full md:w-auto"
     >
       <Plus className="h-4 w-4 mr-2" />
       Connect Account
@@ -324,7 +325,7 @@ export const PlaidLinkButton = () => {
           isLoading={exchangeToken.isPending}
         />
       ) : (
-        <Button disabled isLoading={createLinkToken.isPending}>
+        <Button disabled isLoading={createLinkToken.isPending} className="w-full md:w-auto">
           <Plus className="h-4 w-4 mr-2" />
           Connect Account
         </Button>
@@ -332,14 +333,14 @@ export const PlaidLinkButton = () => {
       
       {/* OAuth warning for HTTP development */}
       {showOAuthWarning && (
-        <p className="text-xs text-amber-600 bg-amber-50 p-2 rounded">
+        <p className="text-xs text-amber-400 bg-amber-500/10 p-2 rounded-lg">
           ⚠️ OAuth banks (Amex, etc.) won't work on HTTP. Use sandbox banks like "First Platypus Bank" for testing, or set up HTTPS (ngrok).
         </p>
       )}
       
       {/* Only show errors when not in a loading state */}
       {error && !isLoading && (
-        <div className="text-sm text-red-500 whitespace-pre-line">
+        <div className="text-sm text-red-400 whitespace-pre-line bg-red-500/10 p-3 rounded-lg">
           {error}
           {linkSessionId && (
             <div className="mt-2 text-xs text-slate-400">
@@ -351,4 +352,3 @@ export const PlaidLinkButton = () => {
     </div>
   );
 };
-

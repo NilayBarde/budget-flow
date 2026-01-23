@@ -67,14 +67,14 @@ export const Tags = () => {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-4 md:space-y-6">
+      {/* Header - Stacked on mobile */}
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-slate-100">Tags</h1>
+          <h1 className="text-2xl md:text-3xl font-bold text-slate-100">Tags</h1>
           <p className="text-slate-400 mt-1">Create custom tags to organize your transactions</p>
         </div>
-        <Button onClick={() => handleOpenModal()}>
+        <Button onClick={() => handleOpenModal()} className="w-full md:w-auto">
           <Plus className="h-4 w-4 mr-2" />
           Create Tag
         </Button>
@@ -82,26 +82,28 @@ export const Tags = () => {
 
       {/* Tags Grid */}
       {tags && tags.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
           {tags.map(tag => (
-            <Card key={tag.id} className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
+            <Card key={tag.id} className="flex items-center justify-between" padding="sm">
+              <div className="flex items-center gap-3 min-w-0">
                 <div 
-                  className="w-4 h-4 rounded-full"
+                  className="w-4 h-4 rounded-full flex-shrink-0"
                   style={{ backgroundColor: tag.color }}
                 />
-                <span className="font-medium text-slate-100">{tag.name}</span>
+                <span className="font-medium text-slate-100 truncate">{tag.name}</span>
               </div>
-              <div className="flex gap-1">
+              <div className="flex gap-1 flex-shrink-0">
                 <button
                   onClick={() => handleOpenModal(tag)}
-                  className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 rounded-lg transition-colors"
+                  className="p-2.5 text-slate-400 hover:text-slate-200 active:bg-midnight-700 rounded-lg transition-colors touch-target"
+                  aria-label={`Edit ${tag.name}`}
                 >
                   <Edit2 className="h-4 w-4" />
                 </button>
                 <button
                   onClick={() => handleDelete(tag.id)}
-                  className="p-2 text-slate-400 hover:text-rose-400 hover:bg-midnight-700 rounded-lg transition-colors"
+                  className="p-2.5 text-slate-400 hover:text-rose-400 active:bg-midnight-700 rounded-lg transition-colors touch-target"
+                  aria-label={`Delete ${tag.name}`}
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
@@ -145,10 +147,11 @@ export const Tags = () => {
                   key={c}
                   type="button"
                   onClick={() => setColor(c)}
-                  className={`w-8 h-8 rounded-full transition-transform ${
+                  className={`w-9 h-9 md:w-8 md:h-8 rounded-full transition-transform touch-target ${
                     color === c ? 'ring-2 ring-white ring-offset-2 ring-offset-midnight-800 scale-110' : ''
                   }`}
                   style={{ backgroundColor: c }}
+                  aria-label={`Select color ${c}`}
                 />
               ))}
             </div>
@@ -177,4 +180,3 @@ export const Tags = () => {
     </div>
   );
 };
-

@@ -97,30 +97,35 @@ export const Settings = () => {
   }, []);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 md:space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-slate-100">Settings</h1>
+        <h1 className="text-2xl md:text-3xl font-bold text-slate-100">Settings</h1>
         <p className="text-slate-400 mt-1">Manage your preferences and data</p>
       </div>
 
       {/* Categories */}
-      <Card>
+      <Card padding="sm">
         <CardHeader 
           title="Categories" 
           subtitle="Default categories for organizing transactions"
           action={
-            <Button onClick={() => setIsModalOpen(true)}>
+            <Button onClick={() => setIsModalOpen(true)} size="sm" className="hidden md:flex">
               <Plus className="h-4 w-4 mr-2" />
               Add Category
             </Button>
           }
         />
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+        {/* Mobile add button */}
+        <Button onClick={() => setIsModalOpen(true)} className="w-full mb-4 md:hidden">
+          <Plus className="h-4 w-4 mr-2" />
+          Add Category
+        </Button>
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 md:gap-3">
           {(categories || []).map(category => (
             <div 
               key={category.id}
-              className="flex items-center justify-between gap-2 bg-midnight-900 rounded-lg px-3 py-2 group"
+              className="flex items-center justify-between gap-2 bg-midnight-900 rounded-lg px-3 py-2.5 md:py-2 group"
             >
               <div className="flex items-center gap-2 flex-1 min-w-0">
                 <div 
@@ -129,21 +134,24 @@ export const Settings = () => {
                 />
                 <span className="text-sm text-slate-200 truncate">{category.name}</span>
               </div>
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              {/* Always show on mobile, hover on desktop */}
+              <div className="flex items-center gap-1 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                 <button
                   onClick={() => handleEditCategory(category)}
-                  className="p-1 hover:bg-midnight-700 rounded text-slate-400 hover:text-slate-200 transition-colors"
+                  className="p-1.5 md:p-1 hover:bg-midnight-700 active:bg-midnight-600 rounded text-slate-400 hover:text-slate-200 transition-colors touch-target"
                   title="Edit category"
+                  aria-label={`Edit ${category.name}`}
                 >
-                  <Pencil className="h-3.5 w-3.5" />
+                  <Pencil className="h-4 w-4 md:h-3.5 md:w-3.5" />
                 </button>
                 {!category.is_default && (
                   <button
                     onClick={() => handleDeleteCategory(category)}
-                    className="p-1 hover:bg-midnight-700 rounded text-slate-400 hover:text-rose-400 transition-colors"
+                    className="p-1.5 md:p-1 hover:bg-midnight-700 active:bg-midnight-600 rounded text-slate-400 hover:text-rose-400 transition-colors touch-target"
                     title="Delete category"
+                    aria-label={`Delete ${category.name}`}
                   >
-                    <Trash2 className="h-3.5 w-3.5" />
+                    <Trash2 className="h-4 w-4 md:h-3.5 md:w-3.5" />
                   </button>
                 )}
               </div>
@@ -181,28 +189,30 @@ export const Settings = () => {
                 <button
                   key={color}
                   onClick={() => setCategoryColor(color)}
-                  className={`w-8 h-8 rounded-full border-2 transition-all ${
+                  className={`w-9 h-9 md:w-8 md:h-8 rounded-full border-2 transition-all touch-target ${
                     categoryColor === color ? 'border-slate-300 scale-110' : 'border-midnight-600'
                   }`}
                   style={{ backgroundColor: color }}
+                  aria-label={`Select color ${color}`}
                 />
               ))}
             </div>
           </div>
 
-          <div className="flex gap-3 pt-2">
+          <div className="flex flex-col-reverse md:flex-row gap-3 pt-2">
+            <Button
+              variant="secondary"
+              onClick={() => setIsModalOpen(false)}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
             <Button
               onClick={handleCreateCategory}
               disabled={!categoryName.trim() || createCategory.isPending}
               className="flex-1"
             >
               {createCategory.isPending ? 'Creating...' : 'Create Category'}
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => setIsModalOpen(false)}
-            >
-              Cancel
             </Button>
           </div>
         </div>
@@ -237,16 +247,24 @@ export const Settings = () => {
                 <button
                   key={color}
                   onClick={() => setCategoryColor(color)}
-                  className={`w-8 h-8 rounded-full border-2 transition-all ${
+                  className={`w-9 h-9 md:w-8 md:h-8 rounded-full border-2 transition-all touch-target ${
                     categoryColor === color ? 'border-slate-300 scale-110' : 'border-midnight-600'
                   }`}
                   style={{ backgroundColor: color }}
+                  aria-label={`Select color ${color}`}
                 />
               ))}
             </div>
           </div>
 
-          <div className="flex gap-3 pt-2">
+          <div className="flex flex-col-reverse md:flex-row gap-3 pt-2">
+            <Button
+              variant="secondary"
+              onClick={handleCloseEditModal}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
             <Button
               onClick={handleUpdateCategory}
               disabled={!categoryName.trim() || updateCategory.isPending}
@@ -254,34 +272,28 @@ export const Settings = () => {
             >
               {updateCategory.isPending ? 'Updating...' : 'Update Category'}
             </Button>
-            <Button
-              variant="secondary"
-              onClick={handleCloseEditModal}
-            >
-              Cancel
-            </Button>
           </div>
         </div>
       </Modal>
 
       {/* Data Management */}
-      <Card>
+      <Card padding="sm">
         <CardHeader 
           title="Data Management" 
           subtitle="Export or clear your data"
         />
-        <div className="flex gap-4">
-          <Button variant="secondary">
+        <div className="flex flex-col sm:flex-row gap-3 md:gap-4">
+          <Button variant="secondary" className="w-full sm:w-auto">
             Export All Data
           </Button>
-          <Button variant="danger">
+          <Button variant="danger" className="w-full sm:w-auto">
             Clear All Data
           </Button>
         </div>
       </Card>
 
       {/* About */}
-      <Card>
+      <Card padding="sm">
         <CardHeader 
           title="About" 
           subtitle="BudgetFlow - Personal Finance Tracker"
@@ -295,4 +307,3 @@ export const Settings = () => {
     </div>
   );
 };
-
