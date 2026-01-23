@@ -31,7 +31,30 @@ const fetchApi = async <T>(
     throw new Error(error.message || 'Request failed');
   }
 
-  return response.json();
+  // Handle empty responses (e.g., 201 Created with no body, 204 No Content)
+  const contentType = response.headers.get('content-type');
+  const contentLength = response.headers.get('content-length');
+  
+  if (
+    response.status === 204 || 
+    contentLength === '0' ||
+    (contentType && !contentType.includes('application/json'))
+  ) {
+    return undefined as T;
+  }
+
+  // Check if there's actually content to parse
+  const text = await response.text();
+  if (!text || text.trim() === '') {
+    return undefined as T;
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch (e) {
+    // If parsing fails, return undefined for void responses
+    return undefined as T;
+  }
 };
 
 // Accounts
