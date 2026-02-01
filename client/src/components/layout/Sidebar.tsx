@@ -118,8 +118,8 @@ export const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
       </aside>
 
       {/* Bottom Tab Navigation - Mobile Only */}
-      <nav className="fixed bottom-0 left-0 right-0 h-16 bg-midnight-900 border-t border-midnight-700 z-40 md:hidden safe-area-bottom">
-        <div className="flex items-center justify-around h-full px-2">
+      <nav className="fixed bottom-0 left-0 right-0 h-20 bg-midnight-900 border-t border-midnight-700 z-40 md:hidden safe-area-bottom">
+        <div className="flex items-center justify-around h-full px-2 pb-2">
           {bottomNavItems.map(({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
