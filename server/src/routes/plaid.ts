@@ -108,6 +108,54 @@ router.post('/create-link-token', async (req, res) => {
   }
 });
 
+// Create update mode link token to add investments permission to existing accounts
+router.post('/create-update-link-token', async (req, res) => {
+  try {
+    const { account_id, redirect_uri } = req.body;
+
+    if (!account_id) {
+      return res.status(400).json({ message: 'Account ID is required' });
+    }
+
+    // Get the account's access token
+    const { data: account, error: accountError } = await supabase
+      .from('accounts')
+      .select('plaid_access_token, institution_name')
+      .eq('id', account_id)
+      .single();
+
+    if (accountError || !account) {
+      return res.status(404).json({ message: 'Account not found' });
+    }
+
+    if (!account.plaid_access_token) {
+      return res.status(400).json({ message: 'Account does not have a Plaid connection' });
+    }
+
+    console.log(`Creating update link token for ${account.institution_name}...`);
+    
+    const linkToken = await plaidService.createUpdateLinkToken(
+      DEFAULT_USER_ID,
+      account.plaid_access_token,
+      redirect_uri
+    );
+
+    console.log('Update link token created successfully');
+
+    res.json({
+      link_token: linkToken.link_token,
+      expiration: linkToken.expiration,
+    });
+  } catch (error: unknown) {
+    console.error('Error creating update link token:', error);
+    const plaidError = error as { response?: { data?: unknown } };
+    if (plaidError.response?.data) {
+      console.error('Plaid error details:', JSON.stringify(plaidError.response.data, null, 2));
+    }
+    res.status(500).json({ message: 'Failed to create update link token' });
+  }
+});
+
 // Log Plaid Link events for debugging (errors, exits, etc.)
 router.post('/log-link-event', async (req, res) => {
   try {
@@ -283,6 +331,71 @@ router.post('/exchange-token', async (req, res) => {
       console.log(`Auto-synced ${syncedCount} transactions across ${createdAccounts.length} accounts`);
     } catch (syncError) {
       console.error('Auto-sync failed (accounts created, but transactions need manual sync):', syncError);
+    }
+
+    // Auto-sync investment holdings if this item has investment accounts
+    try {
+      console.log('Attempting to sync investment holdings...');
+      const holdingsResult = await plaidService.getInvestmentHoldings(accessToken);
+      
+      if (holdingsResult.holdings.length > 0) {
+        // Upsert securities
+        for (const security of holdingsResult.securities) {
+          const securityData = {
+            plaid_security_id: security.security_id,
+            ticker_symbol: security.ticker_symbol,
+            name: security.name || 'Unknown Security',
+            type: security.type || 'unknown',
+            close_price: security.close_price,
+            close_price_as_of: security.close_price_as_of,
+            iso_currency_code: security.iso_currency_code || 'USD',
+            updated_at: new Date().toISOString(),
+          };
+
+          await supabase
+            .from('securities')
+            .upsert(securityData, { onConflict: 'plaid_security_id' });
+        }
+
+        // Get security ID mapping
+        const { data: securities } = await supabase
+          .from('securities')
+          .select('id, plaid_security_id');
+        
+        const securityIdMap = new Map(
+          securities?.map(s => [s.plaid_security_id, s.id]) || []
+        );
+
+        // Insert holdings
+        let holdingsSynced = 0;
+        for (const holding of holdingsResult.holdings) {
+          const dbAccountId = accountIdMap.get(holding.account_id);
+          const dbSecurityId = securityIdMap.get(holding.security_id);
+
+          if (!dbAccountId || !dbSecurityId) continue;
+
+          await supabase
+            .from('holdings')
+            .upsert({
+              id: uuidv4(),
+              account_id: dbAccountId,
+              security_id: dbSecurityId,
+              quantity: holding.quantity,
+              cost_basis: holding.cost_basis,
+              institution_value: holding.institution_value,
+              iso_currency_code: holding.iso_currency_code || 'USD',
+              updated_at: new Date().toISOString(),
+            }, { onConflict: 'account_id,security_id' });
+          
+          holdingsSynced++;
+        }
+        console.log(`Auto-synced ${holdingsSynced} investment holdings`);
+      } else {
+        console.log('No investment holdings found for this item');
+      }
+    } catch (holdingsError) {
+      // Not all accounts have investments, so this is expected to fail for non-investment accounts
+      console.log('Investment holdings sync skipped (account may not have investments)');
     }
 
     // Return the first created account for backwards compatibility

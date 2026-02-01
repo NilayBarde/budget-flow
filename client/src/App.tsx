@@ -10,7 +10,8 @@ import {
   Accounts, 
   Tags, 
   Settings,
-  OAuthCallback
+  OAuthCallback,
+  Investments
 } from './pages';
 
 const queryClient = new QueryClient({
@@ -31,6 +32,7 @@ function App() {
             <Route index element={<Dashboard />} />
             <Route path="transactions" element={<Transactions />} />
             <Route path="budget" element={<Budget />} />
+            <Route path="investments" element={<Investments />} />
             <Route path="year" element={<YearOverview />} />
             <Route path="subscriptions" element={<Subscriptions />} />
             <Route path="accounts" element={<Accounts />} />

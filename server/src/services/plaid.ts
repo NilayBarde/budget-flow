@@ -22,7 +22,7 @@ export const createLinkToken = async (userId: string, redirectUri?: string, webh
   const request: Parameters<typeof plaidClient.linkTokenCreate>[0] = {
     user: { client_user_id: userId },
     client_name: 'BudgetFlow',
-    products: [Products.Transactions],
+    products: [Products.Transactions, Products.Investments],
     country_codes: [CountryCode.Us],
     language: 'en',
     transactions: {
@@ -52,6 +52,46 @@ export const createLinkToken = async (userId: string, redirectUri?: string, webh
     const plaidError = error as { response?: { data?: unknown } };
     if (plaidError.response?.data) {
       console.error('Plaid API error:', JSON.stringify(plaidError.response.data, null, 2));
+    }
+    throw error;
+  }
+};
+
+// Create a link token in update mode to add new products to an existing connection
+export const createUpdateLinkToken = async (
+  userId: string,
+  accessToken: string,
+  redirectUri?: string
+) => {
+  const request: Parameters<typeof plaidClient.linkTokenCreate>[0] = {
+    user: { client_user_id: userId },
+    client_name: 'BudgetFlow',
+    access_token: accessToken, // This puts Link in update mode
+    country_codes: [CountryCode.Us],
+    language: 'en',
+    // Request additional consent for the Investments product
+    additional_consented_products: [Products.Investments],
+    update: {
+      account_selection_enabled: true,
+    },
+  };
+
+  // Add redirect_uri for OAuth institutions (required for production)
+  if (redirectUri) {
+    request.redirect_uri = redirectUri;
+    console.log('Using redirect_uri for update mode:', redirectUri);
+  } else {
+    console.log('No redirect_uri provided for update mode (localhost/HTTP mode)');
+  }
+
+  try {
+    const response = await plaidClient.linkTokenCreate(request);
+    console.log('Update mode link token created successfully (requesting Investments consent)');
+    return response.data;
+  } catch (error: unknown) {
+    const plaidError = error as { response?: { data?: unknown } };
+    if (plaidError.response?.data) {
+      console.error('Plaid update link token error:', JSON.stringify(plaidError.response.data, null, 2));
     }
     throw error;
   }
@@ -186,4 +226,87 @@ export const removeItem = async (accessToken: string) => {
   
   console.log('Item removed from Plaid');
   return response.data;
+};
+
+// Investment holdings types
+export interface PlaidSecurity {
+  security_id: string;
+  ticker_symbol: string | null;
+  name: string | null;
+  type: string | null;
+  close_price: number | null;
+  close_price_as_of: string | null;
+  iso_currency_code: string | null;
+}
+
+export interface PlaidHolding {
+  account_id: string;
+  security_id: string;
+  quantity: number;
+  cost_basis: number | null;
+  institution_value: number | null;
+  iso_currency_code: string | null;
+}
+
+export interface InvestmentHoldingsResult {
+  holdings: PlaidHolding[];
+  securities: PlaidSecurity[];
+  accounts: Array<{
+    account_id: string;
+    name: string;
+    type: string;
+    subtype: string | null;
+    balances: {
+      current: number | null;
+    };
+  }>;
+}
+
+// Get investment holdings from Plaid
+export const getInvestmentHoldings = async (accessToken: string): Promise<InvestmentHoldingsResult> => {
+  try {
+    const response = await plaidClient.investmentsHoldingsGet({
+      access_token: accessToken,
+    });
+    
+    const { holdings, securities, accounts } = response.data;
+    
+    console.log(`Fetched ${holdings.length} holdings across ${securities.length} securities`);
+    
+    return {
+      holdings: holdings.map(h => ({
+        account_id: h.account_id,
+        security_id: h.security_id,
+        quantity: h.quantity,
+        cost_basis: h.cost_basis,
+        institution_value: h.institution_value,
+        iso_currency_code: h.iso_currency_code,
+      })),
+      securities: securities.map(s => ({
+        security_id: s.security_id,
+        ticker_symbol: s.ticker_symbol,
+        name: s.name,
+        type: s.type,
+        close_price: s.close_price,
+        close_price_as_of: s.close_price_as_of,
+        iso_currency_code: s.iso_currency_code,
+      })),
+      accounts: accounts.map(a => ({
+        account_id: a.account_id,
+        name: a.name,
+        type: a.type,
+        subtype: a.subtype,
+        balances: {
+          current: a.balances.current,
+        },
+      })),
+    };
+  } catch (error: unknown) {
+    const plaidError = error as { response?: { data?: { error_code?: string } } };
+    // Don't log ADDITIONAL_CONSENT_REQUIRED - it's expected for accounts without investment consent
+    if (plaidError.response?.data && plaidError.response.data.error_code !== 'ADDITIONAL_CONSENT_REQUIRED') {
+      console.error('Plaid get investment holdings error:', JSON.stringify(plaidError.response.data, null, 2));
+    }
+    throw error;
+  }
 };

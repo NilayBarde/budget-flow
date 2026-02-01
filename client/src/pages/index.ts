@@ -7,4 +7,5 @@ export { Accounts } from './Accounts';
 export { Tags } from './Tags';
 export { Settings } from './Settings';
 export { OAuthCallback } from './OAuthCallback';
+export { Investments } from './Investments';
 

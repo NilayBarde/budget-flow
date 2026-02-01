@@ -30,6 +30,7 @@ const { default: statsRouter } = await import('./routes/stats.js');
 const { default: merchantMappingsRouter } = await import('./routes/merchant-mappings.js');
 const { default: webhooksRouter } = await import('./routes/webhooks.js');
 const { default: csvImportRouter } = await import('./routes/csv-import.js');
+const { default: investmentsRouter } = await import('./routes/investments.js');
 
 console.log('Routes loaded successfully');
 
@@ -52,6 +53,7 @@ app.use('/api/stats', statsRouter);
 app.use('/api/merchant-mappings', merchantMappingsRouter);
 app.use('/api/webhooks', webhooksRouter);
 app.use('/api/csv-import', csvImportRouter);
+app.use('/api/investments', investmentsRouter);
 
 console.log('Routes registered');
 

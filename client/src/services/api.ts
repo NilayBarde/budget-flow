@@ -116,6 +116,12 @@ export const createPlaidLinkToken = (redirectUri?: string) =>
     body: JSON.stringify({ redirect_uri: redirectUri }),
   });
 
+export const createPlaidUpdateLinkToken = (accountId: string, redirectUri?: string) => 
+  fetchApi<PlaidLinkToken>('/plaid/create-update-link-token', { 
+    method: 'POST',
+    body: JSON.stringify({ account_id: accountId, redirect_uri: redirectUri }),
+  });
+
 export const exchangePlaidToken = (publicToken: string, metadata: unknown) =>
   fetchApi<Account>('/plaid/exchange-token', {
     method: 'POST',
@@ -384,3 +390,24 @@ export const getCsvImports = (accountId: string) =>
 
 export const deleteCsvImport = (importId: string) =>
   fetchApi<void>(`/csv-import/imports/${importId}`, { method: 'DELETE' });
+
+// Investments
+import type { InvestmentHoldingsResponse, InvestmentSummary } from '../types';
+
+export const getInvestmentHoldings = () =>
+  fetchApi<InvestmentHoldingsResponse>('/investments/holdings');
+
+export const getInvestmentSummary = () =>
+  fetchApi<InvestmentSummary>('/investments/summary');
+
+export const syncInvestmentHoldings = (accountId: string) =>
+  fetchApi<{ message: string; synced: number; securities: number }>(
+    `/investments/${accountId}/sync`,
+    { method: 'POST' }
+  );
+
+export const syncAllInvestmentHoldings = () =>
+  fetchApi<{ message: string; itemsProcessed: number; totalHoldings: number; totalSecurities: number }>(
+    '/investments/sync-all',
+    { method: 'POST' }
+  );

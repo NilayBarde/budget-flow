@@ -26,6 +26,13 @@ export const useCreatePlaidLinkToken = () => {
   });
 };
 
+export const useCreatePlaidUpdateLinkToken = () => {
+  return useMutation({
+    mutationFn: ({ accountId, redirectUri }: { accountId: string; redirectUri?: string }) => 
+      api.createPlaidUpdateLinkToken(accountId, redirectUri),
+  });
+};
+
 export const useExchangePlaidToken = () => {
   const queryClient = useQueryClient();
   

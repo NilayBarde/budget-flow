@@ -8,7 +8,8 @@ import {
   Repeat,
   Tags,
   Settings,
-  X
+  X,
+  TrendingUp
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -16,6 +17,7 @@ const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/transactions', icon: Receipt, label: 'Transactions' },
   { to: '/budget', icon: PiggyBank, label: 'Budget' },
+  { to: '/investments', icon: TrendingUp, label: 'Investments' },
   { to: '/year', icon: Calendar, label: 'Year Overview' },
   { to: '/subscriptions', icon: Repeat, label: 'Subscriptions' },
   { to: '/accounts', icon: CreditCard, label: 'Accounts' },
