@@ -316,6 +316,7 @@ router.post('/exchange-token', async (req, res) => {
           is_split: false,
           is_recurring: false,
           needs_review: needsReview,
+          pending: tx.pending,
           plaid_category: plaidPFC || null,
         });
         syncedCount++;

@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { MoreHorizontal, Split, Tag, Edit2, AlertCircle } from 'lucide-react';
+import { MoreHorizontal, Split, Tag, Edit2, AlertCircle, Clock } from 'lucide-react';
 import clsx from 'clsx';
 import type { Transaction } from '../../types';
 import { formatCurrency, formatDate } from '../../utils/formatters';
@@ -118,6 +118,12 @@ export const TransactionRow = ({ transaction, onEdit, onSplit, isSelected = fals
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="font-medium text-slate-100 truncate">{displayName}</span>
+            {transaction.pending && (
+              <Badge color="#f97316" size="sm">
+                <Clock className="h-3 w-3 mr-1 inline" />
+                Pending
+              </Badge>
+            )}
             {isTransfer && <Badge color="#64748b" size="sm">Transfer</Badge>}
             {isReturn && <Badge color="#10b981" size="sm">Return</Badge>}
             {isIncome && <Badge color="#10b981" size="sm">Income</Badge>}
@@ -281,8 +287,14 @@ export const TransactionRow = ({ transaction, onEdit, onSplit, isSelected = fals
         </div>
 
         {/* Badges row */}
-        {(isTransfer || isReturn || isIncome || isInvestment || transaction.is_split || transaction.is_recurring || transaction.needs_review || sortedTags.length > 0) && (
+        {(transaction.pending || isTransfer || isReturn || isIncome || isInvestment || transaction.is_split || transaction.is_recurring || transaction.needs_review || sortedTags.length > 0) && (
           <div className="flex flex-wrap gap-1.5 mt-2 ml-13">
+            {transaction.pending && (
+              <Badge color="#f97316" size="sm">
+                <Clock className="h-3 w-3 mr-1 inline" />
+                Pending
+              </Badge>
+            )}
             {isTransfer && <Badge color="#64748b" size="sm">Transfer</Badge>}
             {isReturn && <Badge color="#10b981" size="sm">Return</Badge>}
             {isIncome && <Badge color="#10b981" size="sm">Income</Badge>}

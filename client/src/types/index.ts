@@ -39,6 +39,7 @@ export interface Transaction {
   parent_transaction_id: string | null;
   is_recurring: boolean;
   needs_review: boolean;  // Flag for transactions that need manual categorization
+  pending: boolean;  // Transaction is pending (not yet posted)
   plaid_category: PlaidPFC | null;  // Plaid's personal_finance_category
   notes: string | null;
   created_at: string;

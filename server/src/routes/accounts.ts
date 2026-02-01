@@ -308,6 +308,7 @@ router.post('/:id/sync', async (req, res) => {
         is_split: false,
         is_recurring: false,
         needs_review: needsReview,
+        pending: tx.pending,
         plaid_category: plaidPFC || null,
       });
 
@@ -337,6 +338,7 @@ router.post('/:id/sync', async (req, res) => {
           original_description: (tx as { original_description?: string }).original_description || tx.name,
           merchant_display_name: displayName,
           transaction_type: transactionType,
+          pending: tx.pending,
         })
         .eq('plaid_transaction_id', tx.transaction_id);
       modifiedCount++;
