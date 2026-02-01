@@ -1,10 +1,30 @@
-import { CreditCard } from 'lucide-react';
-import { Card, Spinner, EmptyState } from '../components/ui';
-import { AccountCard, PlaidLinkButton } from '../components/accounts';
+import { useState, useCallback } from 'react';
+import { CreditCard, Plus } from 'lucide-react';
+import { Card, Spinner, EmptyState, Button } from '../components/ui';
+import { AccountCard, PlaidLinkButton, CreateManualAccountModal, CsvImportModal } from '../components/accounts';
 import { useAccounts } from '../hooks';
+import type { Account } from '../types';
 
 export const Accounts = () => {
   const { data: accounts, isLoading } = useAccounts();
+  const [showManualAccountModal, setShowManualAccountModal] = useState(false);
+  const [csvImportAccount, setCsvImportAccount] = useState<Account | null>(null);
+
+  const handleOpenManualModal = useCallback(() => {
+    setShowManualAccountModal(true);
+  }, []);
+
+  const handleCloseManualModal = useCallback(() => {
+    setShowManualAccountModal(false);
+  }, []);
+
+  const handleImportCsv = useCallback((account: Account) => {
+    setCsvImportAccount(account);
+  }, []);
+
+  const handleCloseCsvImport = useCallback(() => {
+    setCsvImportAccount(null);
+  }, []);
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -14,7 +34,13 @@ export const Accounts = () => {
           <h1 className="text-2xl md:text-3xl font-bold text-slate-100">Accounts</h1>
           <p className="text-slate-400 mt-1">Manage your connected bank accounts</p>
         </div>
-        <PlaidLinkButton />
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+          <Button onClick={handleOpenManualModal} className="w-full sm:w-auto">
+            <Plus className="h-4 w-4 mr-2" />
+            Add Manual Account
+          </Button>
+          <PlaidLinkButton />
+        </div>
       </div>
 
       {/* Info Card */}
@@ -26,15 +52,14 @@ export const Accounts = () => {
           <div className="flex-1">
             <h3 className="font-semibold text-slate-100">Connect Your Banks</h3>
             <p className="text-sm text-slate-400 mt-1">
-              Securely connect your American Express, Discover, Capital One, Robinhood, Bilt, 
-              and Venmo accounts to automatically import transactions.
+              Securely connect your accounts automatically, or add a manual account for banks 
+              like American Express that have Plaid connectivity issues. Manual accounts support 
+              CSV import from your bank statements.
             </p>
             <div className="mt-3 pt-3 border-t border-midnight-700">
               <p className="text-xs text-amber-400/80">
-                <strong>Note:</strong> American Express has known integration issues with Plaid 
-                (including INTERNAL_SERVER_ERROR affecting ~1% of connections). Amex accounts also 
-                require frequent re-authentication (often daily) due to strict security protocols. 
-                If you encounter connection errors, wait a few minutes and try reconnecting.
+                <strong>Tip:</strong> If Plaid connection fails for American Express, use 
+                "Add Manual Account" and import transactions via CSV from your AMEX statement downloads.
               </p>
             </div>
           </div>
@@ -47,15 +72,37 @@ export const Accounts = () => {
       ) : accounts && accounts.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
           {accounts.map(account => (
-            <AccountCard key={account.id} account={account} />
+            <AccountCard key={account.id} account={account} onImportCsv={handleImportCsv} />
           ))}
         </div>
       ) : (
         <EmptyState
           title="No accounts connected"
-          description="Connect your first bank account to start tracking your transactions automatically."
+          description="Connect your first bank account to start tracking your transactions automatically, or add a manual account for CSV imports."
           icon={<CreditCard className="h-8 w-8 text-slate-400" />}
-          action={<PlaidLinkButton />}
+          action={
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <Button onClick={handleOpenManualModal}>
+                <Plus className="h-4 w-4 mr-2" />
+                Add Manual
+              </Button>
+              <PlaidLinkButton />
+            </div>
+          }
+        />
+      )}
+
+      {/* Modals */}
+      <CreateManualAccountModal 
+        isOpen={showManualAccountModal} 
+        onClose={handleCloseManualModal} 
+      />
+      
+      {csvImportAccount && (
+        <CsvImportModal
+          isOpen={!!csvImportAccount}
+          onClose={handleCloseCsvImport}
+          account={csvImportAccount}
         />
       )}
     </div>

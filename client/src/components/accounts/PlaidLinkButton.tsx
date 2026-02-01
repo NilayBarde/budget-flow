@@ -305,11 +305,6 @@ export const PlaidLinkButton = () => {
     }).catch(() => {});
   }, []);
 
-  // Show development mode warning for HTTP
-  const isDevelopment = import.meta.env.DEV || window.location.hostname === 'localhost';
-  const isHttp = window.location.protocol === 'http:';
-  const showOAuthWarning = isDevelopment && isHttp;
-  
   // Determine if we're in a loading state (token fetching or exchange pending)
   const isLoading = createLinkToken.isPending || exchangeToken.isPending;
 
@@ -329,13 +324,6 @@ export const PlaidLinkButton = () => {
           <Plus className="h-4 w-4 mr-2" />
           Connect Account
         </Button>
-      )}
-      
-      {/* OAuth warning for HTTP development */}
-      {showOAuthWarning && (
-        <p className="text-xs text-amber-400 bg-amber-500/10 p-2 rounded-lg">
-          ⚠️ OAuth banks (Amex, etc.) won't work on HTTP. Use sandbox banks like "First Platypus Bank" for testing, or set up HTTPS (ngrok).
-        </p>
       )}
       
       {/* Only show errors when not in a loading state */}

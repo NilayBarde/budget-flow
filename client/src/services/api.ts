@@ -57,8 +57,49 @@ const fetchApi = async <T>(
   }
 };
 
+// Types for CSV import
+export interface CsvPreviewTransaction {
+  date: string;
+  description: string;
+  amount: number;
+  extendedDetails?: string;
+  transactionType: 'income' | 'expense' | 'transfer' | 'investment' | 'return';
+  categoryName: string | null;
+  needsReview: boolean;
+  hash: string;
+  isDuplicate: boolean;
+}
+
+export interface CsvPreviewResponse {
+  success: boolean;
+  format: string;
+  totalRows: number;
+  transactions: CsvPreviewTransaction[];
+  duplicateCount: number;
+  newCount: number;
+}
+
+export interface CsvImportResponse {
+  success: boolean;
+  imported: number;
+  skipped: number;
+  errors: string[];
+}
+
+export interface CreateManualAccountData {
+  institution_name: string;
+  account_name: string;
+  account_type: string;
+}
+
 // Accounts
 export const getAccounts = () => fetchApi<Account[]>('/accounts');
+
+export const createManualAccount = (data: CreateManualAccountData) =>
+  fetchApi<Account>('/accounts/manual', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
 
 export const createPlaidLinkToken = (redirectUri?: string) => 
   fetchApi<PlaidLinkToken>('/plaid/create-link-token', { 
@@ -260,3 +301,42 @@ export const getMonthlyStats = (month: number, year: number) =>
 export const getYearlyStats = (year: number) =>
   fetchApi<YearlyStats>(`/stats/yearly?year=${year}`);
 
+// CSV Import
+export const previewCsvImport = async (accountId: string, file: File): Promise<CsvPreviewResponse> => {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const response = await fetch(`${API_BASE_URL}/csv-import/${accountId}/preview`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: 'Preview failed' }));
+    throw new Error(error.message || 'Preview failed');
+  }
+
+  return response.json();
+};
+
+export const importCsv = async (
+  accountId: string, 
+  file: File, 
+  skipDuplicates = true
+): Promise<CsvImportResponse> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('skipDuplicates', String(skipDuplicates));
+
+  const response = await fetch(`${API_BASE_URL}/csv-import/${accountId}/import`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: 'Import failed' }));
+    throw new Error(error.message || 'Import failed');
+  }
+
+  return response.json();
+};

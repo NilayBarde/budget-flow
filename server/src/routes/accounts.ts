@@ -160,6 +160,47 @@ router.get('/', async (req, res) => {
   }
 });
 
+// Create a manual account (for banks that can't be linked via Plaid, e.g., American Express)
+router.post('/manual', async (req, res) => {
+  try {
+    const { institution_name, account_name, account_type } = req.body;
+
+    if (!institution_name || !account_name || !account_type) {
+      return res.status(400).json({ 
+        message: 'institution_name, account_name, and account_type are required' 
+      });
+    }
+
+    const accountId = uuidv4();
+    const manualId = `manual-${accountId}`;
+
+    const account = {
+      id: accountId,
+      user_id: 'default-user',
+      plaid_item_id: manualId,
+      plaid_access_token: 'manual',
+      institution_name,
+      account_name,
+      account_type,
+      created_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabase
+      .from('accounts')
+      .insert(account)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    console.log(`Created manual account: ${institution_name} - ${account_name}`);
+    res.status(201).json(data);
+  } catch (error) {
+    console.error('Error creating manual account:', error);
+    res.status(500).json({ message: 'Failed to create manual account' });
+  }
+});
+
 // Sync transactions for an account using Plaid's /transactions/sync (recommended)
 router.post('/:id/sync', async (req, res) => {
   try {

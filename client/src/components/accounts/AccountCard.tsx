@@ -1,4 +1,4 @@
-import { RefreshCw, Trash2 } from 'lucide-react';
+import { RefreshCw, Trash2, Upload } from 'lucide-react';
 import { Card, Button } from '../ui';
 import type { Account } from '../../types';
 import { formatDate } from '../../utils/formatters';
@@ -6,11 +6,18 @@ import { useSyncAccount, useDeleteAccount } from '../../hooks';
 
 interface AccountCardProps {
   account: Account;
+  onImportCsv?: (account: Account) => void;
 }
 
-export const AccountCard = ({ account }: AccountCardProps) => {
+// Check if account is a manual (non-Plaid) account
+const isManualAccount = (account: Account): boolean => 
+  account.plaid_access_token === 'manual' || account.plaid_item_id.startsWith('manual-');
+
+export const AccountCard = ({ account, onImportCsv }: AccountCardProps) => {
   const syncAccount = useSyncAccount();
   const deleteAccount = useDeleteAccount();
+
+  const isManual = isManualAccount(account);
 
   const handleSync = () => {
     syncAccount.mutate(account.id);
@@ -20,6 +27,10 @@ export const AccountCard = ({ account }: AccountCardProps) => {
     if (confirm(`Are you sure you want to disconnect ${account.institution_name}?`)) {
       deleteAccount.mutate(account.id);
     }
+  };
+
+  const handleImportCsv = () => {
+    onImportCsv?.(account);
   };
 
   // Get institution icon/color
@@ -67,16 +78,28 @@ export const AccountCard = ({ account }: AccountCardProps) => {
         </div>
         
         <div className="flex gap-2 mt-3 pt-3 border-t border-midnight-700">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleSync}
-            isLoading={syncAccount.isPending}
-            className="flex-1"
-          >
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Sync
-          </Button>
+          {isManual ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleImportCsv}
+              className="flex-1"
+            >
+              <Upload className="h-4 w-4 mr-2" />
+              Import CSV
+            </Button>
+          ) : (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleSync}
+              isLoading={syncAccount.isPending}
+              className="flex-1"
+            >
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Sync
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -109,14 +132,25 @@ export const AccountCard = ({ account }: AccountCardProps) => {
         </div>
         
         <div className="flex gap-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleSync}
-            isLoading={syncAccount.isPending}
-          >
-            <RefreshCw className="h-4 w-4" />
-          </Button>
+          {isManual ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleImportCsv}
+            >
+              <Upload className="h-4 w-4 mr-1" />
+              Import CSV
+            </Button>
+          ) : (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleSync}
+              isLoading={syncAccount.isPending}
+            >
+              <RefreshCw className="h-4 w-4" />
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
