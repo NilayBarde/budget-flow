@@ -52,7 +52,7 @@ CREATE TABLE transactions (
   original_description TEXT,  -- Full transaction description from bank/Plaid
   merchant_display_name TEXT,
   category_id UUID REFERENCES categories(id) ON DELETE SET NULL,
-  transaction_type TEXT NOT NULL DEFAULT 'expense' CHECK (transaction_type IN ('income', 'expense', 'transfer', 'investment')),
+  transaction_type TEXT NOT NULL DEFAULT 'expense' CHECK (transaction_type IN ('income', 'expense', 'transfer', 'investment', 'return')),
   is_split BOOLEAN DEFAULT FALSE,
   parent_transaction_id UUID REFERENCES transactions(id) ON DELETE CASCADE,
   is_recurring BOOLEAN DEFAULT FALSE,

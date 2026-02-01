@@ -77,7 +77,7 @@
 
   /* Safe area bottom padding for fixed bottom elements */
   .safe-area-bottom {
-    padding-bottom: env(safe-area-inset-bottom, 0);
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.5rem);
   }
 
   /* Touch-friendly minimum tap target */

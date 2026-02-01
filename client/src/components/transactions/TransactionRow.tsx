@@ -30,6 +30,7 @@ export const TransactionRow = ({ transaction, onEdit, onSplit }: TransactionRowP
   const isTransfer = transactionType === 'transfer';
   const isIncome = transactionType === 'income';
   const isInvestment = transactionType === 'investment';
+  const isReturn = transactionType === 'return';
   
   const handleToggleMenu = useCallback(() => {
     setShowMenu(prev => !prev);
@@ -46,7 +47,7 @@ export const TransactionRow = ({ transaction, onEdit, onSplit }: TransactionRowP
   }, [onSplit, transaction]);
 
   // Get category display color
-  const categoryColor = isIncome ? '#10b981' : isInvestment ? '#8b5cf6' : isTransfer ? '#64748b' : transaction.category?.color || '#64748b';
+  const categoryColor = isReturn ? '#10b981' : isIncome ? '#10b981' : isInvestment ? '#8b5cf6' : isTransfer ? '#64748b' : transaction.category?.color || '#64748b';
   const categoryBgColor = `${categoryColor}20`;
 
   return (
@@ -62,7 +63,7 @@ export const TransactionRow = ({ transaction, onEdit, onSplit }: TransactionRowP
           style={{ backgroundColor: categoryBgColor }}
         >
           <span className="text-sm" style={{ color: categoryColor }}>
-            {isIncome ? '$' : isInvestment ? '📈' : isTransfer ? '↔' : transaction.category?.name?.charAt(0) || '?'}
+            {isReturn ? '↩' : isIncome ? '$' : isInvestment ? '📈' : isTransfer ? '↔' : transaction.category?.name?.charAt(0) || '?'}
           </span>
         </div>
         
@@ -71,6 +72,7 @@ export const TransactionRow = ({ transaction, onEdit, onSplit }: TransactionRowP
           <div className="flex items-center gap-2">
             <span className="font-medium text-slate-100 truncate">{displayName}</span>
             {isTransfer && <Badge color="#64748b" size="sm">Transfer</Badge>}
+            {isReturn && <Badge color="#10b981" size="sm">Return</Badge>}
             {isIncome && <Badge color="#10b981" size="sm">Income</Badge>}
             {isInvestment && <Badge color="#8b5cf6" size="sm">Investment</Badge>}
             {transaction.is_split && <Badge color="#6366f1" size="sm">Split</Badge>}
@@ -117,9 +119,9 @@ export const TransactionRow = ({ transaction, onEdit, onSplit }: TransactionRowP
         {/* Amount */}
         <div className={clsx(
           'font-semibold tabular-nums',
-          isIncome ? 'text-emerald-400' : isInvestment ? 'text-violet-400' : isTransfer ? 'text-slate-500' : 'text-slate-100'
+          isReturn ? 'text-emerald-400' : isIncome ? 'text-emerald-400' : isInvestment ? 'text-violet-400' : isTransfer ? 'text-slate-500' : 'text-slate-100'
         )}>
-          {isIncome ? '+' : '-'}{formatCurrency(Math.abs(transaction.amount))}
+          {isReturn ? '+' : isIncome ? '+' : '-'}{formatCurrency(Math.abs(transaction.amount))}
         </div>
         
         {/* Actions */}
@@ -176,7 +178,7 @@ export const TransactionRow = ({ transaction, onEdit, onSplit }: TransactionRowP
             style={{ backgroundColor: categoryBgColor }}
           >
             <span className="text-sm" style={{ color: categoryColor }}>
-              {isIncome ? '$' : isInvestment ? '📈' : isTransfer ? '↔' : transaction.category?.name?.charAt(0) || '?'}
+              {isReturn ? '↩' : isIncome ? '$' : isInvestment ? '📈' : isTransfer ? '↔' : transaction.category?.name?.charAt(0) || '?'}
             </span>
           </div>
           
@@ -187,9 +189,9 @@ export const TransactionRow = ({ transaction, onEdit, onSplit }: TransactionRowP
               {/* Amount - top right on mobile for quick scanning */}
               <span className={clsx(
                 'font-semibold tabular-nums text-right flex-shrink-0',
-                isIncome ? 'text-emerald-400' : isInvestment ? 'text-violet-400' : isTransfer ? 'text-slate-500' : 'text-slate-100'
+                isReturn ? 'text-emerald-400' : isIncome ? 'text-emerald-400' : isInvestment ? 'text-violet-400' : isTransfer ? 'text-slate-500' : 'text-slate-100'
               )}>
-                {isIncome ? '+' : '-'}{formatCurrency(Math.abs(transaction.amount))}
+                {isReturn ? '+' : isIncome ? '+' : '-'}{formatCurrency(Math.abs(transaction.amount))}
               </span>
             </div>
             
@@ -207,9 +209,10 @@ export const TransactionRow = ({ transaction, onEdit, onSplit }: TransactionRowP
         </div>
 
         {/* Badges row */}
-        {(isTransfer || isIncome || isInvestment || transaction.is_split || transaction.is_recurring || transaction.needs_review || (transaction.tags && transaction.tags.length > 0)) && (
+        {(isTransfer || isReturn || isIncome || isInvestment || transaction.is_split || transaction.is_recurring || transaction.needs_review || (transaction.tags && transaction.tags.length > 0)) && (
           <div className="flex flex-wrap gap-1.5 mt-2 ml-13">
             {isTransfer && <Badge color="#64748b" size="sm">Transfer</Badge>}
+            {isReturn && <Badge color="#10b981" size="sm">Return</Badge>}
             {isIncome && <Badge color="#10b981" size="sm">Income</Badge>}
             {isInvestment && <Badge color="#8b5cf6" size="sm">Investment</Badge>}
             {transaction.is_split && <Badge color="#6366f1" size="sm">Split</Badge>}

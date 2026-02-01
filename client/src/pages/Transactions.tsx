@@ -9,6 +9,7 @@ type TypeFilter = TransactionType | 'all';
 const TYPE_TABS: { id: TypeFilter; label: string }[] = [
   { id: 'all', label: 'All' },
   { id: 'expense', label: 'Expenses' },
+  { id: 'return', label: 'Returns' },
   { id: 'income', label: 'Income' },
   { id: 'investment', label: 'Investments' },
   { id: 'transfer', label: 'Transfers' },
@@ -53,7 +54,7 @@ export const Transactions = () => {
 
   // Calculate totals using transaction_type
   const totals = useMemo(() => {
-    if (!transactions) return { expenses: 0, income: 0, investments: 0, transfers: 0 };
+    if (!transactions) return { expenses: 0, returns: 0, income: 0, investments: 0, transfers: 0 };
     
     return transactions.reduce(
       (acc, t) => {
@@ -62,6 +63,8 @@ export const Transactions = () => {
         
         if (type === 'expense') {
           acc.expenses += amount;
+        } else if (type === 'return') {
+          acc.returns += amount;
         } else if (type === 'income') {
           acc.income += amount;
         } else if (type === 'investment') {
@@ -71,7 +74,7 @@ export const Transactions = () => {
         }
         return acc;
       },
-      { expenses: 0, income: 0, investments: 0, transfers: 0 }
+      { expenses: 0, returns: 0, income: 0, investments: 0, transfers: 0 }
     );
   }, [transactions]);
 
@@ -85,6 +88,9 @@ export const Transactions = () => {
           <span className="hidden sm:inline"> • </span>
           <br className="sm:hidden" />
           <span className="text-rose-400">-${totals.expenses.toFixed(2)}</span>
+          {totals.returns > 0 && (
+            <span className="text-emerald-400 ml-2">+${totals.returns.toFixed(2)} returns</span>
+          )}
           <span className="text-emerald-400 ml-2">+${totals.income.toFixed(2)}</span>
           {totals.investments > 0 && (
             <span className="text-violet-400 ml-2 hidden md:inline">(${totals.investments.toFixed(2)} invested)</span>

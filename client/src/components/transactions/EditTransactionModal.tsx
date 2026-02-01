@@ -7,6 +7,7 @@ import { formatCurrency, formatDate } from '../../utils/formatters';
 
 const TRANSACTION_TYPE_OPTIONS = [
   { value: 'expense', label: 'Expense' },
+  { value: 'return', label: 'Return/Refund' },
   { value: 'income', label: 'Income' },
   { value: 'transfer', label: 'Transfer' },
   { value: 'investment', label: 'Investment' },

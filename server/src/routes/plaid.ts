@@ -9,7 +9,7 @@ const router = Router();
 const DEFAULT_USER_ID = 'default-user';
 
 // Helper to detect transaction type
-type TransactionType = 'income' | 'expense' | 'transfer' | 'investment';
+type TransactionType = 'income' | 'expense' | 'transfer' | 'investment' | 'return';
 
 const TRANSFER_PATTERNS = [
   /credit\s*card[- ]?auto[- ]?pay/i,
@@ -47,13 +47,20 @@ const detectTransactionType = (amount: number, texts: string[], plaidPFC?: Plaid
     if (plaidPFC.primary.startsWith('TRANSFER') || plaidPFC.primary.startsWith('LOAN_PAYMENTS')) {
       return 'transfer';
     }
+    // Only actual income (paychecks, dividends, etc.) should be income
     if (plaidPFC.primary === 'INCOME') {
       return 'income';
     }
   }
   
-  // Negative amounts are income
-  if (amount < 0) return 'income';
+  // Negative amounts: if Plaid says it's income, it's income; otherwise it's a return/refund
+  if (amount < 0) {
+    // If Plaid explicitly says INCOME, it's income; otherwise treat as return
+    if (plaidPFC?.primary === 'INCOME') {
+      return 'income';
+    }
+    return 'return';
+  }
   return 'expense';
 };
 

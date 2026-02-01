@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
-type TransactionType = 'income' | 'expense' | 'transfer' | 'investment';
+type TransactionType = 'income' | 'expense' | 'transfer' | 'investment' | 'return';
 
 // Investment detection patterns (checked AFTER transfers)
 const INVESTMENT_PATTERNS = [
@@ -74,7 +74,8 @@ interface PlaidPersonalFinanceCategory {
  * - Transfer pattern match = transfer (most specific, checked first)
  * - Investment pattern match = investment
  * - Plaid says it's a transfer = transfer
- * - Negative amount = income
+ * - Plaid says INCOME + negative amount = income
+ * - Negative amount (not income) = return/refund
  * - Positive amount = expense
  */
 const detectTransactionType = (
@@ -130,9 +131,14 @@ const detectTransactionType = (
     return 'transfer';
   }
 
-  // Income: negative amounts (money coming in) that aren't transfers
+  // Negative amounts (money coming in)
   if (amount < 0) {
-    return 'income';
+    // Only actual income (paychecks, dividends, etc.) from Plaid should be income
+    if (pfcPrimary === 'INCOME') {
+      return 'income';
+    }
+    // Everything else negative is a return/refund
+    return 'return';
   }
 
   return 'expense';
@@ -219,7 +225,7 @@ router.post('/:id/sync', async (req, res) => {
         if (texts.some(t => INVESTMENT_PATTERNS.some(p => p.test(t)))) return 'investment';
         if (plaidPFC?.primary?.startsWith('TRANSFER') || plaidPFC?.primary?.startsWith('LOAN_PAYMENTS')) return 'transfer';
         if (plaidPFC?.primary === 'INCOME') return 'income';
-        if (tx.amount < 0) return 'income';
+        if (tx.amount < 0) return 'return'; // Negative non-income = return/refund
         return 'expense';
       })() as TransactionType;
 
@@ -227,7 +233,8 @@ router.post('/:id/sync', async (req, res) => {
       let categoryId: string | null = null;
       let needsReview = false;
       
-      if (transactionType === 'expense') {
+      if (transactionType === 'expense' || transactionType === 'return') {
+        // Returns use the same categorization as expenses (e.g., Amazon return → Shopping)
         if (mapping?.default_category_id) {
           categoryId = mapping.default_category_id;
         } else {
@@ -269,11 +276,13 @@ router.post('/:id/sync', async (req, res) => {
     for (const tx of syncResult.modified) {
       const texts = [tx.merchant_name || '', tx.name || '', (tx as { original_description?: string }).original_description || ''];
       const displayName = cleanMerchantName(tx.merchant_name || tx.name);
+      const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
       
       const transactionType = (() => {
         if (texts.some(t => TRANSFER_PATTERNS.some(p => p.test(t)))) return 'transfer';
         if (texts.some(t => INVESTMENT_PATTERNS.some(p => p.test(t)))) return 'investment';
-        if (tx.amount < 0) return 'income';
+        if (plaidPFC?.primary === 'INCOME') return 'income';
+        if (tx.amount < 0) return 'return';
         return 'expense';
       })() as TransactionType;
 

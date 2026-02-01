@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
-type TransactionType = 'income' | 'expense' | 'transfer' | 'investment';
+type TransactionType = 'income' | 'expense' | 'transfer' | 'investment' | 'return';
 
 const TRANSFER_PATTERNS = [
   /credit\s*card[- ]?auto[- ]?pay/i,
@@ -47,7 +47,11 @@ const detectTransactionType = (amount: number, texts: string[], plaidPFC?: Plaid
     }
   }
   
-  if (amount < 0) return 'income';
+  // Negative amounts: actual income vs return/refund
+  if (amount < 0) {
+    if (plaidPFC?.primary === 'INCOME') return 'income';
+    return 'return';
+  }
   return 'expense';
 };
 
@@ -89,8 +93,9 @@ const processSyncedTransactions = async (
     let categoryId: string | null = null;
     let needsReview = false;
     
-    if (transactionType === 'expense') {
+    if (transactionType === 'expense' || transactionType === 'return') {
       // Priority: merchant mapping > Plaid PFC > pattern matching
+      // Returns use same categorization as expenses (e.g., Amazon return → Shopping)
       if (mapping?.default_category_id) {
         categoryId = mapping.default_category_id;
       } else {
