@@ -101,13 +101,21 @@ router.get('/summary', async (req, res) => {
       .select(`
         institution_value, 
         cost_basis,
+        account_id,
         account:accounts!inner(exclude_from_investments)
       `);
     
     // Filter out holdings from excluded accounts
-    const includedHoldings = holdings?.filter(h => !h.account?.exclude_from_investments);
+    // Note: Supabase returns joined data as arrays, so we access the first element
+    const includedHoldings = holdings?.filter(h => {
+      const account = Array.isArray(h.account) ? h.account[0] : h.account;
+      return !account?.exclude_from_investments;
+    });
 
     if (holdingsError) throw holdingsError;
+
+    // Get set of account IDs that have holdings (these should not be counted as cash)
+    const accountsWithHoldings = new Set(holdings?.map(h => h.account_id) || []);
 
     // Calculate investment totals (excluding bad data)
     // Bad data = cost basis > 10x the current value (indicates corrupted data from institution)
@@ -142,12 +150,19 @@ router.get('/summary', async (req, res) => {
     if (accountsError) throw accountsError;
 
     // Separate accounts by type
-    const investmentAccounts = accounts?.filter(a => isInvestmentAccount(a.account_type)) || [];
+    // Accounts with holdings are treated as investment accounts (even if type is "other")
+    const investmentAccounts = accounts?.filter(a => 
+      isInvestmentAccount(a.account_type) || accountsWithHoldings.has(a.id)
+    ) || [];
     const liabilityAccounts = accounts?.filter(a => 
-      !isInvestmentAccount(a.account_type) && isLiabilityAccount(a.account_type)
+      !isInvestmentAccount(a.account_type) && 
+      !accountsWithHoldings.has(a.id) && 
+      isLiabilityAccount(a.account_type)
     ) || [];
     const cashAccounts = accounts?.filter(a => 
-      !isInvestmentAccount(a.account_type) && !isLiabilityAccount(a.account_type)
+      !isInvestmentAccount(a.account_type) && 
+      !accountsWithHoldings.has(a.id) && 
+      !isLiabilityAccount(a.account_type)
     ) || [];
 
     // Cash assets (checking, savings, etc.) - positive balances = money you HAVE
@@ -185,8 +200,9 @@ router.get('/summary', async (req, res) => {
         name: `${a.institution_name} - ${a.account_name}`,
         type: a.account_type,
         balance: a.current_balance,
-        isInvestment: isInvestmentAccount(a.account_type),
+        isInvestment: isInvestmentAccount(a.account_type) || accountsWithHoldings.has(a.id),
         isLiability: isLiabilityAccount(a.account_type),
+        hasHoldings: accountsWithHoldings.has(a.id),
       })) || [],
     });
   } catch (error) {
