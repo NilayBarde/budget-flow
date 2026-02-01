@@ -9,9 +9,12 @@ interface TransactionRowProps {
   transaction: Transaction;
   onEdit: (transaction: Transaction) => void;
   onSplit: (transaction: Transaction) => void;
+  isSelected?: boolean;
+  onSelect?: (transactionId: string, selected: boolean) => void;
+  selectionMode?: boolean;
 }
 
-export const TransactionRow = ({ transaction, onEdit, onSplit }: TransactionRowProps) => {
+export const TransactionRow = ({ transaction, onEdit, onSplit, isSelected = false, onSelect, selectionMode = false }: TransactionRowProps) => {
   const [showMenu, setShowMenu] = useState(false);
   const [openUpward, setOpenUpward] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
@@ -46,17 +49,44 @@ export const TransactionRow = ({ transaction, onEdit, onSplit }: TransactionRowP
     onSplit(transaction);
   }, [onSplit, transaction]);
 
+  const handleCheckboxChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    e.stopPropagation();
+    onSelect?.(transaction.id, e.target.checked);
+  }, [onSelect, transaction.id]);
+
+  const handleRowClick = useCallback(() => {
+    if (selectionMode && onSelect) {
+      onSelect(transaction.id, !isSelected);
+    }
+  }, [selectionMode, onSelect, transaction.id, isSelected]);
+
   // Get category display color
   const categoryColor = isReturn ? '#10b981' : isIncome ? '#10b981' : isInvestment ? '#8b5cf6' : isTransfer ? '#64748b' : transaction.category?.color || '#64748b';
   const categoryBgColor = `${categoryColor}20`;
 
   return (
-    <div className={clsx(
-      "px-3 py-3 md:px-4 hover:bg-midnight-700/50 transition-colors border-b border-midnight-700 last:border-b-0",
-      isTransfer && "opacity-60"
-    )}>
+    <div 
+      className={clsx(
+        "px-3 py-3 md:px-4 hover:bg-midnight-700/50 transition-colors border-b border-midnight-700 last:border-b-0",
+        isTransfer && "opacity-60",
+        isSelected && "bg-accent-500/10",
+        selectionMode && "cursor-pointer"
+      )}
+      onClick={selectionMode ? handleRowClick : undefined}
+    >
       {/* Desktop Layout */}
       <div className="hidden md:flex items-center gap-4">
+        {/* Selection Checkbox */}
+        {selectionMode && (
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={handleCheckboxChange}
+            onClick={e => e.stopPropagation()}
+            className="w-5 h-5 rounded border-slate-600 bg-midnight-700 text-accent-500 focus:ring-accent-500/20 flex-shrink-0"
+          />
+        )}
+        
         {/* Category Icon */}
         <div 
           className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
@@ -172,6 +202,17 @@ export const TransactionRow = ({ transaction, onEdit, onSplit }: TransactionRowP
       <div className="md:hidden">
         {/* Top row: Icon, Merchant, Amount */}
         <div className="flex items-start gap-3">
+          {/* Selection Checkbox - Mobile */}
+          {selectionMode && (
+            <input
+              type="checkbox"
+              checked={isSelected}
+              onChange={handleCheckboxChange}
+              onClick={e => e.stopPropagation()}
+              className="w-5 h-5 mt-2.5 rounded border-slate-600 bg-midnight-700 text-accent-500 focus:ring-accent-500/20 flex-shrink-0"
+            />
+          )}
+          
           {/* Category Icon */}
           <div 
             className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"

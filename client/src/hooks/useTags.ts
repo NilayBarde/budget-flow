@@ -67,3 +67,27 @@ export const useRemoveTagFromTransaction = () => {
   });
 };
 
+
+export const useBulkAddTagToTransactions = () => {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: ({ transactionIds, tagId }: { transactionIds: string[]; tagId: string }) =>
+      api.bulkAddTagToTransactions(transactionIds, tagId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+    },
+  });
+};
+
+export const useBulkRemoveTagFromTransactions = () => {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: ({ transactionIds, tagId }: { transactionIds: string[]; tagId: string }) =>
+      api.bulkRemoveTagFromTransactions(transactionIds, tagId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+    },
+  });
+};

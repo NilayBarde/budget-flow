@@ -216,6 +216,18 @@ export const addTagToTransaction = (transactionId: string, tagId: string) =>
 export const removeTagFromTransaction = (transactionId: string, tagId: string) =>
   fetchApi<void>(`/transactions/${transactionId}/tags/${tagId}`, { method: 'DELETE' });
 
+export const bulkAddTagToTransactions = (transactionIds: string[], tagId: string) =>
+  fetchApi<{ added: number; skipped: number }>('/transactions/bulk/tags', {
+    method: 'POST',
+    body: JSON.stringify({ transactionIds, tagId }),
+  });
+
+export const bulkRemoveTagFromTransactions = (transactionIds: string[], tagId: string) =>
+  fetchApi<void>('/transactions/bulk/tags', {
+    method: 'DELETE',
+    body: JSON.stringify({ transactionIds, tagId }),
+  });
+
 // Merchant Mappings
 export const getMerchantMappings = () => fetchApi<MerchantMapping[]>('/merchant-mappings');
 

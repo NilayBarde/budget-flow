@@ -1,6 +1,8 @@
 import { useState, useCallback, useMemo } from 'react';
-import { TransactionList, TransactionFilters, EditTransactionModal, SplitTransactionModal } from '../components/transactions';
-import { useTransactions, useAccounts, useCategories, useTags } from '../hooks';
+import { CheckSquare, X } from 'lucide-react';
+import { TransactionList, TransactionFilters, EditTransactionModal, SplitTransactionModal, BulkActionBar } from '../components/transactions';
+import { Button } from '../components/ui';
+import { useTransactions, useAccounts, useCategories, useTags, useBulkAddTagToTransactions } from '../hooks';
 import type { Transaction, TransactionFilters as Filters, TransactionType } from '../types';
 import { getMonthYear } from '../utils/formatters';
 
@@ -21,6 +23,9 @@ export const Transactions = () => {
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [splittingTransaction, setSplittingTransaction] = useState<Transaction | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [addedTagIds, setAddedTagIds] = useState<Set<string>>(new Set());
 
   // Build filters with transaction_type
   const queryFilters = useMemo(() => {
@@ -35,6 +40,7 @@ export const Transactions = () => {
   const { data: accounts = [] } = useAccounts();
   const { data: categories = [] } = useCategories();
   const { data: tags = [] } = useTags();
+  const bulkAddTag = useBulkAddTagToTransactions();
 
   const handleEdit = useCallback((transaction: Transaction) => {
     setEditingTransaction(transaction);
@@ -50,6 +56,44 @@ export const Transactions = () => {
 
   const handleCloseSplit = useCallback(() => {
     setSplittingTransaction(null);
+  }, []);
+
+  const toggleSelectionMode = useCallback(() => {
+    setSelectionMode(prev => {
+      if (prev) {
+        setSelectedIds(new Set());
+        setAddedTagIds(new Set());
+      }
+      return !prev;
+    });
+  }, []);
+
+  const handleSelectionChange = useCallback((ids: Set<string>) => {
+    setSelectedIds(ids);
+  }, []);
+
+  const handleBulkAddTag = useCallback(async (tagId: string) => {
+    if (selectedIds.size === 0) return;
+    
+    await bulkAddTag.mutateAsync({
+      transactionIds: Array.from(selectedIds),
+      tagId,
+    });
+    
+    // Track that this tag was added (don't exit selection mode yet)
+    setAddedTagIds(prev => new Set([...prev, tagId]));
+  }, [selectedIds, bulkAddTag]);
+
+  const handleBulkDone = useCallback(() => {
+    setSelectedIds(new Set());
+    setAddedTagIds(new Set());
+    setSelectionMode(false);
+  }, []);
+
+  const handleCancelSelection = useCallback(() => {
+    setSelectedIds(new Set());
+    setAddedTagIds(new Set());
+    setSelectionMode(false);
   }, []);
 
   // Calculate totals using transaction_type
@@ -81,9 +125,10 @@ export const Transactions = () => {
   return (
     <div className="space-y-4 md:space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl md:text-3xl font-bold text-slate-100">Transactions</h1>
-        <p className="text-slate-400 mt-1 text-sm md:text-base">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-bold text-slate-100">Transactions</h1>
+          <p className="text-slate-400 mt-1 text-sm md:text-base">
           <span>{transactions?.length || 0} transactions</span>
           <span className="hidden sm:inline"> • </span>
           <br className="sm:hidden" />
@@ -99,6 +144,26 @@ export const Transactions = () => {
             <span className="text-slate-500 ml-2 hidden md:inline">(${totals.transfers.toFixed(2)} transfers)</span>
           )}
         </p>
+        </div>
+        
+        {/* Selection Mode Toggle */}
+        <Button
+          variant={selectionMode ? 'primary' : 'secondary'}
+          onClick={toggleSelectionMode}
+          className="flex-shrink-0"
+        >
+          {selectionMode ? (
+            <>
+              <X className="h-4 w-4 mr-2" />
+              Cancel
+            </>
+          ) : (
+            <>
+              <CheckSquare className="h-4 w-4 mr-2" />
+              Select
+            </>
+          )}
+        </Button>
       </div>
 
       {/* Transaction Type Tabs - Horizontally scrollable on mobile */}
@@ -131,7 +196,23 @@ export const Transactions = () => {
         isLoading={isLoading}
         onEdit={handleEdit}
         onSplit={handleSplit}
+        selectedIds={selectedIds}
+        onSelectionChange={handleSelectionChange}
+        selectionMode={selectionMode}
       />
+
+      {/* Bulk Action Bar */}
+      {selectionMode && selectedIds.size > 0 && (
+        <BulkActionBar
+          selectedCount={selectedIds.size}
+          tags={tags}
+          onAddTag={handleBulkAddTag}
+          onDone={handleBulkDone}
+          onCancel={handleCancelSelection}
+          isLoading={bulkAddTag.isPending}
+          addedTagIds={addedTagIds}
+        />
+      )}
 
       <EditTransactionModal
         isOpen={!!editingTransaction}

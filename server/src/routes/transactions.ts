@@ -390,6 +390,73 @@ router.post('/:id/tags/:tagId', async (req, res) => {
   }
 });
 
+// Bulk add tag to multiple transactions
+router.post('/bulk/tags', async (req, res) => {
+  try {
+    const { transactionIds, tagId } = req.body;
+
+    if (!transactionIds || !Array.isArray(transactionIds) || transactionIds.length === 0) {
+      return res.status(400).json({ message: 'Transaction IDs array is required' });
+    }
+
+    if (!tagId) {
+      return res.status(400).json({ message: 'Tag ID is required' });
+    }
+
+    // Get existing transaction-tag pairs to avoid duplicates
+    const { data: existing } = await supabase
+      .from('transaction_tags')
+      .select('transaction_id')
+      .eq('tag_id', tagId)
+      .in('transaction_id', transactionIds);
+
+    const existingIds = new Set(existing?.map(e => e.transaction_id) || []);
+    const newPairs = transactionIds
+      .filter(id => !existingIds.has(id))
+      .map(transactionId => ({ transaction_id: transactionId, tag_id: tagId }));
+
+    if (newPairs.length > 0) {
+      const { error } = await supabase
+        .from('transaction_tags')
+        .insert(newPairs);
+
+      if (error) throw error;
+    }
+
+    res.json({ added: newPairs.length, skipped: existingIds.size });
+  } catch (error) {
+    console.error('Error bulk adding tags:', error);
+    res.status(500).json({ message: 'Failed to bulk add tags' });
+  }
+});
+
+// Bulk remove tag from multiple transactions
+router.delete('/bulk/tags', async (req, res) => {
+  try {
+    const { transactionIds, tagId } = req.body;
+
+    if (!transactionIds || !Array.isArray(transactionIds) || transactionIds.length === 0) {
+      return res.status(400).json({ message: 'Transaction IDs array is required' });
+    }
+
+    if (!tagId) {
+      return res.status(400).json({ message: 'Tag ID is required' });
+    }
+
+    const { error } = await supabase
+      .from('transaction_tags')
+      .delete()
+      .eq('tag_id', tagId)
+      .in('transaction_id', transactionIds);
+
+    if (error) throw error;
+    res.status(204).send();
+  } catch (error) {
+    console.error('Error bulk removing tags:', error);
+    res.status(500).json({ message: 'Failed to bulk remove tags' });
+  }
+});
+
 // Remove tag from transaction
 router.delete('/:id/tags/:tagId', async (req, res) => {
   try {
