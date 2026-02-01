@@ -98,6 +98,31 @@ router.get('/', async (req, res) => {
   }
 });
 
+// Get count of similar transactions by merchant name
+router.get('/similar/:merchantName/count', async (req, res) => {
+  try {
+    const { merchantName } = req.params;
+    const { excludeId } = req.query;
+
+    let query = supabase
+      .from('transactions')
+      .select('id', { count: 'exact', head: true })
+      .eq('merchant_name', merchantName);
+
+    if (excludeId) {
+      query = query.neq('id', excludeId);
+    }
+
+    const { count, error } = await query;
+
+    if (error) throw error;
+    res.json({ count: count || 0 });
+  } catch (error) {
+    console.error('Error fetching similar transactions count:', error);
+    res.status(500).json({ message: 'Failed to fetch similar transactions count' });
+  }
+});
+
 // Get single transaction
 router.get('/:id', async (req, res) => {
   try {

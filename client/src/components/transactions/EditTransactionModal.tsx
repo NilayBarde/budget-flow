@@ -1,9 +1,8 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Modal, Button, Input, Select } from '../ui';
 import type { Transaction, Category, Tag, TransactionType } from '../../types';
-import { useUpdateTransaction, useCategories, useTags, useAddTagToTransaction, useRemoveTagFromTransaction } from '../../hooks';
+import { useUpdateTransaction, useCategories, useTags, useAddTagToTransaction, useRemoveTagFromTransaction, useSimilarTransactionsCount } from '../../hooks';
 import { Badge } from '../ui/Badge';
-import { formatCurrency, formatDate } from '../../utils/formatters';
 
 const TRANSACTION_TYPE_OPTIONS = [
   { value: 'expense', label: 'Expense' },
@@ -17,10 +16,9 @@ interface EditTransactionModalProps {
   isOpen: boolean;
   onClose: () => void;
   transaction: Transaction | null;
-  allTransactions?: Transaction[];
 }
 
-export const EditTransactionModal = ({ isOpen, onClose, transaction, allTransactions = [] }: EditTransactionModalProps) => {
+export const EditTransactionModal = ({ isOpen, onClose, transaction }: EditTransactionModalProps) => {
   const [merchantName, setMerchantName] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [transactionType, setTransactionType] = useState<TransactionType>('expense');
@@ -34,13 +32,12 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction, allTransact
   const addTag = useAddTagToTransaction();
   const removeTag = useRemoveTagFromTransaction();
 
-  // Find other transactions from the same merchant (excluding current one)
-  const similarTransactions = useMemo(() => {
-    if (!transaction) return [];
-    return allTransactions.filter(
-      t => t.merchant_name === transaction.merchant_name && t.id !== transaction.id
-    );
-  }, [transaction, allTransactions]);
+  // Fetch count of similar transactions from the backend (across all time)
+  const { data: similarCountData } = useSimilarTransactionsCount(
+    transaction?.merchant_name,
+    transaction?.id
+  );
+  const similarCount = similarCountData?.count || 0;
 
   // Check if category actually changed
   const categoryChanged = transaction && categoryId !== (transaction.category_id || '');
@@ -136,8 +133,8 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction, allTransact
         />
 
         {/* Show apply to all option only if there are similar transactions and category changed */}
-        {similarTransactions.length > 0 && categoryChanged && (
-          <div className="rounded-lg border border-midnight-600 bg-midnight-800/50 p-3 space-y-3">
+        {similarCount > 0 && categoryChanged && (
+          <div className="rounded-lg border border-midnight-600 bg-midnight-800/50 p-3">
             <label className="flex items-start gap-2 cursor-pointer">
               <input
                 type="checkbox"
@@ -146,29 +143,13 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction, allTransact
                 className="w-5 h-5 md:w-4 md:h-4 mt-0.5 rounded border-slate-600 bg-midnight-700 text-cyan-500 focus:ring-cyan-500/20"
               />
               <span className="text-sm text-slate-300">
-                Also recategorize {similarTransactions.length} other{' '}
+                Also recategorize {similarCount} other{' '}
                 <span className="font-medium text-slate-200">
                   {transaction?.merchant_display_name || transaction?.merchant_name}
                 </span>{' '}
-                transaction{similarTransactions.length !== 1 ? 's' : ''}?
+                transaction{similarCount !== 1 ? 's' : ''}?
               </span>
             </label>
-            
-            {applyToAll && (
-              <div className="pl-7 md:pl-6 space-y-1 max-h-32 overflow-y-auto">
-                {similarTransactions.slice(0, 5).map(t => (
-                  <div key={t.id} className="flex justify-between text-xs text-slate-400">
-                    <span>{formatDate(t.date)}</span>
-                    <span className="text-slate-300">{formatCurrency(t.amount)}</span>
-                  </div>
-                ))}
-                {similarTransactions.length > 5 && (
-                  <div className="text-xs text-slate-500 italic">
-                    +{similarTransactions.length - 5} more transactions
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         )}
 

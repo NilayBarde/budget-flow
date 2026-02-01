@@ -17,6 +17,14 @@ export const useTransaction = (id: string) => {
   });
 };
 
+export const useSimilarTransactionsCount = (merchantName: string | undefined, excludeId?: string) => {
+  return useQuery({
+    queryKey: ['similarTransactionsCount', merchantName, excludeId],
+    queryFn: () => api.getSimilarTransactionsCount(merchantName!, excludeId),
+    enabled: !!merchantName,
+  });
+};
+
 export const useUpdateTransaction = () => {
   const queryClient = useQueryClient();
   

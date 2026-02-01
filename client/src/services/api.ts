@@ -217,6 +217,17 @@ export const getTransactions = (filters: TransactionFilters = {}) => {
 export const getTransaction = (id: string) =>
   fetchApi<Transaction>(`/transactions/${id}`);
 
+export const getSimilarTransactionsCount = (merchantName: string, excludeId?: string) => {
+  const params = new URLSearchParams();
+  if (excludeId) {
+    params.append('excludeId', excludeId);
+  }
+  const queryString = params.toString();
+  return fetchApi<{ count: number }>(
+    `/transactions/similar/${encodeURIComponent(merchantName)}/count${queryString ? `?${queryString}` : ''}`
+  );
+};
+
 export const updateTransaction = (id: string, data: Partial<Transaction>, applyToAll = false) =>
   fetchApi<Transaction>(`/transactions/${id}${applyToAll ? '?applyToAll=true' : ''}`, {
     method: 'PATCH',

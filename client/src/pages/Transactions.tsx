@@ -232,7 +232,6 @@ export const Transactions = () => {
         isOpen={!!editingTransaction}
         onClose={handleCloseEdit}
         transaction={editingTransaction}
-        allTransactions={transactions}
       />
 
       <SplitTransactionModal
