@@ -6,10 +6,11 @@ interface BadgeProps {
   color?: string;
   variant?: 'filled' | 'outline';
   size?: 'sm' | 'md';
+  className?: string;
   onRemove?: () => void;
 }
 
-export const Badge = ({ children, color = '#6366f1', variant = 'filled', size = 'sm', onRemove }: BadgeProps) => {
+export const Badge = ({ children, color, variant = 'filled', size = 'sm', className, onRemove }: BadgeProps) => {
   const baseStyles = 'inline-flex items-center gap-1 rounded-full font-medium';
   
   const sizeStyles = {
@@ -17,13 +18,16 @@ export const Badge = ({ children, color = '#6366f1', variant = 'filled', size = 
     md: 'px-3 py-1 text-sm',
   };
 
-  const variantStyles = variant === 'filled' 
-    ? { backgroundColor: `${color}20`, color }
-    : { borderColor: color, color, borderWidth: '1px' };
+  // If className is provided, use it for styling instead of color-based styles
+  const variantStyles = className ? undefined : (
+    variant === 'filled' 
+      ? { backgroundColor: `${color || '#6366f1'}20`, color: color || '#6366f1' }
+      : { borderColor: color || '#6366f1', color: color || '#6366f1', borderWidth: '1px' }
+  );
 
   return (
     <span 
-      className={clsx(baseStyles, sizeStyles[size])}
+      className={clsx(baseStyles, sizeStyles[size], className)}
       style={variantStyles}
     >
       {children}
