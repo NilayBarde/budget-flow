@@ -60,6 +60,23 @@ export const TransactionRow = ({ transaction, onEdit, onSplit, isSelected = fals
     }
   }, [selectionMode, onSelect, transaction.id, isSelected]);
 
+  // Calculate my share for split transactions
+  const myShare = transaction.is_split && transaction.splits && transaction.splits.length > 0
+    ? transaction.splits
+        .filter(s => s.is_my_share)
+        .reduce((sum, s) => sum + Math.abs(s.amount), 0)
+    : null;
+  
+  // Display amount: my share if split, otherwise full amount
+  const displayAmount = myShare !== null ? myShare : Math.abs(transaction.amount);
+  const totalAmount = Math.abs(transaction.amount);
+  const showSplitTotal = myShare !== null && myShare !== totalAmount;
+
+  // Sort tags alphabetically
+  const sortedTags = transaction.tags 
+    ? [...transaction.tags].sort((a, b) => a.name.localeCompare(b.name))
+    : [];
+
   // Get category display color
   const categoryColor = isReturn ? '#10b981' : isIncome ? '#10b981' : isInvestment ? '#8b5cf6' : isTransfer ? '#64748b' : transaction.category?.color || '#64748b';
   const categoryBgColor = `${categoryColor}20`;
@@ -135,9 +152,9 @@ export const TransactionRow = ({ transaction, onEdit, onSplit, isSelected = fals
               </>
             )}
           </div>
-          {transaction.tags && transaction.tags.length > 0 && (
+          {sortedTags.length > 0 && (
             <div className="flex gap-1 mt-1">
-              {transaction.tags.map(tag => (
+              {sortedTags.map(tag => (
                 <Badge key={tag.id} color={tag.color} size="sm">
                   {tag.name}
                 </Badge>
@@ -147,11 +164,18 @@ export const TransactionRow = ({ transaction, onEdit, onSplit, isSelected = fals
         </div>
         
         {/* Amount */}
-        <div className={clsx(
-          'font-semibold tabular-nums',
-          isReturn ? 'text-emerald-400' : isIncome ? 'text-emerald-400' : isInvestment ? 'text-violet-400' : isTransfer ? 'text-slate-500' : 'text-slate-100'
-        )}>
-          {isReturn ? '+' : isIncome ? '+' : '-'}{formatCurrency(Math.abs(transaction.amount))}
+        <div className="text-right">
+          <div className={clsx(
+            'font-semibold tabular-nums',
+            isReturn ? 'text-emerald-400' : isIncome ? 'text-emerald-400' : isInvestment ? 'text-violet-400' : isTransfer ? 'text-slate-500' : 'text-slate-100'
+          )}>
+            {isReturn ? '+' : isIncome ? '+' : '-'}{formatCurrency(displayAmount)}
+          </div>
+          {showSplitTotal && (
+            <div className="text-xs text-slate-500 tabular-nums">
+              of {formatCurrency(totalAmount)}
+            </div>
+          )}
         </div>
         
         {/* Actions */}
@@ -228,12 +252,19 @@ export const TransactionRow = ({ transaction, onEdit, onSplit, isSelected = fals
             <div className="flex items-start justify-between gap-2">
               <span className="font-medium text-slate-100 truncate">{displayName}</span>
               {/* Amount - top right on mobile for quick scanning */}
-              <span className={clsx(
-                'font-semibold tabular-nums text-right flex-shrink-0',
-                isReturn ? 'text-emerald-400' : isIncome ? 'text-emerald-400' : isInvestment ? 'text-violet-400' : isTransfer ? 'text-slate-500' : 'text-slate-100'
-              )}>
-                {isReturn ? '+' : isIncome ? '+' : '-'}{formatCurrency(Math.abs(transaction.amount))}
-              </span>
+              <div className="text-right flex-shrink-0">
+                <span className={clsx(
+                  'font-semibold tabular-nums',
+                  isReturn ? 'text-emerald-400' : isIncome ? 'text-emerald-400' : isInvestment ? 'text-violet-400' : isTransfer ? 'text-slate-500' : 'text-slate-100'
+                )}>
+                  {isReturn ? '+' : isIncome ? '+' : '-'}{formatCurrency(displayAmount)}
+                </span>
+                {showSplitTotal && (
+                  <div className="text-xs text-slate-500 tabular-nums">
+                    of {formatCurrency(totalAmount)}
+                  </div>
+                )}
+              </div>
             </div>
             
             {/* Date and category */}
@@ -250,7 +281,7 @@ export const TransactionRow = ({ transaction, onEdit, onSplit, isSelected = fals
         </div>
 
         {/* Badges row */}
-        {(isTransfer || isReturn || isIncome || isInvestment || transaction.is_split || transaction.is_recurring || transaction.needs_review || (transaction.tags && transaction.tags.length > 0)) && (
+        {(isTransfer || isReturn || isIncome || isInvestment || transaction.is_split || transaction.is_recurring || transaction.needs_review || sortedTags.length > 0) && (
           <div className="flex flex-wrap gap-1.5 mt-2 ml-13">
             {isTransfer && <Badge color="#64748b" size="sm">Transfer</Badge>}
             {isReturn && <Badge color="#10b981" size="sm">Return</Badge>}
@@ -264,7 +295,7 @@ export const TransactionRow = ({ transaction, onEdit, onSplit, isSelected = fals
                 Review
               </Badge>
             )}
-            {transaction.tags?.map(tag => (
+            {sortedTags.map(tag => (
               <Badge key={tag.id} color={tag.color} size="sm">
                 {tag.name}
               </Badge>
