@@ -185,7 +185,7 @@ router.get('/summary', async (req, res) => {
         totalGainLoss,
         totalGainLossPercent,
         accountCount: investmentAccounts.length,
-        holdingCount: holdings?.length || 0,
+        holdingCount: includedHoldings?.length || 0,
       },
       cash: {
         totalAssets: totalCashAssets,
