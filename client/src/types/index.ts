@@ -14,6 +14,8 @@ export interface Account {
   current_balance?: number | null;
   balance_threshold?: number | null;
   last_balance_alert_at?: string | null;
+  exclude_from_investments?: boolean;
+  investment_exclusion_note?: string | null;
   created_at: string;
 }
 
@@ -172,6 +174,7 @@ export interface Holding {
     institution_name: string;
     account_name: string;
     account_type: string;
+    exclude_from_investments?: boolean;
   };
 }
 
@@ -220,4 +223,3 @@ export interface InvestmentSummary {
   netWorth: number;
   accounts: AccountSummary[];
 }
-

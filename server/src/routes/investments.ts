@@ -47,19 +47,26 @@ const isLiabilityAccount = (accountType: string): boolean => {
 // GET /investments/holdings - Get all holdings with security details
 router.get('/holdings', async (req, res) => {
   try {
+    const showExcluded = req.query.showExcluded === 'true';
+    
     const { data: holdings, error } = await supabase
       .from('holdings')
       .select(`
         *,
         security:securities(*),
-        account:accounts(id, institution_name, account_name, account_type)
+        account:accounts(id, institution_name, account_name, account_type, exclude_from_investments)
       `)
       .order('institution_value', { ascending: false });
 
     if (error) throw error;
 
+    // Filter out holdings from excluded accounts (unless showExcluded is true)
+    const filteredHoldings = showExcluded 
+      ? holdings 
+      : holdings?.filter(h => !h.account?.exclude_from_investments);
+
     // Group holdings by account for easier frontend display
-    const holdingsByAccount = holdings?.reduce((acc, holding) => {
+    const holdingsByAccount = filteredHoldings?.reduce((acc, holding) => {
       const accountId = holding.account_id;
       if (!acc[accountId]) {
         acc[accountId] = {
@@ -76,7 +83,7 @@ router.get('/holdings', async (req, res) => {
     }, {} as Record<string, { account: unknown; holdings: unknown[]; totalValue: number; totalCostBasis: number }>);
 
     res.json({
-      holdings: holdings || [],
+      holdings: filteredHoldings || [],
       byAccount: holdingsByAccount || {},
     });
   } catch (error) {
@@ -88,17 +95,43 @@ router.get('/holdings', async (req, res) => {
 // GET /investments/summary - Get portfolio totals and net worth
 router.get('/summary', async (req, res) => {
   try {
-    // Get all holdings for investment totals
+    // Get all holdings for investment totals (excluding holdings from excluded accounts)
     const { data: holdings, error: holdingsError } = await supabase
       .from('holdings')
-      .select('institution_value, cost_basis');
+      .select(`
+        institution_value, 
+        cost_basis,
+        account:accounts!inner(exclude_from_investments)
+      `);
+    
+    // Filter out holdings from excluded accounts
+    const includedHoldings = holdings?.filter(h => !h.account?.exclude_from_investments);
 
     if (holdingsError) throw holdingsError;
 
-    // Calculate investment totals
-    const totalInvestmentValue = holdings?.reduce((sum, h) => sum + (h.institution_value || 0), 0) || 0;
-    const totalCostBasis = holdings?.reduce((sum, h) => sum + (h.cost_basis || 0), 0) || 0;
-    const totalGainLoss = totalInvestmentValue - totalCostBasis;
+    // Calculate investment totals (excluding bad data)
+    // Bad data = cost basis > 10x the current value (indicates corrupted data from institution)
+    const isBadCostBasis = (value: number, costBasis: number) => 
+      costBasis > 0 && Math.abs(costBasis - value) > value * 10;
+    
+    const totalInvestmentValue = includedHoldings?.reduce((sum, h) => sum + (h.institution_value || 0), 0) || 0;
+    const totalCostBasis = includedHoldings?.reduce((sum, h) => {
+      const value = h.institution_value || 0;
+      const costBasis = h.cost_basis || 0;
+      // Skip bad data from totals
+      if (isBadCostBasis(value, costBasis)) return sum;
+      return sum + costBasis;
+    }, 0) || 0;
+    
+    // Also calculate value only for holdings with good cost basis data
+    const validHoldingsValue = includedHoldings?.reduce((sum, h) => {
+      const value = h.institution_value || 0;
+      const costBasis = h.cost_basis || 0;
+      if (isBadCostBasis(value, costBasis)) return sum;
+      return sum + value;
+    }, 0) || 0;
+    
+    const totalGainLoss = validHoldingsValue - totalCostBasis;
     const totalGainLossPercent = totalCostBasis > 0 ? (totalGainLoss / totalCostBasis) * 100 : 0;
 
     // Get all account balances for net worth calculation
@@ -400,6 +433,31 @@ router.post('/sync-all', async (req, res) => {
   } catch (error) {
     console.error('Error syncing all holdings:', error);
     res.status(500).json({ message: 'Failed to sync holdings' });
+  }
+});
+
+// PATCH /investments/accounts/:accountId/exclude - Toggle account exclusion from investments
+router.patch('/accounts/:accountId/exclude', async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const { exclude_from_investments, investment_exclusion_note } = req.body;
+
+    const { data, error } = await supabase
+      .from('accounts')
+      .update({
+        exclude_from_investments: exclude_from_investments ?? true,
+        investment_exclusion_note: investment_exclusion_note || null,
+      })
+      .eq('id', accountId)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.json(data);
+  } catch (error) {
+    console.error('Error updating account exclusion:', error);
+    res.status(500).json({ message: 'Failed to update account' });
   }
 });
 

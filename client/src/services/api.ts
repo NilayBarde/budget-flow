@@ -392,7 +392,7 @@ export const deleteCsvImport = (importId: string) =>
   fetchApi<void>(`/csv-import/imports/${importId}`, { method: 'DELETE' });
 
 // Investments
-import type { InvestmentHoldingsResponse, InvestmentSummary } from '../types';
+import type { InvestmentHoldingsResponse, InvestmentSummary, Account } from '../types';
 
 export const getInvestmentHoldings = () =>
   fetchApi<InvestmentHoldingsResponse>('/investments/holdings');
@@ -411,3 +411,16 @@ export const syncAllInvestmentHoldings = () =>
     '/investments/sync-all',
     { method: 'POST' }
   );
+
+export const toggleAccountInvestmentExclusion = (
+  accountId: string,
+  excludeFromInvestments: boolean,
+  exclusionNote?: string
+) =>
+  fetchApi<Account>(`/investments/accounts/${accountId}/exclude`, {
+    method: 'PATCH',
+    body: JSON.stringify({ 
+      exclude_from_investments: excludeFromInvestments, 
+      investment_exclusion_note: exclusionNote 
+    }),
+  });

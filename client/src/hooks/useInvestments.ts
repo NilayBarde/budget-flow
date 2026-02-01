@@ -38,3 +38,20 @@ export const useSyncAllInvestmentHoldings = () => {
     },
   });
 };
+
+export const useToggleAccountInvestmentExclusion = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ accountId, excludeFromInvestments, exclusionNote }: { 
+      accountId: string; 
+      excludeFromInvestments: boolean; 
+      exclusionNote?: string;
+    }) => api.toggleAccountInvestmentExclusion(accountId, excludeFromInvestments, exclusionNote),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['investment-holdings'] });
+      queryClient.invalidateQueries({ queryKey: ['investment-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+    },
+  });
+};
