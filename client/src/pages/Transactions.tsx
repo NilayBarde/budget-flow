@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
 import { CheckSquare, X } from 'lucide-react';
-import { TransactionList, TransactionFilters, EditTransactionModal, SplitTransactionModal, BulkActionBar } from '../components/transactions';
+import { TransactionList, TransactionFilters, EditTransactionModal, SplitTransactionModal, BulkSplitModal, BulkActionBar } from '../components/transactions';
 import { Button } from '../components/ui';
 import { useTransactions, useAccounts, useCategories, useTags, useBulkAddTagToTransactions } from '../hooks';
 import type { Transaction, TransactionFilters as Filters, TransactionType } from '../types';
@@ -26,6 +26,7 @@ export const Transactions = () => {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [addedTagIds, setAddedTagIds] = useState<Set<string>>(new Set());
+  const [showBulkSplitModal, setShowBulkSplitModal] = useState(false);
 
   // Build filters with transaction_type
   const queryFilters = useMemo(() => {
@@ -91,6 +92,18 @@ export const Transactions = () => {
   }, []);
 
   const handleCancelSelection = useCallback(() => {
+    setSelectedIds(new Set());
+    setAddedTagIds(new Set());
+    setSelectionMode(false);
+  }, []);
+
+  const handleBulkSplit = useCallback(() => {
+    setShowBulkSplitModal(true);
+  }, []);
+
+  const handleCloseBulkSplit = useCallback(() => {
+    setShowBulkSplitModal(false);
+    // Exit selection mode after splitting
     setSelectedIds(new Set());
     setAddedTagIds(new Set());
     setSelectionMode(false);
@@ -207,6 +220,7 @@ export const Transactions = () => {
           selectedCount={selectedIds.size}
           tags={tags}
           onAddTag={handleBulkAddTag}
+          onSplit={handleBulkSplit}
           onDone={handleBulkDone}
           onCancel={handleCancelSelection}
           isLoading={bulkAddTag.isPending}
@@ -225,6 +239,13 @@ export const Transactions = () => {
         isOpen={!!splittingTransaction}
         onClose={handleCloseSplit}
         transaction={splittingTransaction}
+      />
+
+      <BulkSplitModal
+        isOpen={showBulkSplitModal}
+        onClose={handleCloseBulkSplit}
+        selectedCount={selectedIds.size}
+        transactionIds={Array.from(selectedIds)}
       />
     </div>
   );

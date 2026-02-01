@@ -316,6 +316,90 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
+// Bulk split multiple transactions (must be before /:id/splits to avoid route conflict)
+router.post('/bulk/splits', async (req, res) => {
+  try {
+    const { transactionIds, numPeople } = req.body;
+
+    if (!transactionIds || !Array.isArray(transactionIds) || transactionIds.length === 0) {
+      return res.status(400).json({ message: 'Transaction IDs array is required' });
+    }
+
+    if (!numPeople || numPeople < 2) {
+      return res.status(400).json({ message: 'Number of people must be at least 2' });
+    }
+
+    // Get all selected transactions
+    const { data: transactions, error: fetchError } = await supabase
+      .from('transactions')
+      .select('id, amount, is_split')
+      .in('id', transactionIds);
+
+    if (fetchError) throw fetchError;
+
+    if (!transactions || transactions.length === 0) {
+      return res.status(404).json({ message: 'No transactions found' });
+    }
+
+    let splitCount = 0;
+    let skippedCount = 0;
+
+    for (const tx of transactions) {
+      // Skip transactions that are already split
+      if (tx.is_split) {
+        skippedCount++;
+        continue;
+      }
+
+      const totalAmount = Math.abs(tx.amount);
+      const myShare = parseFloat((totalAmount / numPeople).toFixed(2));
+      const othersShare = parseFloat((totalAmount - myShare).toFixed(2));
+
+      // Create splits
+      const splitRecords = [
+        {
+          id: uuidv4(),
+          parent_transaction_id: tx.id,
+          amount: myShare,
+          description: 'Your portion',
+          is_my_share: true,
+          created_at: new Date().toISOString(),
+        },
+        {
+          id: uuidv4(),
+          parent_transaction_id: tx.id,
+          amount: othersShare,
+          description: 'Others',
+          is_my_share: false,
+          created_at: new Date().toISOString(),
+        },
+      ].filter(s => s.amount > 0);
+
+      const { error: insertError } = await supabase
+        .from('transaction_splits')
+        .insert(splitRecords);
+
+      if (insertError) {
+        console.error(`Failed to create splits for transaction ${tx.id}:`, insertError);
+        continue;
+      }
+
+      // Mark transaction as split
+      await supabase
+        .from('transactions')
+        .update({ is_split: true })
+        .eq('id', tx.id);
+
+      splitCount++;
+    }
+
+    res.json({ split: splitCount, skipped: skippedCount });
+  } catch (error) {
+    console.error('Error bulk splitting transactions:', error);
+    res.status(500).json({ message: 'Failed to bulk split transactions' });
+  }
+});
+
 // Create splits for a transaction
 router.post('/:id/splits', async (req, res) => {
   try {

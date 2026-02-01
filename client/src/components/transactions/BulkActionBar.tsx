@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { X, Tag, Check } from 'lucide-react';
+import { X, Tag, Check, Split } from 'lucide-react';
 import clsx from 'clsx';
 import type { Tag as TagType } from '../../types';
 import { Badge } from '../ui/Badge';
@@ -9,6 +9,7 @@ interface BulkActionBarProps {
   selectedCount: number;
   tags: TagType[];
   onAddTag: (tagId: string) => void;
+  onSplit: () => void;
   onDone: () => void;
   onCancel: () => void;
   isLoading?: boolean;
@@ -19,6 +20,7 @@ export const BulkActionBar = ({
   selectedCount, 
   tags, 
   onAddTag,
+  onSplit,
   onDone,
   onCancel,
   isLoading = false,
@@ -84,6 +86,20 @@ export const BulkActionBar = ({
 
         {/* Actions */}
         <div className="mt-4 flex flex-wrap items-center gap-2">
+          {/* Split Button */}
+          <button
+            onClick={onSplit}
+            disabled={isLoading}
+            className={clsx(
+              "flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors",
+              "bg-midnight-700 text-slate-200 hover:bg-midnight-600",
+              isLoading && "opacity-50 cursor-not-allowed"
+            )}
+          >
+            <Split className="h-4 w-4" />
+            Split
+          </button>
+
           {/* Add Tag Button */}
           <div className="relative">
             <button

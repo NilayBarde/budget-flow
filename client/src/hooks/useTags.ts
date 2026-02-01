@@ -91,3 +91,16 @@ export const useBulkRemoveTagFromTransactions = () => {
     },
   });
 };
+
+export const useBulkSplitTransactions = () => {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: ({ transactionIds, numPeople }: { transactionIds: string[]; numPeople: number }) =>
+      api.bulkSplitTransactions(transactionIds, numPeople),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['stats'] });
+    },
+  });
+};

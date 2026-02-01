@@ -315,6 +315,12 @@ export const bulkRemoveTagFromTransactions = (transactionIds: string[], tagId: s
     body: JSON.stringify({ transactionIds, tagId }),
   });
 
+export const bulkSplitTransactions = (transactionIds: string[], numPeople: number) =>
+  fetchApi<{ split: number; skipped: number }>('/transactions/bulk/splits', {
+    method: 'POST',
+    body: JSON.stringify({ transactionIds, numPeople }),
+  });
+
 // Merchant Mappings
 export const getMerchantMappings = () => fetchApi<MerchantMapping[]>('/merchant-mappings');
 
