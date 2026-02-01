@@ -12,6 +12,8 @@ import type {
   TransactionFilters,
   PlaidLinkToken,
   TransactionSplit,
+  InvestmentHoldingsResponse,
+  InvestmentSummary,
 } from '../types';
 
 const fetchApi = async <T>(
@@ -392,8 +394,6 @@ export const deleteCsvImport = (importId: string) =>
   fetchApi<void>(`/csv-import/imports/${importId}`, { method: 'DELETE' });
 
 // Investments
-import type { InvestmentHoldingsResponse, InvestmentSummary, Account } from '../types';
-
 export const getInvestmentHoldings = () =>
   fetchApi<InvestmentHoldingsResponse>('/investments/holdings');
 
