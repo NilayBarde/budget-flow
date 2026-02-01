@@ -84,6 +84,15 @@ export interface CsvImportResponse {
   imported: number;
   skipped: number;
   errors: string[];
+  importId?: string;
+}
+
+export interface CsvImportRecord {
+  id: string;
+  account_id: string;
+  file_name: string;
+  transaction_count: number;
+  created_at: string;
 }
 
 export interface CreateManualAccountData {
@@ -340,3 +349,9 @@ export const importCsv = async (
 
   return response.json();
 };
+
+export const getCsvImports = (accountId: string) =>
+  fetchApi<CsvImportRecord[]>(`/csv-import/${accountId}/imports`);
+
+export const deleteCsvImport = (importId: string) =>
+  fetchApi<void>(`/csv-import/imports/${importId}`, { method: 'DELETE' });

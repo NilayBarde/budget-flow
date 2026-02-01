@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { CreditCard, Plus } from 'lucide-react';
 import { Card, Spinner, EmptyState, Button } from '../components/ui';
-import { AccountCard, PlaidLinkButton, CreateManualAccountModal, CsvImportModal } from '../components/accounts';
+import { AccountCard, PlaidLinkButton, CreateManualAccountModal, CsvImportModal, ImportHistoryModal } from '../components/accounts';
 import { useAccounts } from '../hooks';
 import type { Account } from '../types';
 
@@ -9,6 +9,7 @@ export const Accounts = () => {
   const { data: accounts, isLoading } = useAccounts();
   const [showManualAccountModal, setShowManualAccountModal] = useState(false);
   const [csvImportAccount, setCsvImportAccount] = useState<Account | null>(null);
+  const [historyAccount, setHistoryAccount] = useState<Account | null>(null);
 
   const handleOpenManualModal = useCallback(() => {
     setShowManualAccountModal(true);
@@ -24,6 +25,14 @@ export const Accounts = () => {
 
   const handleCloseCsvImport = useCallback(() => {
     setCsvImportAccount(null);
+  }, []);
+
+  const handleViewHistory = useCallback((account: Account) => {
+    setHistoryAccount(account);
+  }, []);
+
+  const handleCloseHistory = useCallback(() => {
+    setHistoryAccount(null);
   }, []);
 
   return (
@@ -72,7 +81,12 @@ export const Accounts = () => {
       ) : accounts && accounts.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
           {accounts.map(account => (
-            <AccountCard key={account.id} account={account} onImportCsv={handleImportCsv} />
+            <AccountCard 
+              key={account.id} 
+              account={account} 
+              onImportCsv={handleImportCsv}
+              onViewHistory={handleViewHistory}
+            />
           ))}
         </div>
       ) : (
@@ -103,6 +117,14 @@ export const Accounts = () => {
           isOpen={!!csvImportAccount}
           onClose={handleCloseCsvImport}
           account={csvImportAccount}
+        />
+      )}
+
+      {historyAccount && (
+        <ImportHistoryModal
+          isOpen={!!historyAccount}
+          onClose={handleCloseHistory}
+          account={historyAccount}
         />
       )}
     </div>

@@ -1,4 +1,4 @@
-import { RefreshCw, Trash2, Upload } from 'lucide-react';
+import { RefreshCw, Trash2, Upload, History } from 'lucide-react';
 import { Card, Button } from '../ui';
 import type { Account } from '../../types';
 import { formatDate } from '../../utils/formatters';
@@ -7,13 +7,14 @@ import { useSyncAccount, useDeleteAccount } from '../../hooks';
 interface AccountCardProps {
   account: Account;
   onImportCsv?: (account: Account) => void;
+  onViewHistory?: (account: Account) => void;
 }
 
 // Check if account is a manual (non-Plaid) account
 const isManualAccount = (account: Account): boolean => 
   account.plaid_access_token === 'manual' || account.plaid_item_id.startsWith('manual-');
 
-export const AccountCard = ({ account, onImportCsv }: AccountCardProps) => {
+export const AccountCard = ({ account, onImportCsv, onViewHistory }: AccountCardProps) => {
   const syncAccount = useSyncAccount();
   const deleteAccount = useDeleteAccount();
 
@@ -31,6 +32,10 @@ export const AccountCard = ({ account, onImportCsv }: AccountCardProps) => {
 
   const handleImportCsv = () => {
     onImportCsv?.(account);
+  };
+
+  const handleViewHistory = () => {
+    onViewHistory?.(account);
   };
 
   // Get institution icon/color
@@ -79,15 +84,26 @@ export const AccountCard = ({ account, onImportCsv }: AccountCardProps) => {
         
         <div className="flex gap-2 mt-3 pt-3 border-t border-midnight-700">
           {isManual ? (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={handleImportCsv}
-              className="flex-1"
-            >
-              <Upload className="h-4 w-4 mr-2" />
-              Import CSV
-            </Button>
+            <>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleImportCsv}
+                className="flex-1"
+              >
+                <Upload className="h-4 w-4 mr-2" />
+                Import CSV
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleViewHistory}
+                className="text-slate-400 hover:text-slate-200"
+                title="Import History"
+              >
+                <History className="h-4 w-4" />
+              </Button>
+            </>
           ) : (
             <Button
               variant="secondary"
@@ -133,14 +149,25 @@ export const AccountCard = ({ account, onImportCsv }: AccountCardProps) => {
         
         <div className="flex gap-2">
           {isManual ? (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={handleImportCsv}
-            >
-              <Upload className="h-4 w-4 mr-1" />
-              Import CSV
-            </Button>
+            <>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleImportCsv}
+              >
+                <Upload className="h-4 w-4 mr-1" />
+                Import CSV
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleViewHistory}
+                className="text-slate-400 hover:text-slate-200"
+                title="Import History"
+              >
+                <History className="h-4 w-4" />
+              </Button>
+            </>
           ) : (
             <Button
               variant="secondary"

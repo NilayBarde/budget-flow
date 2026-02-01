@@ -84,7 +84,29 @@ export const useImportCsv = () => {
       file: File; 
       skipDuplicates?: boolean;
     }) => api.importCsv(accountId, file, skipDuplicates),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['stats'] });
+      queryClient.invalidateQueries({ queryKey: ['csv-imports', variables.accountId] });
+    },
+  });
+};
+
+export const useCsvImports = (accountId: string) => {
+  return useQuery({
+    queryKey: ['csv-imports', accountId],
+    queryFn: () => api.getCsvImports(accountId),
+    enabled: !!accountId,
+  });
+};
+
+export const useDeleteCsvImport = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (importId: string) => api.deleteCsvImport(importId),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['csv-imports'] });
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
       queryClient.invalidateQueries({ queryKey: ['stats'] });
     },

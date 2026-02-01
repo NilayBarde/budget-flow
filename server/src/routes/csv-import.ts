@@ -217,6 +217,15 @@ interface ImportResponse {
   imported: number;
   skipped: number;
   errors: string[];
+  importId?: string;
+}
+
+interface CsvImport {
+  id: string;
+  account_id: string;
+  file_name: string;
+  transaction_count: number;
+  created_at: string;
 }
 
 // Preview CSV import (parse and show what will be imported)
@@ -410,6 +419,20 @@ router.post('/:accountId/import', upload.single('file'), async (req, res) => {
     const { data: mappings } = await supabase.from('merchant_mappings').select('*');
     const merchantMappingMap = new Map(mappings?.map(m => [m.original_name.toLowerCase(), m]) || []);
 
+    // Create import record
+    const importId = uuidv4();
+    const { error: importError } = await supabase.from('csv_imports').insert({
+      id: importId,
+      account_id: accountId,
+      file_name: file.originalname,
+      transaction_count: 0, // Will update after import
+    });
+
+    if (importError) {
+      console.error('Error creating import record:', importError);
+      return res.status(500).json({ message: 'Failed to create import record' });
+    }
+
     let imported = 0;
     let skipped = 0;
     const errors: string[] = [];
@@ -451,11 +474,12 @@ router.post('/:accountId/import', upload.single('file'), async (req, res) => {
           categoryId = categoryMap.get('Investment') || null;
         }
 
-        // Insert transaction
+        // Insert transaction with import_id
         const { error: insertError } = await supabase.from('transactions').insert({
           id: uuidv4(),
           account_id: accountId,
           plaid_transaction_id: null,
+          import_id: importId,
           amount,
           date,
           merchant_name: description,
@@ -482,11 +506,23 @@ router.post('/:accountId/import', upload.single('file'), async (req, res) => {
       }
     }
 
+    // Update import record with final count
+    await supabase
+      .from('csv_imports')
+      .update({ transaction_count: imported })
+      .eq('id', importId);
+
+    // If no transactions were imported, delete the import record
+    if (imported === 0) {
+      await supabase.from('csv_imports').delete().eq('id', importId);
+    }
+
     const response: ImportResponse = {
       success: true,
       imported,
       skipped,
-      errors: errors.slice(0, 10), // Limit errors to first 10
+      errors: errors.slice(0, 10),
+      importId: imported > 0 ? importId : undefined,
     };
 
     console.log(`CSV import complete: ${imported} imported, ${skipped} skipped, ${errors.length} errors`);
@@ -494,6 +530,46 @@ router.post('/:accountId/import', upload.single('file'), async (req, res) => {
   } catch (error) {
     console.error('Error importing CSV:', error);
     res.status(500).json({ message: 'Failed to import CSV file' });
+  }
+});
+
+// Get all imports for an account
+router.get('/:accountId/imports', async (req, res) => {
+  try {
+    const { accountId } = req.params;
+
+    const { data, error } = await supabase
+      .from('csv_imports')
+      .select('*')
+      .eq('account_id', accountId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    console.error('Error fetching imports:', error);
+    res.status(500).json({ message: 'Failed to fetch imports' });
+  }
+});
+
+// Delete an import (and all its transactions)
+router.delete('/imports/:importId', async (req, res) => {
+  try {
+    const { importId } = req.params;
+
+    // Transactions will be cascade deleted due to foreign key
+    const { error } = await supabase
+      .from('csv_imports')
+      .delete()
+      .eq('id', importId);
+
+    if (error) throw error;
+    
+    console.log(`Deleted import ${importId} and all associated transactions`);
+    res.status(204).send();
+  } catch (error) {
+    console.error('Error deleting import:', error);
+    res.status(500).json({ message: 'Failed to delete import' });
   }
 });
 
