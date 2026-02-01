@@ -160,27 +160,48 @@ router.post('/exchange-token', async (req, res) => {
       throw new Error('No accounts found. Please ensure your account is accessible and try again.');
     }
     
-    const plaidAccount = accountsResponse.accounts[0];
+    const institutionName = metadata?.institution?.name || 'Unknown';
+    const plaidAccounts = accountsResponse.accounts;
+    const createdAccounts: Array<{ id: string; plaid_account_id: string }> = [];
+    
+    console.log(`Found ${plaidAccounts.length} accounts from ${institutionName}`);
 
-    // Store the account
-    const accountId = uuidv4();
-    const account = {
-      id: accountId,
-      user_id: DEFAULT_USER_ID,
-      plaid_item_id: itemId,
-      plaid_access_token: accessToken,
-      institution_name: metadata?.institution?.name || 'Unknown',
-      account_name: plaidAccount?.name || 'Account',
-      account_type: plaidAccount?.type || 'unknown',
-      created_at: new Date().toISOString(),
-    };
+    // Store ALL accounts from this Plaid Item
+    for (const plaidAccount of plaidAccounts) {
+      const accountId = uuidv4();
+      const account = {
+        id: accountId,
+        user_id: DEFAULT_USER_ID,
+        plaid_item_id: itemId,
+        plaid_access_token: accessToken,
+        institution_name: institutionName,
+        account_name: plaidAccount.name || 'Account',
+        account_type: plaidAccount.subtype || plaidAccount.type || 'unknown',
+        plaid_account_id: plaidAccount.account_id, // Store Plaid's account ID for matching transactions
+        current_balance: plaidAccount.balances?.current ?? null,
+        created_at: new Date().toISOString(),
+      };
 
-    const { data, error } = await supabase.from('accounts').insert(account).select().single();
+      const { data, error } = await supabase.from('accounts').insert(account).select().single();
 
-    if (error) throw error;
+      if (error) {
+        console.error(`Failed to create account ${plaidAccount.name}:`, error);
+        continue;
+      }
+      
+      console.log(`Created account: ${institutionName} - ${plaidAccount.name} (${plaidAccount.subtype || plaidAccount.type})`);
+      createdAccounts.push({ id: accountId, plaid_account_id: plaidAccount.account_id });
+    }
+
+    if (createdAccounts.length === 0) {
+      throw new Error('Failed to create any accounts');
+    }
 
     // Auto-sync transactions after connecting using /transactions/sync
-    console.log('Auto-syncing transactions for new account...');
+    console.log('Auto-syncing transactions for new accounts...');
+    
+    // Create a map of Plaid account IDs to our account IDs
+    const accountIdMap = new Map(createdAccounts.map(a => [a.plaid_account_id, a.id]));
     
     try {
       const syncResult = await plaidService.syncTransactions(accessToken, null);
@@ -195,6 +216,13 @@ router.post('/exchange-token', async (req, res) => {
       
       let syncedCount = 0;
       for (const tx of syncResult.added) {
+        // Map the transaction to the correct account using Plaid's account_id
+        const accountId = accountIdMap.get(tx.account_id);
+        if (!accountId) {
+          console.warn(`No matching account for transaction with Plaid account_id: ${tx.account_id}`);
+          continue;
+        }
+        
         const texts = [tx.merchant_name || '', tx.name || '', tx.original_description || ''];
         const displayName = cleanMerchantName(tx.merchant_name || tx.name);
         const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
@@ -245,18 +273,26 @@ router.post('/exchange-token', async (req, res) => {
         syncedCount++;
       }
       
-      // Save the cursor for future syncs
+      // Save the cursor for future syncs - store on the first account (they all share the same access token)
+      const firstAccountId = createdAccounts[0].id;
       await supabase
         .from('accounts')
         .update({ plaid_cursor: syncResult.nextCursor })
-        .eq('id', accountId);
+        .eq('id', firstAccountId);
       
-      console.log(`Auto-synced ${syncedCount} transactions`);
+      console.log(`Auto-synced ${syncedCount} transactions across ${createdAccounts.length} accounts`);
     } catch (syncError) {
-      console.error('Auto-sync failed (account created, but transactions need manual sync):', syncError);
+      console.error('Auto-sync failed (accounts created, but transactions need manual sync):', syncError);
     }
 
-    res.json(data);
+    // Return the first created account for backwards compatibility
+    const { data: firstAccount } = await supabase
+      .from('accounts')
+      .select('*')
+      .eq('id', createdAccounts[0].id)
+      .single();
+
+    res.json(firstAccount);
   } catch (error) {
     console.error('Error exchanging token:', error);
     

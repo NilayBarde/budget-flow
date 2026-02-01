@@ -143,6 +143,35 @@ export const syncAccount = (accountId: string) =>
 export const deleteAccount = (accountId: string) =>
   fetchApi<void>(`/accounts/${accountId}`, { method: 'DELETE' });
 
+export interface UpdateAccountData {
+  balance_threshold?: number | null;
+}
+
+export const updateAccount = (accountId: string, data: UpdateAccountData) =>
+  fetchApi<Account>(`/accounts/${accountId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+
+export interface BalanceResponse {
+  balance: number;
+  account_name: string;
+}
+
+export const refreshBalance = (accountId: string) =>
+  fetchApi<BalanceResponse>(`/accounts/${accountId}/balance`);
+
+export interface RefreshAccountsResponse {
+  message: string;
+  created: Array<{ id: string; name: string; type: string }>;
+  updated: string[];
+  total_new: number;
+  total_updated: number;
+}
+
+export const refreshAccounts = (accountId: string) =>
+  fetchApi<RefreshAccountsResponse>(`/accounts/${accountId}/refresh-accounts`, { method: 'POST' });
+
 export const reclassifyTransactions = () =>
   fetchApi<{ reclassified: number; breakdown: { income: number; expense: number; transfer: number } }>(
     '/accounts/reclassify-transactions',

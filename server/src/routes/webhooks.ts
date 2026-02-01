@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
 import * as plaidService from '../services/plaid.js';
 import { categorizeWithPlaid, cleanMerchantName, PlaidPFC } from '../services/categorizer.js';
+import { checkAccountBalance } from '../services/balance-alerts.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -231,6 +232,16 @@ router.post('/plaid', async (req, res) => {
           .eq('id', account.id);
 
         console.log(`Cursor updated for account ${account.id}`);
+
+        // Check balance and send alert if threshold exceeded
+        try {
+          const alertSent = await checkAccountBalance(account.id);
+          if (alertSent) {
+            console.log(`Balance alert sent for account ${account.id}`);
+          }
+        } catch (balanceError) {
+          console.error('Error checking balance after webhook sync:', balanceError);
+        }
       } else if (webhook_code === 'INITIAL_UPDATE') {
         console.log(`Initial update received for account ${account.id}`);
         // Trigger a sync to get the initial 30 days of data
@@ -245,6 +256,16 @@ router.post('/plaid', async (req, res) => {
           .from('accounts')
           .update({ plaid_cursor: syncResult.nextCursor })
           .eq('id', account.id);
+
+        // Check balance on initial update as well
+        try {
+          const alertSent = await checkAccountBalance(account.id);
+          if (alertSent) {
+            console.log(`Balance alert sent for account ${account.id}`);
+          }
+        } catch (balanceError) {
+          console.error('Error checking balance after initial sync:', balanceError);
+        }
       } else if (webhook_code === 'HISTORICAL_UPDATE') {
         console.log(`Historical update complete for account ${account.id}`);
         // Mark historical sync as complete

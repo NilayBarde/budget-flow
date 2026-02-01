@@ -5,11 +5,15 @@ export interface Account {
   user_id: string;
   plaid_item_id: string;
   plaid_access_token: string;
+  plaid_account_id?: string | null;
   institution_name: string;
   account_name: string;
   account_type: string;
   plaid_cursor?: string | null;
   historical_sync_complete?: boolean;
+  current_balance?: number | null;
+  balance_threshold?: number | null;
+  last_balance_alert_at?: string | null;
   created_at: string;
 }
 

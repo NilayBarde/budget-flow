@@ -1,42 +1,79 @@
-import { RefreshCw, Trash2, Upload, History } from 'lucide-react';
+import { useState, useCallback } from 'react';
+import { RefreshCw, Trash2, Upload, History, Bell, BellOff, Users } from 'lucide-react';
 import { Card, Button } from '../ui';
 import type { Account } from '../../types';
-import { formatDate } from '../../utils/formatters';
-import { useSyncAccount, useDeleteAccount } from '../../hooks';
+import { formatDate, formatCurrency } from '../../utils/formatters';
+import { useSyncAccount, useDeleteAccount, useRefreshAccounts } from '../../hooks';
 
 interface AccountCardProps {
   account: Account;
   onImportCsv?: (account: Account) => void;
   onViewHistory?: (account: Account) => void;
+  onSetBalanceAlert?: (account: Account) => void;
 }
 
 // Check if account is a manual (non-Plaid) account
 const isManualAccount = (account: Account): boolean => 
   account.plaid_access_token === 'manual' || account.plaid_item_id.startsWith('manual-');
 
-export const AccountCard = ({ account, onImportCsv, onViewHistory }: AccountCardProps) => {
+// Check if account is a credit card type
+const isCreditCardAccount = (accountType: string): boolean => {
+  const type = accountType.toLowerCase();
+  return type.includes('credit') || type === 'credit card';
+};
+
+export const AccountCard = ({ account, onImportCsv, onViewHistory, onSetBalanceAlert }: AccountCardProps) => {
   const syncAccount = useSyncAccount();
   const deleteAccount = useDeleteAccount();
+  const refreshAccounts = useRefreshAccounts();
+  const [refreshResult, setRefreshResult] = useState<string | null>(null);
 
   const isManual = isManualAccount(account);
+  const isCreditCard = isCreditCardAccount(account.account_type);
+  const hasBalance = account.current_balance !== null && account.current_balance !== undefined;
+  const hasThreshold = account.balance_threshold !== null && account.balance_threshold !== undefined;
+  const isOverThreshold = hasBalance && hasThreshold && account.current_balance! > account.balance_threshold!;
 
-  const handleSync = () => {
+  const handleSync = useCallback(() => {
     syncAccount.mutate(account.id);
-  };
+  }, [syncAccount, account.id]);
 
-  const handleDelete = () => {
+  const handleDelete = useCallback(() => {
     if (confirm(`Are you sure you want to disconnect ${account.institution_name}?`)) {
       deleteAccount.mutate(account.id);
     }
-  };
+  }, [deleteAccount, account.institution_name, account.id]);
 
-  const handleImportCsv = () => {
+  const handleImportCsv = useCallback(() => {
     onImportCsv?.(account);
-  };
+  }, [onImportCsv, account]);
 
-  const handleViewHistory = () => {
+  const handleViewHistory = useCallback(() => {
     onViewHistory?.(account);
-  };
+  }, [onViewHistory, account]);
+
+  const handleSetBalanceAlert = useCallback(() => {
+    onSetBalanceAlert?.(account);
+  }, [onSetBalanceAlert, account]);
+
+  const handleRefreshAccounts = useCallback(async () => {
+    try {
+      const result = await refreshAccounts.mutateAsync(account.id);
+      if (result.total_new > 0) {
+        setRefreshResult(`Added ${result.total_new} new account(s): ${result.created.map(a => a.name).join(', ')}`);
+      } else if (result.total_updated > 0) {
+        setRefreshResult(`Updated ${result.total_updated} account(s)`);
+      } else {
+        setRefreshResult('All accounts already synced');
+      }
+      // Clear message after 5 seconds
+      setTimeout(() => setRefreshResult(null), 5000);
+    } catch (error) {
+      console.error('Failed to refresh accounts:', error);
+      setRefreshResult('Failed to refresh accounts');
+      setTimeout(() => setRefreshResult(null), 5000);
+    }
+  }, [refreshAccounts, account.id]);
 
   // Get institution icon/color
   const getInstitutionColor = (name: string): string => {
@@ -59,8 +96,59 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory }: AccountCard
 
   const institutionColor = getInstitutionColor(account.institution_name);
 
+  // Balance display component
+  const BalanceDisplay = () => {
+    if (isManual || !isCreditCard) return null;
+    
+    return (
+      <div className="flex items-center gap-2">
+        {hasBalance && (
+          <span className={`text-sm font-medium ${isOverThreshold ? 'text-amber-400' : 'text-slate-300'}`}>
+            {formatCurrency(account.current_balance!)}
+          </span>
+        )}
+        {hasThreshold && (
+          <span 
+            className={`flex items-center gap-1 text-xs px-1.5 py-0.5 rounded ${
+              isOverThreshold 
+                ? 'bg-amber-500/20 text-amber-400' 
+                : 'bg-midnight-700 text-slate-400'
+            }`}
+            title={`Alert threshold: ${formatCurrency(account.balance_threshold!)}`}
+          >
+            <Bell className="h-3 w-3" />
+          </span>
+        )}
+      </div>
+    );
+  };
+
+  // Alert button for credit cards (Plaid only)
+  const AlertButton = ({ className = '' }: { className?: string }) => {
+    if (isManual || !isCreditCard) return null;
+    
+    return (
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={handleSetBalanceAlert}
+        className={`${hasThreshold ? 'text-amber-400 hover:text-amber-300' : 'text-slate-400 hover:text-slate-200'} ${className}`}
+        title={hasThreshold ? 'Edit balance alert' : 'Set balance alert'}
+      >
+        {hasThreshold ? <Bell className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
+      </Button>
+    );
+  };
+
   return (
     <Card className="hover:border-midnight-500 transition-colors" padding="sm">
+      {/* Refresh accounts result message */}
+      {refreshResult && (
+        <div className="mb-3 p-2 bg-accent-500/10 border border-accent-500/30 rounded-lg text-sm text-accent-400">
+          {refreshResult}
+        </div>
+      )}
+      
       {/* Mobile Layout */}
       <div className="md:hidden">
         <div className="flex items-start gap-3">
@@ -72,7 +160,10 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory }: AccountCard
           </div>
           
           <div className="flex-1 min-w-0">
-            <h3 className="font-semibold text-slate-100 truncate">{account.institution_name}</h3>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="font-semibold text-slate-100 truncate">{account.institution_name}</h3>
+              <BalanceDisplay />
+            </div>
             <p className="text-sm text-slate-400 truncate">
               {account.account_name} • {account.account_type}
             </p>
@@ -105,16 +196,29 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory }: AccountCard
               </Button>
             </>
           ) : (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={handleSync}
-              isLoading={syncAccount.isPending}
-              className="flex-1"
-            >
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Sync
-            </Button>
+            <>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleSync}
+                isLoading={syncAccount.isPending}
+                className="flex-1"
+              >
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Sync
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleRefreshAccounts}
+                isLoading={refreshAccounts.isPending}
+                className="text-slate-400 hover:text-slate-200"
+                title="Find missing accounts from this institution"
+              >
+                <Users className="h-4 w-4" />
+              </Button>
+              <AlertButton />
+            </>
           )}
           <Button
             variant="ghost"
@@ -138,7 +242,10 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory }: AccountCard
         </div>
         
         <div className="flex-1">
-          <h3 className="font-semibold text-slate-100">{account.institution_name}</h3>
+          <div className="flex items-center gap-3">
+            <h3 className="font-semibold text-slate-100">{account.institution_name}</h3>
+            <BalanceDisplay />
+          </div>
           <p className="text-sm text-slate-400">
             {account.account_name} • {account.account_type}
           </p>
@@ -169,14 +276,27 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory }: AccountCard
               </Button>
             </>
           ) : (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={handleSync}
-              isLoading={syncAccount.isPending}
-            >
-              <RefreshCw className="h-4 w-4" />
-            </Button>
+            <>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleSync}
+                isLoading={syncAccount.isPending}
+              >
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleRefreshAccounts}
+                isLoading={refreshAccounts.isPending}
+                className="text-slate-400 hover:text-slate-200"
+                title="Find missing accounts from this institution"
+              >
+                <Users className="h-4 w-4" />
+              </Button>
+              <AlertButton />
+            </>
           )}
           <Button
             variant="ghost"

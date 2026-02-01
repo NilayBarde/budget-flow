@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { CreditCard, Plus } from 'lucide-react';
 import { Card, Spinner, EmptyState, Button } from '../components/ui';
-import { AccountCard, PlaidLinkButton, CreateManualAccountModal, CsvImportModal, ImportHistoryModal } from '../components/accounts';
+import { AccountCard, PlaidLinkButton, CreateManualAccountModal, CsvImportModal, ImportHistoryModal, BalanceAlertModal } from '../components/accounts';
 import { useAccounts } from '../hooks';
 import type { Account } from '../types';
 
@@ -10,6 +10,7 @@ export const Accounts = () => {
   const [showManualAccountModal, setShowManualAccountModal] = useState(false);
   const [csvImportAccount, setCsvImportAccount] = useState<Account | null>(null);
   const [historyAccount, setHistoryAccount] = useState<Account | null>(null);
+  const [balanceAlertAccount, setBalanceAlertAccount] = useState<Account | null>(null);
 
   const handleOpenManualModal = useCallback(() => {
     setShowManualAccountModal(true);
@@ -33,6 +34,14 @@ export const Accounts = () => {
 
   const handleCloseHistory = useCallback(() => {
     setHistoryAccount(null);
+  }, []);
+
+  const handleSetBalanceAlert = useCallback((account: Account) => {
+    setBalanceAlertAccount(account);
+  }, []);
+
+  const handleCloseBalanceAlert = useCallback(() => {
+    setBalanceAlertAccount(null);
   }, []);
 
   return (
@@ -86,6 +95,7 @@ export const Accounts = () => {
               account={account} 
               onImportCsv={handleImportCsv}
               onViewHistory={handleViewHistory}
+              onSetBalanceAlert={handleSetBalanceAlert}
             />
           ))}
         </div>
@@ -125,6 +135,14 @@ export const Accounts = () => {
           isOpen={!!historyAccount}
           onClose={handleCloseHistory}
           account={historyAccount}
+        />
+      )}
+
+      {balanceAlertAccount && (
+        <BalanceAlertModal
+          isOpen={!!balanceAlertAccount}
+          onClose={handleCloseBalanceAlert}
+          account={balanceAlertAccount}
         />
       )}
     </div>

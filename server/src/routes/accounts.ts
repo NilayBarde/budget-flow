@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
 import * as plaidService from '../services/plaid.js';
 import { categorizeWithPlaid, cleanMerchantName, PlaidPFC } from '../services/categorizer.js';
+import { checkAccountBalance, fetchAndUpdateBalance } from '../services/balance-alerts.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -363,13 +364,25 @@ router.post('/:id/sync', async (req, res) => {
     console.log(`Sync complete: +${addedCount} added, ~${modifiedCount} modified, -${removedCount} removed`);
     console.log(`Historical sync status: ${syncResult.transactionsUpdateStatus || 'unknown'}`);
 
+    // Check balance and send alert if threshold exceeded
+    console.log('Starting balance check...');
+    let balanceAlertSent = false;
+    try {
+      balanceAlertSent = await checkAccountBalance(id);
+      console.log(`Balance check complete, alert sent: ${balanceAlertSent}`);
+    } catch (balanceError) {
+      console.error('Error checking balance after sync:', balanceError);
+      // Don't fail the sync request if balance check fails
+    }
+
     res.json({ 
       added: addedCount, 
       modified: modifiedCount, 
       removed: removedCount,
       cursor_updated: true,
       transactions_update_status: syncResult.transactionsUpdateStatus,
-      historical_complete: historicalComplete || account.historical_sync_complete
+      historical_complete: historicalComplete || account.historical_sync_complete,
+      balance_alert_sent: balanceAlertSent
     });
   } catch (error) {
     console.error('Error syncing account:', error);
@@ -438,6 +451,206 @@ router.delete('/:id', async (req, res) => {
   } catch (error) {
     console.error('Error deleting account:', error);
     res.status(500).json({ message: 'Failed to delete account' });
+  }
+});
+
+// Refresh accounts from Plaid - fetches any missing accounts from an existing Plaid Item
+// This is useful when the original link only stored one account but Plaid has multiple
+router.post('/:id/refresh-accounts', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Get the existing account to get the access token
+    const { data: existingAccount, error: accountError } = await supabase
+      .from('accounts')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (accountError || !existingAccount) {
+      return res.status(404).json({ message: 'Account not found' });
+    }
+
+    // Check if it's a manual account
+    if (existingAccount.plaid_access_token === 'manual') {
+      return res.status(400).json({ message: 'Cannot refresh accounts for manual accounts' });
+    }
+
+    // Fetch all accounts from Plaid
+    const plaidData = await plaidService.getAccounts(existingAccount.plaid_access_token);
+    
+    if (!plaidData.accounts || plaidData.accounts.length === 0) {
+      return res.status(400).json({ message: 'No accounts found in Plaid' });
+    }
+
+    console.log(`Found ${plaidData.accounts.length} accounts from Plaid for ${existingAccount.institution_name}`);
+
+    // Get all existing accounts for this Plaid Item
+    const { data: existingAccounts } = await supabase
+      .from('accounts')
+      .select('plaid_account_id')
+      .eq('plaid_item_id', existingAccount.plaid_item_id);
+
+    const existingPlaidAccountIds = new Set(
+      existingAccounts?.map(a => a.plaid_account_id).filter(Boolean) || []
+    );
+
+    // Also check by account name as fallback for older accounts without plaid_account_id
+    const { data: existingByName } = await supabase
+      .from('accounts')
+      .select('account_name')
+      .eq('plaid_item_id', existingAccount.plaid_item_id);
+
+    const existingNames = new Set(
+      existingByName?.map(a => a.account_name) || []
+    );
+
+    const newAccounts: Array<{ id: string; name: string; type: string }> = [];
+    const updatedAccounts: string[] = [];
+
+    for (const plaidAccount of plaidData.accounts) {
+      const alreadyExists = existingPlaidAccountIds.has(plaidAccount.account_id) ||
+                           existingNames.has(plaidAccount.name);
+
+      if (alreadyExists) {
+        // Update existing account with plaid_account_id and balance if missing
+        const { data: existing } = await supabase
+          .from('accounts')
+          .select('id, plaid_account_id')
+          .eq('plaid_item_id', existingAccount.plaid_item_id)
+          .or(`plaid_account_id.eq.${plaidAccount.account_id},account_name.eq.${plaidAccount.name}`)
+          .single();
+
+        if (existing && !existing.plaid_account_id) {
+          await supabase
+            .from('accounts')
+            .update({ 
+              plaid_account_id: plaidAccount.account_id,
+              current_balance: plaidAccount.balances?.current ?? null,
+              account_type: plaidAccount.subtype || plaidAccount.type || existing.plaid_account_id,
+            })
+            .eq('id', existing.id);
+          updatedAccounts.push(plaidAccount.name);
+        }
+        continue;
+      }
+
+      // Create new account
+      const accountId = uuidv4();
+      const account = {
+        id: accountId,
+        user_id: existingAccount.user_id,
+        plaid_item_id: existingAccount.plaid_item_id,
+        plaid_access_token: existingAccount.plaid_access_token,
+        plaid_account_id: plaidAccount.account_id,
+        institution_name: existingAccount.institution_name,
+        account_name: plaidAccount.name || 'Account',
+        account_type: plaidAccount.subtype || plaidAccount.type || 'unknown',
+        current_balance: plaidAccount.balances?.current ?? null,
+        created_at: new Date().toISOString(),
+      };
+
+      const { error: insertError } = await supabase
+        .from('accounts')
+        .insert(account);
+
+      if (insertError) {
+        console.error(`Failed to create account ${plaidAccount.name}:`, insertError);
+        continue;
+      }
+
+      console.log(`Created new account: ${existingAccount.institution_name} - ${plaidAccount.name} (${plaidAccount.subtype || plaidAccount.type})`);
+      newAccounts.push({ 
+        id: accountId, 
+        name: plaidAccount.name, 
+        type: plaidAccount.subtype || plaidAccount.type || 'unknown'
+      });
+    }
+
+    res.json({
+      message: `Found ${plaidData.accounts.length} accounts in Plaid`,
+      created: newAccounts,
+      updated: updatedAccounts,
+      total_new: newAccounts.length,
+      total_updated: updatedAccounts.length,
+    });
+  } catch (error) {
+    console.error('Error refreshing accounts:', error);
+    res.status(500).json({ message: 'Failed to refresh accounts from Plaid' });
+  }
+});
+
+// Update an account (balance threshold, etc.)
+router.patch('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { balance_threshold } = req.body;
+
+    // Build update object with only allowed fields
+    const updates: Record<string, unknown> = {};
+    
+    // Allow setting balance_threshold to null (to disable) or a number
+    if (balance_threshold !== undefined) {
+      updates.balance_threshold = balance_threshold;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ message: 'No valid fields to update' });
+    }
+
+    const { data, error } = await supabase
+      .from('accounts')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    if (!data) {
+      return res.status(404).json({ message: 'Account not found' });
+    }
+
+    console.log(`Updated account ${id}: balance_threshold=${balance_threshold}`);
+    res.json(data);
+  } catch (error) {
+    console.error('Error updating account:', error);
+    res.status(500).json({ message: 'Failed to update account' });
+  }
+});
+
+// Refresh balance for an account from Plaid
+router.get('/:id/balance', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { data: account, error: accountError } = await supabase
+      .from('accounts')
+      .select('id, plaid_access_token, account_name')
+      .eq('id', id)
+      .single();
+
+    if (accountError || !account) {
+      return res.status(404).json({ message: 'Account not found' });
+    }
+
+    // Check if it's a manual account
+    if (account.plaid_access_token === 'manual') {
+      return res.status(400).json({ 
+        message: 'Balance refresh not available for manual accounts' 
+      });
+    }
+
+    // Fetch and update balance from Plaid
+    const balance = await fetchAndUpdateBalance(id);
+
+    if (balance === null) {
+      return res.status(500).json({ message: 'Failed to fetch balance from Plaid' });
+    }
+
+    res.json({ balance, account_name: account.account_name });
+  } catch (error) {
+    console.error('Error refreshing balance:', error);
+    res.status(500).json({ message: 'Failed to refresh balance' });
   }
 });
 

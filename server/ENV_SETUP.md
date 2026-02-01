@@ -16,6 +16,11 @@ PLAID_ENV=sandbox
 
 # Server Configuration
 PORT=3001
+
+# Pushover Configuration (for balance alerts)
+# Get these from: https://pushover.net
+PUSHOVER_USER_KEY=your-pushover-user-key
+PUSHOVER_APP_TOKEN=your-pushover-app-token
 ```
 
 ## Getting Your Credentials
@@ -42,3 +47,12 @@ PORT=3001
 - `sandbox` - Use fake test credentials (`user_good` / `pass_good`)
 - `development` - Connect to real banks (100 free connections)
 - `production` - Requires Plaid approval
+
+### Pushover (for Balance Alerts)
+
+1. Go to [pushover.net](https://pushover.net) and create an account
+2. Install the Pushover app on your phone (iOS/Android) - $5 one-time purchase
+3. Copy your **User Key** from the dashboard → `PUSHOVER_USER_KEY`
+4. Create a new **Application/API Token** → `PUSHOVER_APP_TOKEN`
+
+Balance alerts will be sent to your Pushover app when a credit card balance exceeds your configured threshold. Alerts trigger automatically when new transactions are synced via Plaid webhooks.

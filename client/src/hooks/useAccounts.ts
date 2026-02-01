@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as api from '../services/api';
-import type { CreateManualAccountData } from '../services/api';
+import type { CreateManualAccountData, UpdateAccountData } from '../services/api';
 
 export const useAccounts = () => {
   return useQuery({
@@ -109,6 +109,41 @@ export const useDeleteCsvImport = () => {
       queryClient.invalidateQueries({ queryKey: ['csv-imports'] });
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
       queryClient.invalidateQueries({ queryKey: ['stats'] });
+    },
+  });
+};
+
+// Balance alert hooks
+export const useUpdateAccount = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ accountId, data }: { accountId: string; data: UpdateAccountData }) =>
+      api.updateAccount(accountId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+    },
+  });
+};
+
+export const useRefreshBalance = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (accountId: string) => api.refreshBalance(accountId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+    },
+  });
+};
+
+export const useRefreshAccounts = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (accountId: string) => api.refreshAccounts(accountId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
     },
   });
 };
