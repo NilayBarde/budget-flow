@@ -292,7 +292,8 @@ router.post('/:id/sync', async (req, res) => {
         return 'expense';
       })() as TransactionType;
 
-      // Auto-assign category with Plaid-first approach
+      // Auto-assign category only for expenses and returns
+      // Income, investment, and transfer types don't need categories - the type is sufficient
       let categoryId: string | null = null;
       let needsReview = false;
       
@@ -309,10 +310,6 @@ router.post('/:id/sync', async (req, res) => {
           categoryId = categoryMap.get(result.categoryName) || null;
           needsReview = result.needsReview;
         }
-      } else if (transactionType === 'income') {
-        categoryId = categoryMap.get('Income') || null;
-      } else if (transactionType === 'investment') {
-        categoryId = categoryMap.get('Investment') || null;
       }
 
       await supabase.from('transactions').insert({

@@ -308,7 +308,8 @@ router.post('/:accountId/preview', upload.single('file'), async (req, res) => {
 
         const transactionType = detectTransactionType(description, amount);
         
-        // Categorize the transaction
+        // Categorize the transaction - only expenses and returns get categories
+        // Income, investment, and transfer types don't need categories - the type is sufficient
         let categoryName: string | null = null;
         let needsReview = false;
 
@@ -316,10 +317,6 @@ router.post('/:accountId/preview', upload.single('file'), async (req, res) => {
           const result = categorizeWithPlaid(description, extendedDetails || null, null);
           categoryName = result.categoryName;
           needsReview = result.needsReview;
-        } else if (transactionType === 'income') {
-          categoryName = 'Income';
-        } else if (transactionType === 'investment') {
-          categoryName = 'Investment';
         }
 
         transactions.push({
@@ -458,20 +455,19 @@ router.post('/:accountId/import', upload.single('file'), async (req, res) => {
         // Check for merchant mapping
         const merchantMapping = merchantMappingMap.get(description.toLowerCase());
 
-        // Categorize
+        // Categorize - only expenses and returns get categories
+        // Income, investment, and transfer types don't need categories - the type is sufficient
         let categoryId: string | null = null;
         let needsReview = false;
 
-        if (merchantMapping?.default_category_id) {
-          categoryId = merchantMapping.default_category_id;
-        } else if (transactionType === 'expense' || transactionType === 'return') {
-          const result = categorizeWithPlaid(description, extendedDetails || null, null);
-          categoryId = categoryMap.get(result.categoryName) || null;
-          needsReview = result.needsReview;
-        } else if (transactionType === 'income') {
-          categoryId = categoryMap.get('Income') || null;
-        } else if (transactionType === 'investment') {
-          categoryId = categoryMap.get('Investment') || null;
+        if (transactionType === 'expense' || transactionType === 'return') {
+          if (merchantMapping?.default_category_id) {
+            categoryId = merchantMapping.default_category_id;
+          } else {
+            const result = categorizeWithPlaid(description, extendedDetails || null, null);
+            categoryId = categoryMap.get(result.categoryName) || null;
+            needsReview = result.needsReview;
+          }
         }
 
         // Insert transaction with import_id
