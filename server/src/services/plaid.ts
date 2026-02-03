@@ -22,7 +22,8 @@ export const createLinkToken = async (userId: string, redirectUri?: string, webh
   const request: Parameters<typeof plaidClient.linkTokenCreate>[0] = {
     user: { client_user_id: userId },
     client_name: 'BudgetFlow',
-    products: [Products.Transactions, Products.Investments],
+    products: [Products.Transactions],  // Only require Transactions - widely supported
+    optional_products: [Products.Investments],  // Request Investments if institution supports it
     country_codes: [CountryCode.Us],
     language: 'en',
     transactions: {
