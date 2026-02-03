@@ -56,21 +56,44 @@ export const OAuthCallback = () => {
     }
   }, [exchangeToken, navigate]);
 
-  const onExit = useCallback((err: unknown) => {
-    console.log('Plaid Link exited during OAuth:', err);
+  const onExit = useCallback((err: unknown, metadata?: unknown) => {
+    console.log('=== Plaid Link OAuth Exit ===');
+    console.log('Error:', JSON.stringify(err, null, 2));
+    console.log('Metadata:', JSON.stringify(metadata, null, 2));
+    console.log('Current URL:', window.location.href);
+    
     if (err) {
-      setError('Connection was cancelled or failed. Please try again.');
+      const plaidErr = err as { error_code?: string; error_message?: string; display_message?: string };
+      const errorMessage = plaidErr.display_message || plaidErr.error_message || 'Connection failed';
+      const errorCode = plaidErr.error_code || 'UNKNOWN';
+      console.error(`OAuth error [${errorCode}]: ${errorMessage}`);
+      setError(`${errorMessage} (Code: ${errorCode})`);
+    } else {
+      // User closed without error - still navigate back
+      console.log('User closed Plaid Link (no error)');
     }
     // Navigate back to accounts page after a delay
     setTimeout(() => navigate('/accounts'), 2000);
   }, [navigate]);
 
+  const onEvent = useCallback((eventName: string, metadata: unknown) => {
+    console.log('OAuth Plaid Link event:', eventName, metadata);
+  }, []);
+
   // Render Plaid Link when we have a token - it will auto-detect OAuth params
-  const { open, ready } = usePlaidLink({
+  const { open, ready, error: plaidLinkError } = usePlaidLink({
     token: linkToken,
     onSuccess,
     onExit,
+    onEvent,
   });
+  
+  // Log any Plaid Link initialization errors
+  useEffect(() => {
+    if (plaidLinkError) {
+      console.error('Plaid Link initialization error:', plaidLinkError);
+    }
+  }, [plaidLinkError]);
 
   // Open Plaid Link once ready - it will automatically complete the OAuth flow
   useEffect(() => {
