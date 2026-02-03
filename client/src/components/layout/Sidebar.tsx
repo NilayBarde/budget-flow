@@ -28,7 +28,7 @@ const navItems = [
 const bottomNavItems = [
   { to: '/', icon: LayoutDashboard, label: 'Home' },
   { to: '/transactions', icon: Receipt, label: 'Transactions' },
-  { to: '/budget', icon: PiggyBank, label: 'Budget' },
+  { to: '/investments', icon: TrendingUp, label: 'Investments' },
   { to: '/accounts', icon: CreditCard, label: 'Accounts' },
 ];
 
