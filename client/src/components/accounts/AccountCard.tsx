@@ -280,6 +280,13 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onSetBalanceA
             <p className="text-xs text-slate-500 mt-0.5">
               Connected {formatDate(account.created_at)}
             </p>
+            {isManual && (
+              <p className={`text-xs mt-0.5 ${account.last_csv_import_at ? 'text-slate-500' : 'text-amber-400'}`}>
+                {account.last_csv_import_at 
+                  ? `Last imported: ${formatDate(account.last_csv_import_at)}`
+                  : 'No imports yet'}
+              </p>
+            )}
           </div>
         </div>
         
@@ -405,9 +412,18 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onSetBalanceA
           <p className="text-sm text-slate-400">
             {account.account_name} • {account.account_type}
           </p>
-          <p className="text-xs text-slate-500 mt-1">
-            Connected {formatDate(account.created_at)}
-          </p>
+          <div className="flex items-center gap-3 mt-1">
+            <p className="text-xs text-slate-500">
+              Connected {formatDate(account.created_at)}
+            </p>
+            {isManual && (
+              <span className={`text-xs ${account.last_csv_import_at ? 'text-slate-500' : 'text-amber-400'}`}>
+                • {account.last_csv_import_at 
+                    ? `Last imported: ${formatDate(account.last_csv_import_at)}`
+                    : 'No imports yet'}
+              </span>
+            )}
+          </div>
         </div>
         
         <div className="flex gap-2">

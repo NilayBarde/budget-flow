@@ -148,13 +148,34 @@ const detectTransactionType = (
 // Get all accounts
 router.get('/', async (req, res) => {
   try {
-    const { data, error } = await supabase
+    const { data: accounts, error } = await supabase
       .from('accounts')
       .select('*')
       .order('created_at', { ascending: false });
 
     if (error) throw error;
-    res.json(data);
+
+    // Get the most recent CSV import date for each account
+    const { data: lastImports } = await supabase
+      .from('csv_imports')
+      .select('account_id, created_at')
+      .order('created_at', { ascending: false });
+
+    // Build a map of account_id -> most recent import date
+    const lastImportMap = new Map<string, string>();
+    for (const imp of lastImports || []) {
+      if (!lastImportMap.has(imp.account_id)) {
+        lastImportMap.set(imp.account_id, imp.created_at);
+      }
+    }
+
+    // Merge last import dates into accounts
+    const accountsWithLastImport = accounts?.map(account => ({
+      ...account,
+      last_csv_import_at: lastImportMap.get(account.id) || null,
+    }));
+
+    res.json(accountsWithLastImport);
   } catch (error) {
     console.error('Error fetching accounts:', error);
     res.status(500).json({ message: 'Failed to fetch accounts' });
