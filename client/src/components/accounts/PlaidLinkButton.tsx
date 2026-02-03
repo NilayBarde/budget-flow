@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePlaidLink } from 'react-plaid-link';
 import type { PlaidLinkOptions } from 'react-plaid-link';
 import { Plus } from 'lucide-react';
@@ -167,11 +167,24 @@ export const PlaidLinkButton = () => {
   const [linkSessionId, setLinkSessionId] = useState<string | null>(null);
   const [tokenExpiration, setTokenExpiration] = useState<string | undefined>(undefined);
   
+  // Use refs to always have current values in callbacks (avoids stale closure issues)
+  const linkTokenRef = useRef<string | null>(null);
+  const tokenExpirationRef = useRef<string | undefined>(undefined);
+  
   const createLinkToken = useCreatePlaidLinkToken();
   const exchangeToken = useExchangePlaidToken();
   
   // Memoize redirect URI to avoid recomputation
   const oAuthRedirectUri = useMemo(() => getOAuthRedirectUri(), []);
+  
+  // Keep refs in sync with state
+  useEffect(() => {
+    linkTokenRef.current = linkToken;
+  }, [linkToken]);
+  
+  useEffect(() => {
+    tokenExpirationRef.current = tokenExpiration;
+  }, [tokenExpiration]);
 
   useEffect(() => {
     const fetchToken = async () => {
@@ -230,6 +243,10 @@ export const PlaidLinkButton = () => {
     const nextLinkSessionId = md?.link_session_id || null;
     const institutionName = md?.institution?.name;
     const isAmex = isAmexInstitution(institutionName);
+    
+    // Use refs to get current values (avoids stale closure issues)
+    const currentToken = linkTokenRef.current;
+    const currentExpiration = tokenExpirationRef.current;
 
     if (eventName === 'ERROR') {
       if (nextLinkSessionId) {
@@ -243,10 +260,20 @@ export const PlaidLinkButton = () => {
         user_agent: navigator.userAgent,
       }).catch(() => {});
     }
-    if (eventName === 'SELECT_INSTITUTION' && isAmex && linkToken) {
-      persistAmexLinkToken(linkToken, tokenExpiration, institutionName);
+    
+    // Store token for AMEX when selected
+    if (eventName === 'SELECT_INSTITUTION' && isAmex && currentToken) {
+      console.log('Storing AMEX link token on SELECT_INSTITUTION');
+      persistAmexLinkToken(currentToken, currentExpiration, institutionName);
     }
-  }, [linkToken, tokenExpiration]);
+    
+    // Also store on OPEN_OAUTH as a fallback (right before browser redirects)
+    // This catches any OAuth institution, not just AMEX
+    if (eventName === 'OPEN_OAUTH' && currentToken) {
+      console.log('Storing link token on OPEN_OAUTH (fallback)');
+      persistAmexLinkToken(currentToken, currentExpiration, institutionName);
+    }
+  }, []); // No deps needed - uses refs for current values
 
   const onExit = useCallback((err: unknown, metadata?: unknown) => {
     // Always log in production for debugging
