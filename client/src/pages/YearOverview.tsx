@@ -28,7 +28,7 @@ export const YearOverview = () => {
   const totalSpent = stats?.total_spent || 0;
   const totalIncome = stats?.total_income || 0;
   const totalInvested = stats?.total_invested || 0;
-  const netSavings = totalIncome - totalSpent - totalInvested;
+  const netSavings = totalIncome - totalSpent;
   const avgMonthly = totalSpent / 12;
 
   if (isLoading) {
