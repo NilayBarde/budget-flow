@@ -16,6 +16,7 @@ export interface Account {
   last_balance_alert_at?: string | null;
   exclude_from_investments?: boolean;
   investment_exclusion_note?: string | null;
+  last_csv_import_at?: string | null;
   created_at: string;
 }
 
