@@ -110,13 +110,18 @@ export const Transactions = () => {
   }, []);
 
   // Calculate totals using transaction_type
+  // For split transactions, only count the user's share (is_my_share === true)
   const totals = useMemo(() => {
     if (!transactions) return { expenses: 0, returns: 0, income: 0, investments: 0, transfers: 0 };
     
     return transactions.reduce(
       (acc, t) => {
         const type = t.transaction_type || (t.amount > 0 ? 'expense' : 'income');
-        const amount = Math.abs(t.amount);
+        
+        // For split transactions, sum only the user's share
+        const amount = t.is_split && t.splits?.length
+          ? t.splits.filter(s => s.is_my_share).reduce((sum, s) => sum + s.amount, 0)
+          : Math.abs(t.amount);
         
         if (type === 'expense') {
           acc.expenses += amount;
