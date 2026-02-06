@@ -221,11 +221,64 @@ export const Investments = () => {
 
           {/* Holdings Table and Account Breakdown */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
-            {/* Holdings Table */}
+            {/* Holdings Table (desktop) / Cards (mobile) */}
             <Card className="lg:col-span-2" padding="sm">
               <CardHeader title="Holdings" subtitle={`${investments?.holdingCount ?? 0} positions`} />
-              <div className="overflow-x-auto -mx-4 md:mx-0">
-                <table className="w-full min-w-[600px]">
+
+              {/* Mobile: Card layout */}
+              <div className="md:hidden space-y-3">
+                {holdingsData?.holdings?.map((holding: Holding) => {
+                  const rawCostBasis = holding.cost_basis ?? 0;
+                  const value = holding.institution_value ?? 0;
+                  const isBadData = rawCostBasis > 0 && Math.abs(rawCostBasis - value) > value * 10;
+                  const costBasis = isBadData ? 0 : rawCostBasis;
+                  const gainLoss = isBadData ? null : (value - costBasis);
+                  const gainLossPercent = (!isBadData && costBasis > 0) ? ((value - costBasis) / costBasis) * 100 : 0;
+                  const holdingIsPositive = (gainLoss ?? 0) >= 0;
+                  const security = holding.security;
+                  const account = holding.account;
+
+                  return (
+                    <div key={holding.id} className="p-3 bg-midnight-800/50 rounded-lg border border-midnight-700">
+                      {/* Row 1: Ticker + Value */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-medium text-slate-100">
+                            {security?.ticker_symbol || security?.name || 'Unknown'}
+                          </p>
+                          <p className="text-xs text-slate-500 truncate">
+                            {security?.name}
+                          </p>
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <p className="font-medium text-slate-100">{formatCurrency(value)}</p>
+                          {isBadData ? (
+                            <p className="text-xs text-amber-400">⚠️ Bad data</p>
+                          ) : (
+                            <p className={`text-xs ${holdingIsPositive ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {formatCurrency(gainLoss ?? 0)} ({formatGainLossPercent(gainLossPercent)})
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      {/* Row 2: Details */}
+                      <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-midnight-700">
+                        <div className="flex items-center gap-3 text-xs text-slate-400">
+                          <span>{formatQuantity(holding.quantity)} shares</span>
+                          <span>@ {security?.close_price ? formatCurrency(security.close_price) : '-'}</span>
+                        </div>
+                        <p className="text-xs text-slate-500 truncate max-w-[120px]">
+                          {account?.institution_name || ''}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Desktop: Table layout */}
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full">
                   <thead>
                     <tr className="border-b border-midnight-700">
                       <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider py-3 px-4">
@@ -252,8 +305,6 @@ export const Investments = () => {
                     {holdingsData?.holdings?.map((holding: Holding) => {
                       const rawCostBasis = holding.cost_basis ?? 0;
                       const value = holding.institution_value ?? 0;
-                      
-                      // Detect bad cost basis data (if loss > 10x the current value, it's likely corrupted)
                       const isBadData = rawCostBasis > 0 && Math.abs(rawCostBasis - value) > value * 10;
                       const costBasis = isBadData ? 0 : rawCostBasis;
                       const gainLoss = isBadData ? null : (value - costBasis);
@@ -319,7 +370,7 @@ export const Investments = () => {
               <CardHeader title="By Account" subtitle="Investment allocation" />
               {accountChartData.length > 0 ? (
                 <div className="space-y-4">
-                  <div className="h-48">
+                  <div className="h-48 md:h-48">
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie
@@ -352,21 +403,21 @@ export const Investments = () => {
                   </div>
                   <div className="space-y-2">
                     {accountChartData.map((item, index) => (
-                      <div key={index} className="flex items-center justify-between gap-2">
+                      <div key={index} className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
                         <div className="flex items-center gap-2 min-w-0">
                           <div 
                             className="w-3 h-3 rounded-full flex-shrink-0"
                             style={{ backgroundColor: item.color }}
                           />
-                          <span className="text-sm text-slate-300 truncate">{item.name}</span>
+                          <span className="text-xs sm:text-sm text-slate-300 truncate">{item.name}</span>
                         </div>
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                          <span className="text-sm font-medium text-slate-100">
+                        <div className="flex items-center gap-2 flex-shrink-0 pl-5 sm:pl-0">
+                          <span className="text-xs sm:text-sm font-medium text-slate-100">
                             {formatCurrency(item.value)}
                           </span>
                           <button
                             onClick={() => handleToggleAccountExclusion(item.id, item.excluded)}
-                            className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                            className="p-1.5 sm:p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
                             title="Exclude this account from investments (e.g., unvested equity)"
                           >
                             <EyeOff className="h-3.5 w-3.5" />
@@ -392,12 +443,12 @@ export const Investments = () => {
                   <div className="space-y-2">
                     {excludedAccounts.map((account) => (
                       <div key={account.id} className="flex items-center justify-between gap-2 opacity-60">
-                        <span className="text-sm text-slate-400 truncate">
+                        <span className="text-xs sm:text-sm text-slate-400 truncate">
                           {account.institution_name} - {account.account_name}
                         </span>
                         <button
                           onClick={() => handleToggleAccountExclusion(account.id, true)}
-                          className="p-1 rounded text-slate-500 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                          className="p-1.5 sm:p-1 rounded text-slate-500 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors flex-shrink-0"
                           title="Include this account in investments"
                         >
                           <Eye className="h-3.5 w-3.5" />
@@ -413,27 +464,33 @@ export const Investments = () => {
           {/* Accounts List */}
           <Card padding="sm">
             <CardHeader title="All Accounts" subtitle="Investment and cash accounts" />
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {summary?.accounts?.map((account) => (
-                <div 
-                  key={account.id}
-                  className="flex items-center gap-3 p-3 bg-midnight-800/50 rounded-lg border border-midnight-700"
-                >
-                  <div className={`p-2 rounded-lg ${account.isInvestment ? 'bg-violet-500/20' : 'bg-emerald-500/20'}`}>
-                    {account.isInvestment 
-                      ? <TrendingUp className="h-4 w-4 text-violet-400" />
-                      : <Building2 className="h-4 w-4 text-emerald-400" />
-                    }
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 md:gap-3">
+              {summary?.accounts?.map((account) => {
+                const iconBg = account.isInvestment ? 'bg-violet-500/20' : account.isLiability ? 'bg-rose-500/20' : 'bg-emerald-500/20';
+                const icon = account.isInvestment
+                  ? <TrendingUp className="h-4 w-4 text-violet-400" />
+                  : account.isLiability
+                    ? <Building2 className="h-4 w-4 text-rose-400" />
+                    : <Building2 className="h-4 w-4 text-emerald-400" />;
+
+                return (
+                  <div 
+                    key={account.id}
+                    className="flex items-center gap-2.5 md:gap-3 p-2.5 md:p-3 bg-midnight-800/50 rounded-lg border border-midnight-700"
+                  >
+                    <div className={`p-1.5 md:p-2 rounded-lg flex-shrink-0 ${iconBg}`}>
+                      {icon}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs md:text-sm font-medium text-slate-100 truncate">{account.name}</p>
+                      <p className="text-[10px] md:text-xs text-slate-500 capitalize">{account.type}</p>
+                    </div>
+                    <p className={`text-xs md:text-sm font-medium flex-shrink-0 ${account.isLiability ? 'text-rose-400' : 'text-slate-100'}`}>
+                      {account.balance !== null ? formatCurrency(account.balance) : '-'}
+                    </p>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-slate-100 truncate">{account.name}</p>
-                    <p className="text-xs text-slate-500 capitalize">{account.type}</p>
-                  </div>
-                  <p className="text-sm font-medium text-slate-100">
-                    {account.balance !== null ? formatCurrency(account.balance) : '-'}
-                  </p>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </Card>
         </>
