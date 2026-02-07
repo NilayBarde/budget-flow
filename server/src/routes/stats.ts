@@ -260,6 +260,19 @@ router.get('/insights', async (req, res) => {
     const currentMonthEnd = new Date(currentYear, currentMonth, 0)
       .toISOString().split('T')[0];
 
+    // ── Query active monthly recurring charges ────────────────────────
+    const { data: recurringCharges } = await supabase
+      .from('recurring_transactions')
+      .select('merchant_display_name, average_amount')
+      .eq('is_active', true)
+      .eq('frequency', 'monthly');
+
+    const recurringMerchants = new Set(
+      (recurringCharges || []).map(r => r.merchant_display_name)
+    );
+    const expectedFixedCosts = (recurringCharges || [])
+      .reduce((sum, r) => sum + r.average_amount, 0);
+
     // Single query for all 6 months of transactions
     const { data: transactions, error } = await supabase
       .from('transactions')
@@ -310,6 +323,7 @@ router.get('/insights', async (req, res) => {
 
     // ── Spending velocity (current month) ──────────────────────────────
     let currentMonthSpent = 0;
+    let currentMonthRecurringSpent = 0;
     let prevMonthTotalSpent = 0;
 
     // ── Process all transactions ───────────────────────────────────────
@@ -359,6 +373,12 @@ router.get('/insights', async (req, res) => {
           const day = txDate.getDate();
           dailySpending.set(day, (dailySpending.get(day) || 0) + amountToCount);
           currentMonthSpent += amountToCount;
+
+          // Track recurring vs variable for velocity
+          const merchantName = t.merchant_display_name || t.merchant_name;
+          if (merchantName && recurringMerchants.has(merchantName)) {
+            currentMonthRecurringSpent += amountToCount;
+          }
         }
 
         // Month-over-month
@@ -467,8 +487,10 @@ router.get('/insights', async (req, res) => {
       .map(([day, amount]) => ({ day, amount }));
 
     // ── Build spending velocity ────────────────────────────────────────
-    const projectedTotal = today > 0 ? (currentMonthSpent / today) * daysInMonth : 0;
-    const dailyAverage = today > 0 ? currentMonthSpent / today : 0;
+    const variableSpent = Math.max(0, currentMonthSpent - currentMonthRecurringSpent);
+    const projectedVariable = today > 0 ? (variableSpent / today) * daysInMonth : 0;
+    const projectedTotal = expectedFixedCosts + projectedVariable;
+    const dailyAverage = today > 0 ? variableSpent / today : 0;
 
     const spendingVelocity = {
       daysElapsed: today,
@@ -477,6 +499,9 @@ router.get('/insights', async (req, res) => {
       projectedTotal,
       lastMonthTotal: prevMonthTotalSpent,
       dailyAverage,
+      fixedCosts: expectedFixedCosts,
+      recurringSpent: currentMonthRecurringSpent,
+      variableSpent,
     };
 
     // ── Build month-over-month ─────────────────────────────────────────

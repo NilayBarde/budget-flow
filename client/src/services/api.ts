@@ -349,9 +349,6 @@ export const deleteMerchantMapping = (id: string) =>
 export const getRecurringTransactions = () =>
   fetchApi<RecurringTransaction[]>('/recurring-transactions');
 
-export const detectRecurringTransactions = () =>
-  fetchApi<RecurringTransaction[]>('/recurring-transactions/detect', { method: 'POST' });
-
 export const updateRecurringTransaction = (id: string, data: Partial<RecurringTransaction>) =>
   fetchApi<RecurringTransaction>(`/recurring-transactions/${id}`, {
     method: 'PATCH',

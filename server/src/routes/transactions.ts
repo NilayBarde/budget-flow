@@ -8,7 +8,7 @@ const router = Router();
 // Get transactions with filters
 router.get('/', async (req, res) => {
   try {
-    const { month, year, account_id, category_id, tag_id, search, is_recurring, transaction_type, needs_review } = req.query;
+    const { month, year, account_id, category_id, tag_id, search, is_recurring, transaction_type, needs_review, date } = req.query;
 
     let query = supabase
       .from('transactions')
@@ -20,8 +20,11 @@ router.get('/', async (req, res) => {
       `)
       .order('date', { ascending: false });
 
-    // Filter by month and year
-    if (month && year) {
+    // Filter by exact date (takes precedence over month/year)
+    if (date) {
+      query = query.eq('date', date);
+    } else if (month && year) {
+      // Filter by month and year
       const startDate = new Date(Number(year), Number(month) - 1, 1).toISOString().split('T')[0];
       const endDate = new Date(Number(year), Number(month), 0).toISOString().split('T')[0];
       query = query.gte('date', startDate).lte('date', endDate);
@@ -226,7 +229,7 @@ router.post('/', async (req, res) => {
 router.patch('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const updates = req.body;
+    const { recurring_amount: recurringAmountOverride, ...updates } = req.body;
     const applyToAll = req.query.applyToAll === 'true';
 
     // Get the current transaction to know the merchant and current type
@@ -301,6 +304,109 @@ router.patch('/:id', async (req, res) => {
             .from('transactions')
             .update(bulkUpdates)
             .eq('merchant_name', transaction.merchant_name);
+        }
+      }
+    }
+
+    // ── Handle is_recurring changes ─────────────────────────────────────
+    if (transaction && updates.is_recurring !== undefined) {
+      const merchantName = updates.merchant_display_name || transaction.merchant_display_name || transaction.merchant_name;
+
+      // If applyToAll, bulk-update is_recurring for all transactions from this merchant
+      if (applyToAll && transaction.merchant_name) {
+        await supabase
+          .from('transactions')
+          .update({ is_recurring: updates.is_recurring })
+          .eq('merchant_name', transaction.merchant_name);
+      }
+
+      if (updates.is_recurring) {
+        // Marking as recurring: upsert into recurring_transactions
+        // Query all recurring transactions for this merchant to compute average MONTHLY total (split-aware)
+        const { data: recurringTxns } = await supabase
+          .from('transactions')
+          .select('amount, date, is_split, splits:transaction_splits(amount, is_my_share)')
+          .eq('merchant_name', transaction.merchant_name)
+          .eq('is_recurring', true)
+          .eq('transaction_type', 'expense');
+
+        // Group transaction amounts by month, then average the monthly totals.
+        // This correctly handles merchants with multiple charges per month.
+        const monthlyTotals = new Map<string, number>();
+        const allTxns = recurringTxns || [];
+        for (const t of allTxns) {
+          const splits = t.splits as { amount: number; is_my_share: boolean }[] | null;
+          let txAmount: number;
+          if (t.is_split && splits && splits.length > 0) {
+            txAmount = splits
+              .filter(s => s.is_my_share)
+              .reduce((sum, s) => sum + Math.abs(s.amount), 0);
+          } else {
+            txAmount = Math.abs(t.amount);
+          }
+          const monthKey = (t.date as string).slice(0, 7); // "YYYY-MM"
+          monthlyTotals.set(monthKey, (monthlyTotals.get(monthKey) || 0) + txAmount);
+        }
+
+        // If no transactions found yet (single update not yet committed), use current transaction
+        if (monthlyTotals.size === 0) {
+          const { data: thisTx } = await supabase
+            .from('transactions')
+            .select('amount, date, is_split, splits:transaction_splits(amount, is_my_share)')
+            .eq('id', id)
+            .single();
+          if (thisTx) {
+            const splits = thisTx.splits as { amount: number; is_my_share: boolean }[] | null;
+            let txAmount: number;
+            if (thisTx.is_split && splits && splits.length > 0) {
+              txAmount = splits
+                .filter(s => s.is_my_share)
+                .reduce((sum, s) => sum + Math.abs(s.amount), 0);
+            } else {
+              txAmount = Math.abs(thisTx.amount);
+            }
+            const monthKey = (thisTx.date as string).slice(0, 7);
+            monthlyTotals.set(monthKey, txAmount);
+          }
+        }
+
+        // Use manual override if provided, otherwise average monthly totals
+        let avgAmount: number;
+        if (recurringAmountOverride && recurringAmountOverride > 0) {
+          avgAmount = recurringAmountOverride;
+        } else {
+          const monthTotalsArr = Array.from(monthlyTotals.values());
+          avgAmount = monthTotalsArr.length > 0
+            ? monthTotalsArr.reduce((a, b) => a + b, 0) / monthTotalsArr.length
+            : 0;
+        }
+
+        await supabase
+          .from('recurring_transactions')
+          .upsert({
+            merchant_display_name: merchantName,
+            average_amount: avgAmount,
+            frequency: 'monthly' as const,
+            last_seen: new Date().toISOString().split('T')[0],
+            is_active: true,
+          }, {
+            onConflict: 'merchant_display_name',
+          });
+      } else {
+        // Unmarking as recurring: check if any transactions for this merchant are still recurring
+        const { count } = await supabase
+          .from('transactions')
+          .select('id', { count: 'exact', head: true })
+          .eq('merchant_name', transaction.merchant_name)
+          .eq('is_recurring', true)
+          .neq('id', id); // exclude the current one being unmarked
+
+        if (!count || count === 0) {
+          // No more recurring transactions for this merchant — deactivate
+          await supabase
+            .from('recurring_transactions')
+            .update({ is_active: false })
+            .eq('merchant_display_name', merchantName);
         }
       }
     }

@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
-import { detectRecurringTransactions } from '../services/recurring.js';
 
 const router = Router();
 
@@ -18,17 +17,6 @@ router.get('/', async (req, res) => {
   } catch (error) {
     console.error('Error fetching recurring transactions:', error);
     res.status(500).json({ message: 'Failed to fetch recurring transactions' });
-  }
-});
-
-// Detect recurring transactions
-router.post('/detect', async (req, res) => {
-  try {
-    const recurring = await detectRecurringTransactions();
-    res.json(recurring);
-  } catch (error) {
-    console.error('Error detecting recurring transactions:', error);
-    res.status(500).json({ message: 'Failed to detect recurring transactions' });
   }
 });
 
@@ -54,4 +42,3 @@ router.patch('/:id', async (req, res) => {
 });
 
 export default router;
-

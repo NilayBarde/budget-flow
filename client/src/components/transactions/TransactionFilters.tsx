@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { Search, ChevronLeft, ChevronRight, AlertCircle, Filter, X } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight, AlertCircle, Filter, X, Repeat, CalendarDays } from 'lucide-react';
 import { Input, Select, Button } from '../ui';
 import type { Category, Account, Tag, TransactionFilters as Filters } from '../../types';
 import { MONTHS } from '../../utils/constants';
@@ -32,7 +32,7 @@ export const TransactionFilters = ({
       newMonth = 12;
       newYear -= 1;
     }
-    onFilterChange({ ...filters, month: newMonth, year: newYear });
+    onFilterChange({ ...filters, month: newMonth, year: newYear, date: undefined });
   }, [currentMonth, currentYear, filters, onFilterChange]);
 
   const handleNextMonth = useCallback(() => {
@@ -42,8 +42,22 @@ export const TransactionFilters = ({
       newMonth = 1;
       newYear += 1;
     }
-    onFilterChange({ ...filters, month: newMonth, year: newYear });
+    onFilterChange({ ...filters, month: newMonth, year: newYear, date: undefined });
   }, [currentMonth, currentYear, filters, onFilterChange]);
+
+  const handleClearDate = useCallback(() => {
+    onFilterChange({ ...filters, date: undefined });
+  }, [filters, onFilterChange]);
+
+  const handleDateChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    if (value) {
+      const d = new Date(value + 'T00:00:00');
+      onFilterChange({ ...filters, date: value, month: d.getMonth() + 1, year: d.getFullYear() });
+    } else {
+      onFilterChange({ ...filters, date: undefined });
+    }
+  }, [filters, onFilterChange]);
 
   const toggleFilters = useCallback(() => {
     setShowFilters(prev => !prev);
@@ -70,7 +84,14 @@ export const TransactionFilters = ({
     filters.account_id,
     filters.tag_id,
     filters.needs_review,
+    filters.is_recurring,
+    filters.date,
   ].filter(Boolean).length;
+
+  // Format date for display
+  const dateLabel = filters.date
+    ? new Date(filters.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+    : null;
 
   return (
     <div className="space-y-3">
@@ -94,6 +115,23 @@ export const TransactionFilters = ({
           <ChevronRight className="h-5 w-5" />
         </button>
       </div>
+
+      {/* Active Date Filter Banner */}
+      {dateLabel && (
+        <div className="flex items-center justify-between bg-accent-500/10 border border-accent-500/30 rounded-xl px-4 py-2.5">
+          <div className="flex items-center gap-2 text-accent-400">
+            <CalendarDays className="h-4 w-4" />
+            <span className="text-sm font-medium">Showing transactions for {dateLabel}</span>
+          </div>
+          <button
+            onClick={handleClearDate}
+            className="p-1 text-accent-400 hover:text-accent-300 hover:bg-accent-500/20 rounded transition-colors"
+            aria-label="Clear date filter"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {/* Search and Filter Toggle - Mobile */}
       <div className="flex gap-2 md:hidden">
@@ -173,6 +211,29 @@ export const TransactionFilters = ({
               <AlertCircle className="h-4 w-4" />
               <span className="text-sm font-medium">Needs Review</span>
             </button>
+            
+            <button
+              onClick={() => onFilterChange({ 
+                ...filters, 
+                is_recurring: filters.is_recurring ? undefined : true 
+              })}
+              className={clsx(
+                "w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border transition-colors",
+                filters.is_recurring
+                  ? "bg-accent-500/20 border-accent-500 text-accent-400"
+                  : "bg-midnight-900 border-midnight-600 text-slate-400"
+              )}
+            >
+              <Repeat className="h-4 w-4" />
+              <span className="text-sm font-medium">Recurring</span>
+            </button>
+
+            <Input
+              label="Date"
+              type="date"
+              value={filters.date || ''}
+              onChange={handleDateChange}
+            />
           </div>
         </div>
       )}
@@ -215,6 +276,14 @@ export const TransactionFilters = ({
           />
         </div>
         
+        <div className="w-40">
+          <Input
+            type="date"
+            value={filters.date || ''}
+            onChange={handleDateChange}
+          />
+        </div>
+        
         {/* Needs Review Toggle */}
         <button
           onClick={() => onFilterChange({ 
@@ -230,6 +299,23 @@ export const TransactionFilters = ({
         >
           <AlertCircle className="h-4 w-4" />
           <span className="text-sm font-medium">Needs Review</span>
+        </button>
+        
+        {/* Recurring Toggle */}
+        <button
+          onClick={() => onFilterChange({ 
+            ...filters, 
+            is_recurring: filters.is_recurring ? undefined : true 
+          })}
+          className={clsx(
+            "flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors",
+            filters.is_recurring
+              ? "bg-accent-500/20 border-accent-500 text-accent-400"
+              : "bg-midnight-800 border-midnight-600 text-slate-400 hover:text-slate-200 hover:border-midnight-500"
+          )}
+        >
+          <Repeat className="h-4 w-4" />
+          <span className="text-sm font-medium">Recurring</span>
         </button>
       </div>
     </div>

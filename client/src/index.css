@@ -88,6 +88,13 @@
 
 }
 
+/* Make native date/time picker icons white for dark theme */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  cursor: pointer;
+}
+
 @layer utilities {
   /* Horizontal scroll container for tabs/pills on mobile */
   .scroll-x-mobile {

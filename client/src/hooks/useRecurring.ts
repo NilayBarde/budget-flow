@@ -9,18 +9,6 @@ export const useRecurringTransactions = () => {
   });
 };
 
-export const useDetectRecurringTransactions = () => {
-  const queryClient = useQueryClient();
-  
-  return useMutation({
-    mutationFn: api.detectRecurringTransactions,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['recurring-transactions'] });
-      queryClient.invalidateQueries({ queryKey: ['transactions'] });
-    },
-  });
-};
-
 export const useUpdateRecurringTransaction = () => {
   const queryClient = useQueryClient();
   
@@ -32,4 +20,3 @@ export const useUpdateRecurringTransaction = () => {
     },
   });
 };
-

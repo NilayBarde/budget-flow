@@ -1,12 +1,11 @@
 import { useState, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   ArrowUpRight,
   ArrowDownRight,
   TrendingUp,
-
   ChevronDown,
   ChevronUp,
-  RefreshCw,
   X,
   Repeat,
 } from 'lucide-react';
@@ -20,9 +19,9 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-import { Card, CardHeader, Spinner, Badge, Button, EmptyState } from '../components/ui';
+import { Card, CardHeader, Spinner, Badge, EmptyState } from '../components/ui';
 import { ProgressBar } from '../components/ui/ProgressBar';
-import { useInsights, useRecurringTransactions, useDetectRecurringTransactions, useUpdateRecurringTransaction } from '../hooks';
+import { useInsights, useRecurringTransactions, useUpdateRecurringTransaction } from '../hooks';
 import { formatCurrency } from '../utils/formatters';
 import { MONTHS } from '../utils/constants';
 import type { InsightsCategoryTrend } from '../types';
@@ -67,9 +66,9 @@ const buildTrendChartData = (trends: InsightsCategoryTrend[]) => {
 };
 
 export const Insights = () => {
+  const navigate = useNavigate();
   const { data: insights, isLoading } = useInsights();
   const { data: recurring } = useRecurringTransactions();
-  const detectRecurring = useDetectRecurringTransactions();
   const updateRecurring = useUpdateRecurringTransaction();
   const [subscriptionsOpen, setSubscriptionsOpen] = useState(false);
 
@@ -83,6 +82,17 @@ export const Insights = () => {
   const toggleSubscriptions = useCallback(() => {
     setSubscriptionsOpen(prev => !prev);
   }, []);
+
+  // Navigate to transactions page filtered by the clicked day
+  const handleDayBarClick = useCallback(
+    (data: { day: number }) => {
+      if (!insights) return;
+      const { month, year } = insights.monthOverMonth.currentMonth;
+      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(data.day).padStart(2, '0')}`;
+      navigate(`/transactions?date=${dateStr}`);
+    },
+    [navigate, insights],
+  );
 
   const activeSubscriptions = useMemo(
     () => recurring?.filter(r => r.is_active) || [],
@@ -129,14 +139,14 @@ export const Insights = () => {
   const isIncomeUp = incomeChangePercent > 0;
   const isNetUp = netChangePercent > 0;
 
-  // Spending velocity
+  // Spending velocity — use projected total vs last month to determine pace.
+  // The old naive % comparison breaks when fixed costs (rent, etc.) are paid early in the month.
   const pacePercent = spendingVelocity.daysInMonth > 0
     ? (spendingVelocity.daysElapsed / spendingVelocity.daysInMonth) * 100
     : 0;
-  const spentPercent = spendingVelocity.lastMonthTotal > 0
-    ? (spendingVelocity.spentSoFar / spendingVelocity.lastMonthTotal) * 100
-    : 0;
-  const isOnPace = spentPercent <= pacePercent + 5; // 5% grace
+  const isOnPace = spendingVelocity.lastMonthTotal > 0
+    ? spendingVelocity.projectedTotal <= spendingVelocity.lastMonthTotal * 1.05 // 5% grace
+    : true;
 
   const subscriptionMonthlyTotal = activeSubscriptions
     .filter(r => r.frequency === 'monthly')
@@ -239,12 +249,28 @@ export const Insights = () => {
           </div>
 
           {/* Stats row */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
             <div>
-              <p className="text-xs text-slate-500">Daily Average</p>
+              <p className="text-xs text-slate-500">Fixed Costs</p>
+              <p className="text-sm font-medium text-slate-200">
+                {formatCurrency(spendingVelocity.fixedCosts)}
+              </p>
+              {spendingVelocity.fixedCosts > 0 && (
+                <p className="text-[10px] text-slate-500 mt-0.5">
+                  {formatCurrency(spendingVelocity.recurringSpent)} paid
+                </p>
+              )}
+            </div>
+            <div>
+              <p className="text-xs text-slate-500">Variable / day</p>
               <p className="text-sm font-medium text-slate-200">
                 {formatCurrency(spendingVelocity.dailyAverage)}
               </p>
+              {spendingVelocity.variableSpent > 0 && (
+                <p className="text-[10px] text-slate-500 mt-0.5">
+                  {formatCurrency(spendingVelocity.variableSpent)} so far
+                </p>
+              )}
             </div>
             <div>
               <p className="text-xs text-slate-500">Projected Total</p>
@@ -252,7 +278,7 @@ export const Insights = () => {
                 {formatCurrency(spendingVelocity.projectedTotal)}
               </p>
             </div>
-            <div className="col-span-2 sm:col-span-1">
+            <div>
               <p className="text-xs text-slate-500">Status</p>
               <p className={`text-sm font-medium ${isOnPace ? 'text-emerald-400' : 'text-amber-400'}`}>
                 {isOnPace ? 'On pace' : 'Over pace'}
@@ -417,11 +443,19 @@ export const Insights = () => {
       <Card padding="sm">
         <CardHeader
           title="Daily Spending"
-          subtitle={`${MONTHS[currentMonth.month - 1]} ${currentMonth.year}`}
+          subtitle={`${MONTHS[currentMonth.month - 1]} ${currentMonth.year} · Click a bar to view transactions`}
         />
         <div className="h-48 md:h-56 -mx-2 md:mx-0">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={dailySpending}>
+            <BarChart
+              data={dailySpending}
+              style={{ cursor: 'pointer' }}
+              onClick={(state) => {
+                if (state?.activeLabel != null) {
+                  handleDayBarClick({ day: Number(state.activeLabel) });
+                }
+              }}
+            >
               <XAxis
                 dataKey="day"
                 stroke="#64748b"
@@ -441,7 +475,7 @@ export const Insights = () => {
                 labelStyle={CHART_LABEL_STYLE}
                 itemStyle={CHART_ITEM_STYLE}
               />
-              <Bar dataKey="amount" fill="#6366f1" radius={[3, 3, 0, 0]} name="Spent" />
+              <Bar dataKey="amount" fill="#6366f1" radius={[3, 3, 0, 0]} name="Spent" cursor="pointer" />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -473,20 +507,6 @@ export const Insights = () => {
 
         {subscriptionsOpen && (
           <div className="border-t border-midnight-700">
-            {/* Detect button */}
-            <div className="px-4 md:px-6 py-3 border-b border-midnight-700">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => detectRecurring.mutate()}
-                isLoading={detectRecurring.isPending}
-                className="w-full md:w-auto"
-              >
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Detect Subscriptions
-              </Button>
-            </div>
-
             {activeSubscriptions.length > 0 ? (
               <div className="divide-y divide-midnight-700">
                 {activeSubscriptions.map(sub => (
@@ -532,7 +552,7 @@ export const Insights = () => {
             ) : (
               <div className="px-4 md:px-6 py-8 text-center">
                 <p className="text-slate-400 text-sm">
-                  No subscriptions detected. Click &quot;Detect Subscriptions&quot; to scan your transactions.
+                  No recurring charges yet. Mark transactions as recurring in the transaction editor.
                 </p>
               </div>
             )}

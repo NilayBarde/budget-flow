@@ -34,6 +34,8 @@ export const useUpdateTransaction = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
       queryClient.invalidateQueries({ queryKey: ['stats'] });
+      queryClient.invalidateQueries({ queryKey: ['recurring-transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['insights'] });
     },
   });
 };

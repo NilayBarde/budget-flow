@@ -1,4 +1,5 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { CheckSquare, X } from 'lucide-react';
 import { TransactionList, TransactionFilters, EditTransactionModal, SplitTransactionModal, BulkSplitModal, BulkActionBar } from '../components/transactions';
 import { Button } from '../components/ui';
@@ -19,8 +20,28 @@ const TYPE_TABS: { id: TypeFilter; label: string }[] = [
 
 export const Transactions = () => {
   const { month, year } = getMonthYear();
-  const [filters, setFilters] = useState<Filters>({ month, year });
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Build initial filters from URL search params (e.g. ?date=2026-02-07)
+  const [filters, setFilters] = useState<Filters>(() => {
+    const dateParam = searchParams.get('date');
+    if (dateParam) {
+      const d = new Date(dateParam + 'T00:00:00');
+      return { month: d.getMonth() + 1, year: d.getFullYear(), date: dateParam };
+    }
+    return { month, year };
+  });
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
+
+  // Sync URL search params when date filter changes
+  useEffect(() => {
+    if (filters.date) {
+      setSearchParams({ date: filters.date }, { replace: true });
+    } else {
+      searchParams.delete('date');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [filters.date]); // eslint-disable-line react-hooks/exhaustive-deps
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [splittingTransaction, setSplittingTransaction] = useState<Transaction | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);

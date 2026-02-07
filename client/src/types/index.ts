@@ -151,6 +151,9 @@ export interface InsightsSpendingVelocity {
   projectedTotal: number;
   lastMonthTotal: number;
   dailyAverage: number;
+  fixedCosts: number;
+  recurringSpent: number;
+  variableSpent: number;
 }
 
 export interface InsightsMonthOverMonth {
@@ -192,6 +195,7 @@ export type TransactionFilters = {
   is_recurring?: boolean;
   transaction_type?: TransactionType;
   needs_review?: boolean;
+  date?: string; // exact date filter, YYYY-MM-DD
 };
 
 // Investment types

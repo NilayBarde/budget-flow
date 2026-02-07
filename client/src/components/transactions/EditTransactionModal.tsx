@@ -23,6 +23,8 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction }: EditTrans
   const [categoryId, setCategoryId] = useState('');
   const [transactionType, setTransactionType] = useState<TransactionType>('expense');
   const [notes, setNotes] = useState('');
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [recurringAmount, setRecurringAmount] = useState('');
   const [selectedTags, setSelectedTags] = useState<Tag[]>([]);
   const [applyToAll, setApplyToAll] = useState(false);
   
@@ -39,8 +41,9 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction }: EditTrans
   );
   const similarCount = similarCountData?.count || 0;
 
-  // Check if category actually changed
+  // Check if category or recurring status actually changed
   const categoryChanged = transaction && categoryId !== (transaction.category_id || '');
+  const recurringChanged = transaction && isRecurring !== (transaction.is_recurring || false);
 
   useEffect(() => {
     if (isOpen && transaction) {
@@ -48,6 +51,8 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction }: EditTrans
       setCategoryId(transaction.category_id || '');
       setTransactionType(transaction.transaction_type || 'expense');
       setNotes(transaction.notes || '');
+      setIsRecurring(transaction.is_recurring || false);
+      setRecurringAmount('');
       setSelectedTags(transaction.tags || []);
       setApplyToAll(false);
     }
@@ -56,13 +61,17 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction }: EditTrans
   const handleSave = async () => {
     if (!transaction) return;
 
+    const parsedRecurringAmount = recurringAmount ? parseFloat(recurringAmount) : undefined;
+
     await updateTransaction.mutateAsync({
       id: transaction.id,
       data: {
         merchant_display_name: merchantName,
         category_id: categoryId || null,
         transaction_type: transactionType,
+        is_recurring: isRecurring,
         notes: notes || null,
+        ...(isRecurring && parsedRecurringAmount ? { recurring_amount: parsedRecurringAmount } : {}),
       },
       applyToAll,
     });
@@ -132,8 +141,36 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction }: EditTrans
           options={TRANSACTION_TYPE_OPTIONS}
         />
 
-        {/* Show apply to all option only if there are similar transactions and category changed */}
-        {similarCount > 0 && categoryChanged && (
+        {/* Recurring toggle */}
+        <label className="flex items-center gap-3 cursor-pointer">
+          <div className="relative">
+            <input
+              type="checkbox"
+              checked={isRecurring}
+              onChange={e => setIsRecurring(e.target.checked)}
+              className="sr-only peer"
+            />
+            <div className="w-9 h-5 bg-midnight-600 rounded-full peer peer-checked:bg-accent-500 transition-colors" />
+            <div className="absolute left-0.5 top-0.5 w-4 h-4 bg-slate-300 rounded-full peer-checked:translate-x-4 peer-checked:bg-white transition-transform" />
+          </div>
+          <span className="text-sm text-slate-300">Recurring charge</span>
+        </label>
+
+        {/* Optional monthly amount override — visible when recurring is on */}
+        {isRecurring && (
+          <Input
+            label="Monthly amount (optional override)"
+            type="number"
+            step="0.01"
+            min="0"
+            value={recurringAmount}
+            onChange={e => setRecurringAmount(e.target.value)}
+            placeholder="Leave blank to auto-calculate from history"
+          />
+        )}
+
+        {/* Show apply to all option when there are similar transactions and category or recurring changed */}
+        {similarCount > 0 && (categoryChanged || recurringChanged) && (
           <div className="rounded-lg border border-midnight-600 bg-midnight-800/50 p-3">
             <label className="flex items-start gap-2 cursor-pointer">
               <input
@@ -143,7 +180,7 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction }: EditTrans
                 className="w-5 h-5 md:w-4 md:h-4 mt-0.5 rounded border-slate-600 bg-midnight-700 text-cyan-500 focus:ring-cyan-500/20"
               />
               <span className="text-sm text-slate-300">
-                Also recategorize {similarCount} other{' '}
+                Apply changes to {similarCount} other{' '}
                 <span className="font-medium text-slate-200">
                   {transaction?.merchant_display_name || transaction?.merchant_name}
                 </span>{' '}
