@@ -8,7 +8,7 @@ const Dashboard = lazy(() => import('./pages/Dashboard').then(m => ({ default: m
 const Transactions = lazy(() => import('./pages/Transactions').then(m => ({ default: m.Transactions })));
 const Budget = lazy(() => import('./pages/Budget').then(m => ({ default: m.Budget })));
 const YearOverview = lazy(() => import('./pages/YearOverview').then(m => ({ default: m.YearOverview })));
-const Subscriptions = lazy(() => import('./pages/Subscriptions').then(m => ({ default: m.Subscriptions })));
+const Insights = lazy(() => import('./pages/Insights').then(m => ({ default: m.Insights })));
 const Accounts = lazy(() => import('./pages/Accounts').then(m => ({ default: m.Accounts })));
 const Tags = lazy(() => import('./pages/Tags').then(m => ({ default: m.Tags })));
 const Settings = lazy(() => import('./pages/Settings').then(m => ({ default: m.Settings })));
@@ -36,7 +36,7 @@ function App() {
               <Route path="budget" element={<Budget />} />
               <Route path="investments" element={<Investments />} />
               <Route path="year" element={<YearOverview />} />
-              <Route path="subscriptions" element={<Subscriptions />} />
+              <Route path="insights" element={<Insights />} />
               <Route path="accounts" element={<Accounts />} />
               <Route path="tags" element={<Tags />} />
               <Route path="settings" element={<Settings />} />

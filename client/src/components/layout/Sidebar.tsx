@@ -5,7 +5,7 @@ import {
   PiggyBank, 
   CreditCard, 
   Calendar,
-  Repeat,
+  BarChart3,
   Tags,
   Settings,
   X,
@@ -19,7 +19,7 @@ const navItems = [
   { to: '/budget', icon: PiggyBank, label: 'Budget' },
   { to: '/investments', icon: TrendingUp, label: 'Investments' },
   { to: '/year', icon: Calendar, label: 'Year Overview' },
-  { to: '/subscriptions', icon: Repeat, label: 'Subscriptions' },
+  { to: '/insights', icon: BarChart3, label: 'Insights' },
   { to: '/accounts', icon: CreditCard, label: 'Accounts' },
   { to: '/tags', icon: Tags, label: 'Tags' },
 ];

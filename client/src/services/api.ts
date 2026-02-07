@@ -14,6 +14,7 @@ import type {
   TransactionSplit,
   InvestmentHoldingsResponse,
   InvestmentSummary,
+  InsightsData,
 } from '../types';
 
 const fetchApi = async <T>(
@@ -363,6 +364,9 @@ export const getMonthlyStats = (month: number, year: number) =>
 
 export const getYearlyStats = (year: number) =>
   fetchApi<YearlyStats>(`/stats/yearly?year=${year}`);
+
+export const getInsights = () =>
+  fetchApi<InsightsData>('/stats/insights');
 
 // CSV Import
 export const previewCsvImport = async (accountId: string, file: File): Promise<CsvPreviewResponse> => {

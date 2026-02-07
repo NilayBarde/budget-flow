@@ -222,4 +222,304 @@ router.get('/yearly', async (req, res) => {
   }
 });
 
+// Helper: compute the expense amount for a transaction, respecting splits
+const getExpenseAmount = (t: {
+  amount: number;
+  is_split: boolean;
+  splits: unknown;
+}): number => {
+  const splits = t.splits as { amount: number; is_my_share: boolean }[] | null;
+  if (t.is_split && splits && splits.length > 0) {
+    return splits
+      .filter(s => s.is_my_share)
+      .reduce((sum, s) => sum + Math.abs(s.amount), 0);
+  }
+  return Math.abs(t.amount);
+};
+
+// Get spending insights (trends, merchants, velocity, daily breakdown)
+router.get('/insights', async (req, res) => {
+  try {
+    const now = new Date();
+    const currentMonth = now.getMonth() + 1; // 1-indexed
+    const currentYear = now.getFullYear();
+    const today = now.getDate();
+    const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+
+    // Build date range for last 6 months (inclusive of current month)
+    const months: { month: number; year: number }[] = [];
+    for (let i = 5; i >= 0; i--) {
+      let m = currentMonth - i;
+      let y = currentYear;
+      while (m < 1) { m += 12; y -= 1; }
+      months.push({ month: m, year: y });
+    }
+
+    const sixMonthsAgoStart = new Date(months[0].year, months[0].month - 1, 1)
+      .toISOString().split('T')[0];
+    const currentMonthEnd = new Date(currentYear, currentMonth, 0)
+      .toISOString().split('T')[0];
+
+    // Single query for all 6 months of transactions
+    const { data: transactions, error } = await supabase
+      .from('transactions')
+      .select(`
+        amount,
+        date,
+        transaction_type,
+        is_split,
+        merchant_name,
+        merchant_display_name,
+        category:categories(id, name, color, icon),
+        splits:transaction_splits(amount, is_my_share)
+      `)
+      .gte('date', sixMonthsAgoStart)
+      .lte('date', currentMonthEnd);
+
+    if (error) throw error;
+
+    // ── Category Trends (per-category, per-month) ──────────────────────
+    // Map<categoryId, { category, months: Map<"YYYY-MM", amount> }>
+    const categoryMonthMap = new Map<string, {
+      category: CategoryData;
+      months: Map<string, number>;
+    }>();
+
+    // ── Top Merchants ──────────────────────────────────────────────────
+    const merchantMap = new Map<string, {
+      merchantName: string;
+      totalSpent: number;
+      transactionCount: number;
+      lastDate: string;
+    }>();
+
+    // ── Daily Spending (current month only) ────────────────────────────
+    const dailySpending = new Map<number, number>(); // day -> amount
+    for (let d = 1; d <= daysInMonth; d++) {
+      dailySpending.set(d, 0);
+    }
+
+    // ── Month-over-Month totals ────────────────────────────────────────
+    const currentMonthKey = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
+    const prevMonth = months[months.length - 2]; // second to last
+    const prevMonthKey = `${prevMonth.year}-${String(prevMonth.month).padStart(2, '0')}`;
+    const momTotals: Record<string, { spent: number; income: number }> = {
+      [currentMonthKey]: { spent: 0, income: 0 },
+      [prevMonthKey]: { spent: 0, income: 0 },
+    };
+
+    // ── Spending velocity (current month) ──────────────────────────────
+    let currentMonthSpent = 0;
+    let prevMonthTotalSpent = 0;
+
+    // ── Process all transactions ───────────────────────────────────────
+    transactions?.forEach(t => {
+      const transactionType = t.transaction_type || (t.amount > 0 ? 'expense' : 'income');
+      if (transactionType === 'transfer') return;
+
+      const txDate = new Date(t.date);
+      const txMonth = txDate.getMonth() + 1;
+      const txYear = txDate.getFullYear();
+      const monthKey = `${txYear}-${String(txMonth).padStart(2, '0')}`;
+
+      if (transactionType === 'expense') {
+        const amountToCount = getExpenseAmount(t);
+
+        // Category trends
+        const category = t.category as unknown as CategoryData | null;
+        if (category && amountToCount > 0) {
+          let entry = categoryMonthMap.get(category.id);
+          if (!entry) {
+            entry = { category, months: new Map() };
+            categoryMonthMap.set(category.id, entry);
+          }
+          entry.months.set(monthKey, (entry.months.get(monthKey) || 0) + amountToCount);
+        }
+
+        // Top merchants (all 6 months aggregated)
+        const merchant = t.merchant_display_name || t.merchant_name;
+        if (merchant && amountToCount > 0) {
+          const existing = merchantMap.get(merchant);
+          if (existing) {
+            existing.totalSpent += amountToCount;
+            existing.transactionCount += 1;
+            if (t.date > existing.lastDate) existing.lastDate = t.date;
+          } else {
+            merchantMap.set(merchant, {
+              merchantName: merchant,
+              totalSpent: amountToCount,
+              transactionCount: 1,
+              lastDate: t.date,
+            });
+          }
+        }
+
+        // Daily spending (current month only)
+        if (txMonth === currentMonth && txYear === currentYear) {
+          const day = txDate.getDate();
+          dailySpending.set(day, (dailySpending.get(day) || 0) + amountToCount);
+          currentMonthSpent += amountToCount;
+        }
+
+        // Month-over-month
+        if (monthKey === currentMonthKey) {
+          momTotals[currentMonthKey].spent += amountToCount;
+        } else if (monthKey === prevMonthKey) {
+          momTotals[prevMonthKey].spent += amountToCount;
+          prevMonthTotalSpent += amountToCount;
+        }
+      } else if (transactionType === 'return') {
+        // Returns also respect splits (only subtract my share)
+        const returnAmount = getExpenseAmount(t);
+
+        // Category trends: reduce
+        const category = t.category as unknown as CategoryData | null;
+        if (category) {
+          const entry = categoryMonthMap.get(category.id);
+          if (entry) {
+            const current = entry.months.get(monthKey) || 0;
+            entry.months.set(monthKey, Math.max(0, current - returnAmount));
+          }
+        }
+
+        // Daily spending (current month)
+        if (txMonth === currentMonth && txYear === currentYear) {
+          const day = txDate.getDate();
+          dailySpending.set(day, Math.max(0, (dailySpending.get(day) || 0) - returnAmount));
+          currentMonthSpent = Math.max(0, currentMonthSpent - returnAmount);
+        }
+
+        // Month-over-month
+        if (monthKey === currentMonthKey) {
+          momTotals[currentMonthKey].spent = Math.max(0, momTotals[currentMonthKey].spent - returnAmount);
+        } else if (monthKey === prevMonthKey) {
+          momTotals[prevMonthKey].spent = Math.max(0, momTotals[prevMonthKey].spent - returnAmount);
+          prevMonthTotalSpent = Math.max(0, prevMonthTotalSpent - returnAmount);
+        }
+      } else if (transactionType === 'income') {
+        const incomeAmount = Math.abs(t.amount);
+        if (monthKey === currentMonthKey) {
+          momTotals[currentMonthKey].income += incomeAmount;
+        } else if (monthKey === prevMonthKey) {
+          momTotals[prevMonthKey].income += incomeAmount;
+        }
+      }
+    });
+
+    // ── Build category trends response ─────────────────────────────────
+    const monthKeys = months.map(m => `${m.year}-${String(m.month).padStart(2, '0')}`);
+
+    // Rank categories by total 6-month spend, take top 8
+    const categoryEntries = Array.from(categoryMonthMap.entries())
+      .map(([id, entry]) => {
+        const totalSpend = Array.from(entry.months.values()).reduce((a, b) => a + b, 0);
+        return { id, ...entry, totalSpend };
+      })
+      .sort((a, b) => b.totalSpend - a.totalSpend)
+      .slice(0, 8);
+
+    const categoryTrends = categoryEntries.map(entry => ({
+      categoryId: entry.id,
+      categoryName: entry.category.name,
+      categoryColor: entry.category.color,
+      months: monthKeys.map((key, idx) => ({
+        month: months[idx].month,
+        year: months[idx].year,
+        amount: entry.months.get(key) || 0,
+      })),
+    }));
+
+    // ── Build top categories response ────────────────────────────────
+    const topCategories = categoryEntries.map(entry => ({
+      categoryId: entry.id,
+      categoryName: entry.category.name,
+      categoryColor: entry.category.color,
+      totalSpent: entry.totalSpend,
+      transactionCount: 0, // will be filled below
+    }));
+
+    // Count transactions per category (expenses only, using my-share amounts)
+    const categoryCounts = new Map<string, number>();
+    transactions?.forEach(t => {
+      const txType = t.transaction_type || (t.amount > 0 ? 'expense' : 'income');
+      if (txType !== 'expense') return;
+      const category = t.category as unknown as CategoryData | null;
+      if (category) {
+        categoryCounts.set(category.id, (categoryCounts.get(category.id) || 0) + 1);
+      }
+    });
+    for (const cat of topCategories) {
+      cat.transactionCount = categoryCounts.get(cat.categoryId) || 0;
+    }
+
+    // ── Build top merchants response ───────────────────────────────────
+    const topMerchants = Array.from(merchantMap.values())
+      .sort((a, b) => b.totalSpent - a.totalSpent)
+      .slice(0, 10)
+      .map(m => ({
+        ...m,
+        avgTransaction: m.transactionCount > 0 ? m.totalSpent / m.transactionCount : 0,
+      }));
+
+    // ── Build daily spending response ──────────────────────────────────
+    const dailySpendingArr = Array.from(dailySpending.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([day, amount]) => ({ day, amount }));
+
+    // ── Build spending velocity ────────────────────────────────────────
+    const projectedTotal = today > 0 ? (currentMonthSpent / today) * daysInMonth : 0;
+    const dailyAverage = today > 0 ? currentMonthSpent / today : 0;
+
+    const spendingVelocity = {
+      daysElapsed: today,
+      daysInMonth,
+      spentSoFar: currentMonthSpent,
+      projectedTotal,
+      lastMonthTotal: prevMonthTotalSpent,
+      dailyAverage,
+    };
+
+    // ── Build month-over-month ─────────────────────────────────────────
+    const currentMom = momTotals[currentMonthKey];
+    const prevMom = momTotals[prevMonthKey];
+    const spentChangePercent = prevMom.spent > 0
+      ? ((currentMom.spent - prevMom.spent) / prevMom.spent) * 100
+      : 0;
+    const incomeChangePercent = prevMom.income > 0
+      ? ((currentMom.income - prevMom.income) / prevMom.income) * 100
+      : 0;
+
+    const monthOverMonth = {
+      currentMonth: {
+        month: currentMonth,
+        year: currentYear,
+        spent: currentMom.spent,
+        income: currentMom.income,
+        net: currentMom.income - currentMom.spent,
+      },
+      previousMonth: {
+        month: prevMonth.month,
+        year: prevMonth.year,
+        spent: prevMom.spent,
+        income: prevMom.income,
+        net: prevMom.income - prevMom.spent,
+      },
+      spentChangePercent,
+      incomeChangePercent,
+    };
+
+    res.json({
+      categoryTrends,
+      topCategories,
+      topMerchants,
+      spendingVelocity,
+      dailySpending: dailySpendingArr,
+      monthOverMonth,
+    });
+  } catch (error) {
+    console.error('Error fetching insights:', error);
+    res.status(500).json({ message: 'Failed to fetch insights' });
+  }
+});
+
 export default router;

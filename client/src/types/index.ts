@@ -128,6 +128,55 @@ export interface YearlyStats {
   total_invested: number;
 }
 
+// Insights types
+export interface InsightsCategoryTrend {
+  categoryId: string;
+  categoryName: string;
+  categoryColor: string;
+  months: { month: number; year: number; amount: number }[];
+}
+
+export interface InsightsTopMerchant {
+  merchantName: string;
+  totalSpent: number;
+  transactionCount: number;
+  avgTransaction: number;
+  lastDate: string;
+}
+
+export interface InsightsSpendingVelocity {
+  daysElapsed: number;
+  daysInMonth: number;
+  spentSoFar: number;
+  projectedTotal: number;
+  lastMonthTotal: number;
+  dailyAverage: number;
+}
+
+export interface InsightsMonthOverMonth {
+  currentMonth: { month: number; year: number; spent: number; income: number; net: number };
+  previousMonth: { month: number; year: number; spent: number; income: number; net: number };
+  spentChangePercent: number;
+  incomeChangePercent: number;
+}
+
+export interface InsightsTopCategory {
+  categoryId: string;
+  categoryName: string;
+  categoryColor: string;
+  totalSpent: number;
+  transactionCount: number;
+}
+
+export interface InsightsData {
+  categoryTrends: InsightsCategoryTrend[];
+  topCategories: InsightsTopCategory[];
+  topMerchants: InsightsTopMerchant[];
+  spendingVelocity: InsightsSpendingVelocity;
+  dailySpending: { day: number; amount: number }[];
+  monthOverMonth: InsightsMonthOverMonth;
+}
+
 export interface PlaidLinkToken {
   link_token: string;
   expiration: string;
