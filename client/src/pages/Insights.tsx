@@ -10,8 +10,6 @@ import {
   Repeat,
 } from 'lucide-react';
 import {
-  LineChart,
-  Line,
   BarChart,
   Bar,
   XAxis,
@@ -24,8 +22,6 @@ import { ProgressBar } from '../components/ui/ProgressBar';
 import { useInsights, useRecurringTransactions, useUpdateRecurringTransaction } from '../hooks';
 import { formatCurrency } from '../utils/formatters';
 import { MONTHS } from '../utils/constants';
-import type { InsightsCategoryTrend } from '../types';
-
 const CHART_TOOLTIP_STYLE = {
   backgroundColor: '#252a3d',
   border: '1px solid #3a4160',
@@ -36,33 +32,10 @@ const CHART_TOOLTIP_STYLE = {
 const CHART_LABEL_STYLE = { color: '#f1f5f9', fontWeight: 500 };
 const CHART_ITEM_STYLE = { color: '#cbd5e1' };
 
-// Build short month label from month/year
-const monthLabel = (m: number, y: number) =>
-  `${MONTHS[m - 1].slice(0, 3)} ${String(y).slice(2)}`;
-
 // Format a change percent as a readable string
 const formatChangePercent = (pct: number): string => {
   const sign = pct >= 0 ? '+' : '';
   return `${sign}${pct.toFixed(1)}%`;
-};
-
-// Transform category trends into recharts-friendly data
-const buildTrendChartData = (trends: InsightsCategoryTrend[]) => {
-  if (!trends.length) return [];
-  const monthCount = trends[0].months.length;
-  const data: Record<string, unknown>[] = [];
-
-  for (let i = 0; i < monthCount; i++) {
-    const point: Record<string, unknown> = {
-      name: monthLabel(trends[0].months[i].month, trends[0].months[i].year),
-    };
-    for (const trend of trends) {
-      point[trend.categoryName] = trend.months[i].amount;
-    }
-    data.push(point);
-  }
-
-  return data;
 };
 
 export const Insights = () => {
@@ -99,11 +72,6 @@ export const Insights = () => {
     [recurring],
   );
 
-  const trendChartData = useMemo(
-    () => buildTrendChartData(insights?.categoryTrends || []),
-    [insights?.categoryTrends],
-  );
-
   // Max spend values for relative bar widths
   const maxMerchantSpend = useMemo(() => {
     const merchants = insights?.topMerchants || [];
@@ -129,7 +97,7 @@ export const Insights = () => {
     );
   }
 
-  const { monthOverMonth, spendingVelocity, categoryTrends, topCategories, topMerchants, dailySpending } = insights;
+  const { monthOverMonth, spendingVelocity, topCategories, topMerchants, dailySpending } = insights;
   const { currentMonth, previousMonth, spentChangePercent, incomeChangePercent } = monthOverMonth;
   const netChangePercent =
     previousMonth.net !== 0
@@ -286,63 +254,6 @@ export const Insights = () => {
             </div>
           </div>
         </div>
-      </Card>
-
-      {/* ── Category Trends (full width) ──────────────────────────── */}
-      <Card padding="sm">
-        <CardHeader title="Category Trends" subtitle="Last 6 months" />
-        {categoryTrends.length > 0 ? (
-          <div>
-            <div className="h-56 md:h-64 -mx-2 md:mx-0">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={trendChartData}>
-                  <XAxis
-                    dataKey="name"
-                    stroke="#64748b"
-                    tick={{ fill: '#94a3b8', fontSize: 11 }}
-                  />
-                  <YAxis
-                    stroke="#64748b"
-                    tick={{ fill: '#94a3b8', fontSize: 11 }}
-                    tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
-                    width={45}
-                  />
-                  <Tooltip
-                    formatter={(value) => formatCurrency(value as number)}
-                    contentStyle={CHART_TOOLTIP_STYLE}
-                    labelStyle={CHART_LABEL_STYLE}
-                    itemStyle={CHART_ITEM_STYLE}
-                  />
-                  {categoryTrends.map(trend => (
-                    <Line
-                      key={trend.categoryId}
-                      type="monotone"
-                      dataKey={trend.categoryName}
-                      stroke={trend.categoryColor}
-                      strokeWidth={2}
-                      dot={{ r: 3 }}
-                      activeDot={{ r: 5 }}
-                    />
-                  ))}
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-            {/* Legend */}
-            <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3">
-              {categoryTrends.map(trend => (
-                <div key={trend.categoryId} className="flex items-center gap-1.5">
-                  <div
-                    className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                    style={{ backgroundColor: trend.categoryColor }}
-                  />
-                  <span className="text-xs text-slate-400">{trend.categoryName}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <p className="text-slate-400 text-center py-8">No category data yet</p>
-        )}
       </Card>
 
       {/* ── Top Categories & Top Merchants (side by side on lg) ────── */}
