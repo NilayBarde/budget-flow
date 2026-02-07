@@ -402,6 +402,15 @@ router.get('/insights', async (req, res) => {
           }
         }
 
+        // Top merchants: subtract returns from merchant totals
+        const merchant = t.merchant_display_name || t.merchant_name;
+        if (merchant && returnAmount > 0) {
+          const existing = merchantMap.get(merchant);
+          if (existing) {
+            existing.totalSpent = Math.max(0, existing.totalSpent - returnAmount);
+          }
+        }
+
         // Daily spending (current month)
         if (txMonth === currentMonth && txYear === currentYear) {
           const day = txDate.getDate();
@@ -474,6 +483,7 @@ router.get('/insights', async (req, res) => {
 
     // ── Build top merchants response ───────────────────────────────────
     const topMerchants = Array.from(merchantMap.values())
+      .filter(m => m.totalSpent > 0) // Exclude fully-returned merchants
       .sort((a, b) => b.totalSpent - a.totalSpent)
       .slice(0, 10)
       .map(m => ({
