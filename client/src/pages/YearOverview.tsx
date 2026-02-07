@@ -45,7 +45,7 @@ export const YearOverview = () => {
         </div>
         
         {/* Year Selector */}
-        <div className="flex items-center gap-1 md:gap-2 bg-midnight-800 border border-midnight-600 rounded-xl p-1.5 md:p-2 w-fit">
+        <div className="flex flex-1 md:flex-initial items-center gap-1 md:gap-2 bg-midnight-800 border border-midnight-600 rounded-xl p-1.5 md:p-2 md:w-fit">
           <button
             onClick={() => setYear(y => y - 1)}
             className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 active:bg-midnight-600 rounded-lg transition-colors touch-target"
@@ -53,7 +53,7 @@ export const YearOverview = () => {
           >
             <ChevronLeft className="h-5 w-5" />
           </button>
-          <span className="text-base md:text-lg font-semibold text-slate-100 px-3 md:px-4 min-w-[60px] text-center">{year}</span>
+          <span className="flex-1 md:flex-initial text-base md:text-lg font-semibold text-slate-100 px-3 md:px-4 md:min-w-[60px] text-center">{year}</span>
           <button
             onClick={() => setYear(y => y + 1)}
             className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 active:bg-midnight-600 rounded-lg transition-colors touch-target"

@@ -84,7 +84,7 @@ export const Dashboard = () => {
           <p className="text-slate-400 mt-1">Your financial overview</p>
         </div>
         
-        <div className="flex items-center gap-2 md:gap-3">
+        <div className="flex items-center gap-2 md:gap-3 w-full md:w-auto">
           {/* Refresh Button */}
           <Button
             variant="ghost"
@@ -98,7 +98,7 @@ export const Dashboard = () => {
           </Button>
           
           {/* Month Selector */}
-          <div className="flex items-center gap-1 md:gap-2 bg-midnight-800 border border-midnight-600 rounded-xl p-1.5 md:p-2">
+          <div className="flex flex-1 md:flex-initial items-center gap-1 md:gap-2 bg-midnight-800 border border-midnight-600 rounded-xl p-1.5 md:p-2">
             <button
               onClick={handlePrevMonth}
               className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 active:bg-midnight-600 rounded-lg transition-colors touch-target"
@@ -106,7 +106,7 @@ export const Dashboard = () => {
             >
               <ChevronLeft className="h-5 w-5" />
             </button>
-            <span className="text-base md:text-lg font-semibold text-slate-100 px-2 md:px-4 min-w-[120px] md:min-w-[160px] text-center">
+            <span className="flex-1 md:flex-initial text-base md:text-lg font-semibold text-slate-100 px-2 md:px-4 md:min-w-[160px] text-center">
               {MONTHS[currentDate.month - 1]} {currentDate.year}
             </span>
             <button
