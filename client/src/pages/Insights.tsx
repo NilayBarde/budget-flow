@@ -3,7 +3,7 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   TrendingUp,
-  TrendingDown,
+
   ChevronDown,
   ChevronUp,
   RefreshCw,
