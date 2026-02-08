@@ -168,39 +168,54 @@ export const Transactions = () => {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-slate-100">Transactions</h1>
-          <p className="text-slate-400 mt-1 text-sm md:text-base">
-          <span>{transactions?.length || 0} transactions</span>
-          <span className="hidden sm:inline"> • </span>
-          <br className="sm:hidden" />
-          <span className="text-rose-400">-${totals.expenses.toFixed(2)}</span>
-          {totals.returns > 0 && (
-            <span className="text-emerald-400 ml-2">+${totals.returns.toFixed(2)} returns</span>
-          )}
-          <span className="text-emerald-400 ml-2">+${totals.income.toFixed(2)}</span>
-          {totals.investments > 0 && (
-            <span className="text-violet-400 ml-2 hidden md:inline">(${totals.investments.toFixed(2)} invested)</span>
-          )}
-          {totals.transfers > 0 && (
-            <span className="text-slate-500 ml-2 hidden md:inline">(${totals.transfers.toFixed(2)} transfers)</span>
-          )}
-        </p>
+          {/* Desktop: single-line summary */}
+          <p className="hidden sm:block text-slate-400 mt-1 text-base">
+            <span>{transactions?.length || 0} transactions</span>
+            <span> • </span>
+            <span className="text-rose-400">-${totals.expenses.toFixed(2)}</span>
+            <span className="text-emerald-400 ml-2">+${totals.income.toFixed(2)}</span>
+            {totals.returns > 0 && (
+              <span className="text-emerald-400 ml-2">+${totals.returns.toFixed(2)} returns</span>
+            )}
+            {totals.investments > 0 && (
+              <span className="text-violet-400 ml-2">(${totals.investments.toFixed(2)} invested)</span>
+            )}
+            {totals.transfers > 0 && (
+              <span className="text-slate-500 ml-2">(${totals.transfers.toFixed(2)} transfers)</span>
+            )}
+          </p>
+          {/* Mobile: structured compact rows */}
+          <div className="sm:hidden mt-1.5 text-xs text-slate-400 space-y-0.5">
+            <p>{transactions?.length || 0} transactions</p>
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="text-rose-400">-${totals.expenses.toFixed(2)}</span>
+              <span className="text-emerald-400">+${totals.income.toFixed(2)}</span>
+              {totals.returns > 0 && (
+                <span className="text-emerald-400">+${totals.returns.toFixed(2)} ret.</span>
+              )}
+            </div>
+          </div>
         </div>
         
         <div className="flex items-center gap-2 flex-shrink-0">
           {/* Find Duplicates */}
           <Button
             variant="secondary"
+            size="sm"
             onClick={() => setShowDuplicates(true)}
             title="Find duplicate transactions"
+            className="sm:!text-sm sm:!px-4 sm:!py-2"
           >
-            <Copy className="h-4 w-4 mr-2" />
+            <Copy className="h-4 w-4 sm:mr-2" />
             <span className="hidden sm:inline">Duplicates</span>
           </Button>
 
           {/* Selection Mode Toggle */}
           <Button
             variant={selectionMode ? 'primary' : 'secondary'}
+            size="sm"
             onClick={toggleSelectionMode}
+            className="sm:!text-sm sm:!px-4 sm:!py-2"
           >
             {selectionMode ? (
               <>
