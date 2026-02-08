@@ -4,7 +4,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout } from './components/layout';
 import { Spinner } from './components/ui';
 
-const Dashboard = lazy(() => import('./pages/Dashboard').then(m => ({ default: m.Dashboard })));
+// Eagerly prefetch the Dashboard chunk since it's the landing page — avoids a
+// network waterfall (main bundle → React render → lazy import → Dashboard fetch).
+const dashboardImport = import('./pages/Dashboard');
+const Dashboard = lazy(() => dashboardImport.then(m => ({ default: m.Dashboard })));
 const Transactions = lazy(() => import('./pages/Transactions').then(m => ({ default: m.Transactions })));
 const Budget = lazy(() => import('./pages/Budget').then(m => ({ default: m.Budget })));
 const YearOverview = lazy(() => import('./pages/YearOverview').then(m => ({ default: m.YearOverview })));

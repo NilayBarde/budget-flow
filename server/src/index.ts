@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
 import express from 'express';
+import compression from 'compression';
 import cors from 'cors';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -38,6 +39,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
+app.use(compression());
 app.use(cors());
 app.use(express.json());
 
