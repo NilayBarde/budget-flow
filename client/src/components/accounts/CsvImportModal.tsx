@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
-import { Upload, FileText, AlertCircle, CheckCircle2, XCircle } from 'lucide-react';
+import { Upload, FileText, AlertCircle, CheckCircle2, XCircle, Link2 } from 'lucide-react';
 import { Modal, Button, Badge } from '../ui';
-import { usePreviewCsvImport, useImportCsv } from '../../hooks';
+import { usePreviewCsvImport, useImportCsv, useBackfillCsvReferences } from '../../hooks';
 import type { CsvPreviewTransaction } from '../../services/api';
 import type { Account } from '../../types';
 import { formatCurrency, formatDate } from '../../utils/formatters';
@@ -39,9 +39,13 @@ export const CsvImportModal = ({ isOpen, onClose, account }: CsvImportModalProps
   const [error, setError] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
 
+  const [backfillResult, setBackfillResult] = useState<{ updated: number; skipped: number } | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const backfillInputRef = useRef<HTMLInputElement>(null);
   const previewCsv = usePreviewCsvImport();
   const importCsv = useImportCsv();
+  const backfillRefs = useBackfillCsvReferences();
 
   const resetState = useCallback(() => {
     setStep('upload');
@@ -51,7 +55,29 @@ export const CsvImportModal = ({ isOpen, onClose, account }: CsvImportModalProps
     setImportResult(null);
     setError(null);
     setIsDragOver(false);
+    setBackfillResult(null);
   }, []);
+
+  const handleBackfill = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0];
+    if (!selectedFile) return;
+
+    setBackfillResult(null);
+    setError(null);
+
+    try {
+      const result = await backfillRefs.mutateAsync({
+        accountId: account.id,
+        file: selectedFile,
+      });
+      setBackfillResult({ updated: result.updated, skipped: result.skipped });
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Backfill failed';
+      setError(errorMessage);
+    }
+    // Reset file input so the same file can be selected again
+    e.target.value = '';
+  }, [account.id, backfillRefs]);
 
   const handleClose = useCallback(() => {
     resetState();
@@ -182,6 +208,41 @@ export const CsvImportModal = ({ isOpen, onClose, account }: CsvImportModalProps
           <span className="text-slate-400">Analyzing file...</span>
         </div>
       )}
+
+      {/* Backfill references section */}
+      <div className="border-t border-midnight-600 pt-4">
+        <div className="flex items-start gap-3">
+          <Link2 className="h-5 w-5 text-slate-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm text-slate-300 font-medium">Backfill Reference IDs</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Upload a CSV with a Reference column to link IDs to existing transactions for better duplicate detection.
+            </p>
+            <input
+              ref={backfillInputRef}
+              type="file"
+              accept=".csv"
+              onChange={handleBackfill}
+              className="hidden"
+            />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mt-2 text-slate-400 hover:text-slate-200"
+              onClick={() => backfillInputRef.current?.click()}
+              isLoading={backfillRefs.isPending}
+            >
+              <Upload className="h-3.5 w-3.5 mr-1.5" />
+              Upload CSV to Backfill
+            </Button>
+            {backfillResult && (
+              <p className="text-xs text-emerald-400 mt-1.5">
+                Updated {backfillResult.updated} transactions ({backfillResult.skipped} skipped)
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
 
       <div className="flex justify-end pt-2">
         <Button variant="secondary" onClick={handleClose}>

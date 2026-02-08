@@ -120,6 +120,13 @@ export const useDeleteCsvImport = () => {
   });
 };
 
+export const useBackfillCsvReferences = () => {
+  return useMutation({
+    mutationFn: ({ accountId, file }: { accountId: string; file: File }) =>
+      api.backfillCsvReferences(accountId, file),
+  });
+};
+
 // Balance alert hooks
 export const useUpdateAccount = () => {
   const queryClient = useQueryClient();

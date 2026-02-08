@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { CheckSquare, X } from 'lucide-react';
-import { TransactionList, TransactionFilters, EditTransactionModal, SplitTransactionModal, BulkSplitModal, BulkActionBar } from '../components/transactions';
+import { CheckSquare, X, Copy } from 'lucide-react';
+import { TransactionList, TransactionFilters, EditTransactionModal, SplitTransactionModal, BulkSplitModal, BulkActionBar, DuplicateReviewModal } from '../components/transactions';
 import { Button } from '../components/ui';
 import { useTransactions, useAccounts, useCategories, useTags, useBulkAddTagToTransactions } from '../hooks';
 import type { Transaction, TransactionFilters as Filters, TransactionType } from '../types';
@@ -48,6 +48,7 @@ export const Transactions = () => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [addedTagIds, setAddedTagIds] = useState<Set<string>>(new Set());
   const [showBulkSplitModal, setShowBulkSplitModal] = useState(false);
+  const [showDuplicates, setShowDuplicates] = useState(false);
 
   // Build filters with transaction_type
   const queryFilters = useMemo(() => {
@@ -185,24 +186,35 @@ export const Transactions = () => {
         </p>
         </div>
         
-        {/* Selection Mode Toggle */}
-        <Button
-          variant={selectionMode ? 'primary' : 'secondary'}
-          onClick={toggleSelectionMode}
-          className="flex-shrink-0"
-        >
-          {selectionMode ? (
-            <>
-              <X className="h-4 w-4 mr-2" />
-              Cancel
-            </>
-          ) : (
-            <>
-              <CheckSquare className="h-4 w-4 mr-2" />
-              Select
-            </>
-          )}
-        </Button>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {/* Find Duplicates */}
+          <Button
+            variant="secondary"
+            onClick={() => setShowDuplicates(true)}
+            title="Find duplicate transactions"
+          >
+            <Copy className="h-4 w-4 mr-2" />
+            <span className="hidden sm:inline">Duplicates</span>
+          </Button>
+
+          {/* Selection Mode Toggle */}
+          <Button
+            variant={selectionMode ? 'primary' : 'secondary'}
+            onClick={toggleSelectionMode}
+          >
+            {selectionMode ? (
+              <>
+                <X className="h-4 w-4 mr-2" />
+                Cancel
+              </>
+            ) : (
+              <>
+                <CheckSquare className="h-4 w-4 mr-2" />
+                Select
+              </>
+            )}
+          </Button>
+        </div>
       </div>
 
       {/* Transaction Type Tabs - Horizontally scrollable on mobile */}
@@ -271,6 +283,11 @@ export const Transactions = () => {
         onClose={handleCloseBulkSplit}
         selectedCount={selectedIds.size}
         transactionIds={Array.from(selectedIds)}
+      />
+
+      <DuplicateReviewModal
+        isOpen={showDuplicates}
+        onClose={() => setShowDuplicates(false)}
       />
     </div>
   );

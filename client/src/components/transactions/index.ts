@@ -5,4 +5,5 @@ export { SplitTransactionModal } from './SplitTransactionModal';
 export { BulkSplitModal } from './BulkSplitModal';
 export { EditTransactionModal } from './EditTransactionModal';
 export { BulkActionBar } from './BulkActionBar';
+export { DuplicateReviewModal } from './DuplicateReviewModal';
 

@@ -26,6 +26,7 @@ export type Database = {
     id: string;
     account_id: string;
     plaid_transaction_id: string | null;
+    csv_reference: string | null;
     amount: number;
     date: string;
     merchant_name: string;

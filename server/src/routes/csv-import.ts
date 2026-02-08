@@ -69,6 +69,7 @@ interface ColumnMapping {
   description: string;
   amount: string;
   extendedDetails?: string;
+  reference?: string;
 }
 
 // Known CSV formats and their column mappings
@@ -90,7 +91,7 @@ const CSV_FORMATS: Record<string, ColumnMapping> = {
 const detectFormat = (headers: string[]): ColumnMapping | null => {
   const normalizedHeaders = headers.map(h => h.toLowerCase().trim());
 
-  // AMEX format: Date, Description, Amount (and optionally Extended Details)
+  // AMEX format: Date, Description, Amount (and optionally Extended Details, Reference)
   if (
     normalizedHeaders.includes('date') &&
     normalizedHeaders.includes('description') &&
@@ -104,6 +105,10 @@ const detectFormat = (headers: string[]): ColumnMapping | null => {
     
     if (normalizedHeaders.includes('extended details')) {
       mapping.extendedDetails = headers[normalizedHeaders.indexOf('extended details')];
+    }
+
+    if (normalizedHeaders.includes('reference')) {
+      mapping.reference = headers[normalizedHeaders.indexOf('reference')];
     }
     
     return mapping;
@@ -121,11 +126,16 @@ const detectFormat = (headers: string[]): ColumnMapping | null => {
   );
 
   if (dateCol && descCol && amountCol) {
-    return {
+    const refCol = headers.find(h =>
+      /^(reference|ref|transaction[\s_-]?id|confirmation)$/i.test(h.trim())
+    );
+    const mapping: ColumnMapping = {
       date: dateCol,
       description: descCol,
       amount: amountCol,
     };
+    if (refCol) mapping.reference = refCol;
+    return mapping;
   }
 
   return null;
@@ -189,6 +199,11 @@ const parseAmount = (amountStr: string): number => {
 // Generate a unique hash for duplicate detection
 const generateTransactionHash = (date: string, description: string, amount: number): string => {
   return `${date}|${description.toLowerCase().trim()}|${amount.toFixed(2)}`;
+};
+
+// Generate a looser hash for fuzzy duplicate detection (date + amount only)
+const generateLooseHash = (date: string, amount: number): string => {
+  return `${date}|${amount.toFixed(2)}`;
 };
 
 interface ParsedTransaction {
@@ -275,14 +290,28 @@ router.post('/:accountId/preview', upload.single('file'), async (req, res) => {
     // Get existing transactions for duplicate detection
     const { data: existingTransactions } = await supabase
       .from('transactions')
-      .select('date, merchant_name, amount')
+      .select('date, merchant_name, original_description, merchant_display_name, amount, csv_reference')
       .eq('account_id', accountId);
 
-    const existingHashes = new Set(
-      existingTransactions?.map(t => 
-        generateTransactionHash(t.date, t.merchant_name, t.amount)
-      ) || []
-    );
+    const existingHashes = new Set<string>();
+    const existingReferences = new Set<string>();
+    // Build a map of loose hashes (date+amount) to count for fuzzy matching
+    const existingLooseCounts = new Map<string, number>();
+
+    existingTransactions?.forEach(t => {
+      existingHashes.add(generateTransactionHash(t.date, t.merchant_name, t.amount));
+      if (t.original_description) {
+        existingHashes.add(generateTransactionHash(t.date, t.original_description, t.amount));
+      }
+      if (t.merchant_display_name) {
+        existingHashes.add(generateTransactionHash(t.date, t.merchant_display_name, t.amount));
+      }
+      if (t.csv_reference) {
+        existingReferences.add(t.csv_reference);
+      }
+      const looseKey = generateLooseHash(t.date, t.amount);
+      existingLooseCounts.set(looseKey, (existingLooseCounts.get(looseKey) || 0) + 1);
+    });
 
     // Get categories for categorization
     const { data: categories } = await supabase.from('categories').select('id, name');
@@ -291,6 +320,8 @@ router.post('/:accountId/preview', upload.single('file'), async (req, res) => {
     // Parse transactions
     const transactions: ParsedTransaction[] = [];
     let duplicateCount = 0;
+    // Track loose hashes within the CSV itself for intra-file duplicate detection
+    const csvLooseCounts = new Map<string, number>();
 
     for (const record of records) {
       try {
@@ -298,9 +329,30 @@ router.post('/:accountId/preview', upload.single('file'), async (req, res) => {
         const description = record[mapping.description] || '';
         const amount = parseAmount(record[mapping.amount]);
         const extendedDetails = mapping.extendedDetails ? record[mapping.extendedDetails] : undefined;
+        const reference = mapping.reference ? record[mapping.reference]?.replace(/'/g, '').trim() : undefined;
 
-        const hash = generateTransactionHash(date, description, amount);
-        const isDuplicate = existingHashes.has(hash);
+        const hash = reference || generateTransactionHash(date, description, amount);
+
+        // Strategy 1: Exact match on csv_reference
+        let isDuplicate = !!reference && existingReferences.has(reference);
+
+        // Strategy 2: Hash-based matching on description variants
+        if (!isDuplicate) {
+          const descHash = generateTransactionHash(date, description, amount);
+          const displayNameHash = generateTransactionHash(date, cleanMerchantName(description), amount);
+          isDuplicate = existingHashes.has(descHash) || existingHashes.has(displayNameHash);
+        }
+
+        // Strategy 3: Fuzzy match — same date + same amount already exists in DB
+        if (!isDuplicate) {
+          const looseKey = generateLooseHash(date, amount);
+          const existingCount = existingLooseCounts.get(looseKey) || 0;
+          const csvCount = csvLooseCounts.get(looseKey) || 0;
+          if (existingCount > csvCount) {
+            isDuplicate = true;
+          }
+          csvLooseCounts.set(looseKey, csvCount + 1);
+        }
 
         if (isDuplicate) {
           duplicateCount++;
@@ -400,14 +452,27 @@ router.post('/:accountId/import', upload.single('file'), async (req, res) => {
     // Get existing transactions for duplicate detection
     const { data: existingTransactions } = await supabase
       .from('transactions')
-      .select('date, merchant_name, amount')
+      .select('date, merchant_name, original_description, merchant_display_name, amount, csv_reference')
       .eq('account_id', accountId);
 
-    const existingHashes = new Set(
-      existingTransactions?.map(t => 
-        generateTransactionHash(t.date, t.merchant_name, t.amount)
-      ) || []
-    );
+    const existingHashes = new Set<string>();
+    const existingReferences = new Set<string>();
+    const existingLooseCounts = new Map<string, number>();
+
+    existingTransactions?.forEach(t => {
+      existingHashes.add(generateTransactionHash(t.date, t.merchant_name, t.amount));
+      if (t.original_description) {
+        existingHashes.add(generateTransactionHash(t.date, t.original_description, t.amount));
+      }
+      if (t.merchant_display_name) {
+        existingHashes.add(generateTransactionHash(t.date, t.merchant_display_name, t.amount));
+      }
+      if (t.csv_reference) {
+        existingReferences.add(t.csv_reference);
+      }
+      const looseKey = generateLooseHash(t.date, t.amount);
+      existingLooseCounts.set(looseKey, (existingLooseCounts.get(looseKey) || 0) + 1);
+    });
 
     // Get categories and merchant mappings
     const { data: categories } = await supabase.from('categories').select('id, name');
@@ -433,6 +498,7 @@ router.post('/:accountId/import', upload.single('file'), async (req, res) => {
     let imported = 0;
     let skipped = 0;
     const errors: string[] = [];
+    const csvLooseCounts = new Map<string, number>();
 
     for (const record of records) {
       try {
@@ -441,8 +507,29 @@ router.post('/:accountId/import', upload.single('file'), async (req, res) => {
         const amount = parseAmount(record[mapping.amount]);
         const extendedDetails = mapping.extendedDetails ? record[mapping.extendedDetails] : undefined;
 
-        const hash = generateTransactionHash(date, description, amount);
-        const isDuplicate = existingHashes.has(hash);
+        const reference = mapping.reference ? record[mapping.reference]?.replace(/'/g, '').trim() : undefined;
+        const displayName = cleanMerchantName(description);
+
+        // Strategy 1: Exact match on csv_reference
+        let isDuplicate = !!reference && existingReferences.has(reference);
+
+        // Strategy 2: Hash-based matching on description variants
+        if (!isDuplicate) {
+          const descHash = generateTransactionHash(date, description, amount);
+          const displayNameHash = generateTransactionHash(date, displayName, amount);
+          isDuplicate = existingHashes.has(descHash) || existingHashes.has(displayNameHash);
+        }
+
+        // Strategy 3: Fuzzy match — same date + same amount already exists
+        if (!isDuplicate) {
+          const looseKey = generateLooseHash(date, amount);
+          const existingCount = existingLooseCounts.get(looseKey) || 0;
+          const csvCount = csvLooseCounts.get(looseKey) || 0;
+          if (existingCount > csvCount) {
+            isDuplicate = true;
+          }
+          csvLooseCounts.set(looseKey, csvCount + 1);
+        }
 
         if (isDuplicate && skipDuplicates) {
           skipped++;
@@ -450,7 +537,6 @@ router.post('/:accountId/import', upload.single('file'), async (req, res) => {
         }
 
         const transactionType = detectTransactionType(description, amount);
-        const displayName = cleanMerchantName(description);
 
         // Check for merchant mapping
         const merchantMapping = merchantMappingMap.get(description.toLowerCase());
@@ -475,6 +561,7 @@ router.post('/:accountId/import', upload.single('file'), async (req, res) => {
           id: uuidv4(),
           account_id: accountId,
           plaid_transaction_id: null,
+          csv_reference: reference || null,
           import_id: importId,
           amount,
           date,
@@ -493,8 +580,11 @@ router.post('/:accountId/import', upload.single('file'), async (req, res) => {
           errors.push(`Row ${imported + skipped + 1}: ${insertError.message}`);
         } else {
           imported++;
-          // Add hash to prevent duplicates within the same import
-          existingHashes.add(hash);
+          // Track to prevent duplicates within the same import
+          existingHashes.add(generateTransactionHash(date, description, amount));
+          if (reference) {
+            existingReferences.add(reference);
+          }
         }
       } catch (parseError) {
         const errorMessage = parseError instanceof Error ? parseError.message : 'Unknown error';
@@ -566,6 +656,120 @@ router.delete('/imports/:importId', async (req, res) => {
   } catch (error) {
     console.error('Error deleting import:', error);
     res.status(500).json({ message: 'Failed to delete import' });
+  }
+});
+
+// Backfill csv_reference for existing transactions by matching CSV rows
+// Matches on date + amount + description/merchant name
+router.post('/:accountId/backfill-references', upload.single('file'), async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const file = req.file;
+
+    if (!file) {
+      return res.status(400).json({ message: 'No file uploaded' });
+    }
+
+    // Parse CSV
+    const csvContent = file.buffer.toString('utf-8');
+    const records = parse(csvContent, {
+      columns: true,
+      skip_empty_lines: true,
+      trim: true,
+    }) as Record<string, string>[];
+
+    if (records.length === 0) {
+      return res.status(400).json({ message: 'CSV file is empty' });
+    }
+
+    const headers = Object.keys(records[0]);
+    const mapping = detectFormat(headers);
+
+    if (!mapping || !mapping.reference) {
+      return res.status(400).json({
+        message: 'CSV must have a Reference column for backfilling',
+        headers,
+      });
+    }
+
+    // Get existing transactions without csv_reference
+    const { data: existingTransactions, error } = await supabase
+      .from('transactions')
+      .select('id, date, amount, merchant_name, original_description, merchant_display_name')
+      .eq('account_id', accountId)
+      .is('csv_reference', null);
+
+    if (error) throw error;
+
+    // Build lookup maps for matching: date+amount → list of transactions
+    const txByDateAmount = new Map<string, NonNullable<typeof existingTransactions>>();
+    for (const t of existingTransactions || []) {
+      const key = generateLooseHash(t.date, t.amount);
+      if (!txByDateAmount.has(key)) txByDateAmount.set(key, []);
+      txByDateAmount.get(key)!.push(t);
+    }
+
+    let updated = 0;
+    let skipped = 0;
+    const alreadyMatched = new Set<string>();
+
+    for (const record of records) {
+      try {
+        const date = parseDate(record[mapping.date]);
+        const description = record[mapping.description] || '';
+        const amount = parseAmount(record[mapping.amount]);
+        const reference = record[mapping.reference]?.replace(/'/g, '').trim();
+
+        if (!reference) {
+          skipped++;
+          continue;
+        }
+
+        const key = generateLooseHash(date, amount);
+        const candidates = txByDateAmount.get(key);
+        if (!candidates) {
+          skipped++;
+          continue;
+        }
+
+        // Find best match: try exact description, then cleaned name, then just date+amount
+        const descLower = description.toLowerCase().trim();
+        const cleanedName = cleanMerchantName(description).toLowerCase().trim();
+
+        const match = candidates.find(t => {
+          if (alreadyMatched.has(t.id)) return false;
+          const merchantLower = (t.merchant_name || '').toLowerCase().trim();
+          const origDescLower = (t.original_description || '').toLowerCase().trim();
+          const displayLower = (t.merchant_display_name || '').toLowerCase().trim();
+          return merchantLower === descLower
+            || origDescLower === descLower
+            || displayLower === cleanedName
+            || merchantLower === cleanedName;
+        }) || candidates.find(t => !alreadyMatched.has(t.id)); // Fallback: first unmatched with same date+amount
+
+        if (match) {
+          const { error: updateError } = await supabase
+            .from('transactions')
+            .update({ csv_reference: reference })
+            .eq('id', match.id);
+
+          if (!updateError) {
+            updated++;
+            alreadyMatched.add(match.id);
+          }
+        } else {
+          skipped++;
+        }
+      } catch {
+        skipped++;
+      }
+    }
+
+    console.log(`Backfill complete: ${updated} updated, ${skipped} skipped`);
+    res.json({ success: true, updated, skipped, total: records.length });
+  } catch (error) {
+    console.error('Error backfilling references:', error);
+    res.status(500).json({ message: 'Failed to backfill references' });
   }
 });
 

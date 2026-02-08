@@ -244,6 +244,40 @@ export const createManualTransaction = (data: Partial<Transaction>) =>
 export const deleteTransaction = (id: string) =>
   fetchApi<void>(`/transactions/${id}`, { method: 'DELETE' });
 
+// Duplicate detection
+export interface DuplicateTransaction {
+  id: string;
+  merchant_name: string;
+  merchant_display_name: string | null;
+  transaction_type: string;
+  import_id: string | null;
+  created_at: string;
+}
+
+export interface DuplicateGroup {
+  count: number;
+  date: string;
+  amount: number;
+  merchant: string;
+  accountName: string;
+  transactions: DuplicateTransaction[];
+}
+
+export interface DuplicatesResponse {
+  totalGroups: number;
+  totalDuplicates: number;
+  groups: DuplicateGroup[];
+}
+
+export const getDuplicates = () =>
+  fetchApi<DuplicatesResponse>('/transactions/duplicates');
+
+export const bulkDeleteTransactions = (transactionIds: string[]) =>
+  fetchApi<{ deleted: number }>('/transactions/bulk/delete', {
+    method: 'POST',
+    body: JSON.stringify({ transactionIds }),
+  });
+
 // Transaction Splits
 export const createSplit = (transactionId: string, splits: Omit<TransactionSplit, 'id' | 'parent_transaction_id' | 'created_at'>[]) =>
   fetchApi<TransactionSplit[]>(`/transactions/${transactionId}/splits`, {
@@ -410,6 +444,26 @@ export const getCsvImports = (accountId: string) =>
 
 export const deleteCsvImport = (importId: string) =>
   fetchApi<void>(`/csv-import/imports/${importId}`, { method: 'DELETE' });
+
+export const backfillCsvReferences = async (
+  accountId: string,
+  file: File,
+): Promise<{ success: boolean; updated: number; skipped: number; total: number }> => {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const response = await fetch(`${API_BASE_URL}/csv-import/${accountId}/backfill-references`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: 'Backfill failed' }));
+    throw new Error(error.message || 'Backfill failed');
+  }
+
+  return response.json();
+};
 
 // Investments
 export const getInvestmentHoldings = () =>

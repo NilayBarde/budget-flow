@@ -126,6 +126,116 @@ router.get('/similar/:merchantName/count', async (req, res) => {
   }
 });
 
+// Find duplicate transactions — only flags exact ID matches
+// Matches on plaid_transaction_id or csv_reference
+router.get('/duplicates', async (req, res) => {
+  try {
+    const { data: transactions, error } = await supabase
+      .from('transactions')
+      .select(`
+        id,
+        date,
+        amount,
+        merchant_name,
+        merchant_display_name,
+        transaction_type,
+        account_id,
+        import_id,
+        plaid_transaction_id,
+        csv_reference,
+        created_at,
+        account:accounts(institution_name)
+      `)
+      .order('date', { ascending: false });
+
+    if (error) throw error;
+
+    // Helper: group transactions by a key field, returning groups with 2+ entries
+    const groupByField = (
+      txns: NonNullable<typeof transactions>,
+      getKey: (t: NonNullable<typeof transactions>[number]) => string | null,
+    ) => {
+      const groups = new Map<string, typeof transactions>();
+      for (const t of txns) {
+        const key = getKey(t);
+        if (!key) continue;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key)!.push(t);
+      }
+      return Array.from(groups.values()).filter(g => g.length > 1);
+    };
+
+    const allTxns = transactions || [];
+
+    // Group by plaid_transaction_id
+    const plaidDuplicates = groupByField(allTxns, t => t.plaid_transaction_id);
+
+    // Group by csv_reference (exclude those already caught by plaid ID)
+    const plaidGroupedIds = new Set(plaidDuplicates.flatMap(g => g.map(t => t.id)));
+    const csvRefDuplicates = groupByField(
+      allTxns.filter(t => !plaidGroupedIds.has(t.id)),
+      t => t.csv_reference,
+    );
+
+    const allDuplicateGroups = [...plaidDuplicates, ...csvRefDuplicates];
+
+    const formatGroup = (group: NonNullable<typeof transactions>) => ({
+      count: group.length,
+      date: group[0].date,
+      amount: group[0].amount,
+      merchant: group[0].merchant_display_name || group[0].merchant_name,
+      accountName: (group[0].account as unknown as { institution_name: string } | null)?.institution_name || 'Unknown',
+      transactions: group.map(t => ({
+        id: t.id,
+        merchant_name: t.merchant_name,
+        merchant_display_name: t.merchant_display_name,
+        transaction_type: t.transaction_type,
+        import_id: t.import_id,
+        plaid_transaction_id: t.plaid_transaction_id,
+        csv_reference: t.csv_reference,
+        created_at: t.created_at,
+      })),
+    });
+
+    const duplicateGroups = allDuplicateGroups.map(formatGroup);
+
+    res.json({
+      totalGroups: duplicateGroups.length,
+      totalDuplicates: duplicateGroups.reduce((sum, g) => sum + g.count - 1, 0),
+      groups: duplicateGroups,
+    });
+  } catch (error) {
+    console.error('Error finding duplicates:', error);
+    res.status(500).json({ message: 'Failed to find duplicates' });
+  }
+});
+
+// Bulk delete transactions
+router.post('/bulk/delete', async (req, res) => {
+  try {
+    const { transactionIds } = req.body;
+
+    if (!transactionIds || !Array.isArray(transactionIds) || transactionIds.length === 0) {
+      return res.status(400).json({ message: 'Transaction IDs array is required' });
+    }
+
+    // Delete splits first
+    await supabase.from('transaction_splits').delete().in('parent_transaction_id', transactionIds);
+
+    // Delete tags
+    await supabase.from('transaction_tags').delete().in('transaction_id', transactionIds);
+
+    // Delete transactions
+    const { error } = await supabase.from('transactions').delete().in('id', transactionIds);
+
+    if (error) throw error;
+    res.json({ deleted: transactionIds.length });
+  } catch (error) {
+    console.error('Error bulk deleting transactions:', error);
+    res.status(500).json({ message: 'Failed to bulk delete transactions' });
+  }
+});
+
 // Get single transaction
 router.get('/:id', async (req, res) => {
   try {

@@ -92,3 +92,24 @@ export const useDeleteSplits = () => {
   });
 };
 
+export const useDuplicates = (enabled = true) => {
+  return useQuery({
+    queryKey: ['duplicates'],
+    queryFn: () => api.getDuplicates(),
+    enabled,
+  });
+};
+
+export const useBulkDeleteTransactions = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (transactionIds: string[]) => api.bulkDeleteTransactions(transactionIds),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['duplicates'] });
+      queryClient.invalidateQueries({ queryKey: ['stats'] });
+      queryClient.invalidateQueries({ queryKey: ['insights'] });
+    },
+  });
+};
