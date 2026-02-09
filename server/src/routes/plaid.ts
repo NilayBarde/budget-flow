@@ -214,31 +214,69 @@ router.post('/exchange-token', async (req, res) => {
     
     console.log(`Found ${plaidAccounts.length} accounts from ${institutionName}`);
 
-    // Store ALL accounts from this Plaid Item
+    // Check for existing accounts with the same plaid_account_id to prevent duplicates
+    // This handles the case where a user relinks the same bank (new item_id/access_token, same plaid_account_id)
+    const plaidAccountIds = plaidAccounts.map(a => a.account_id);
+    const { data: existingAccounts } = await supabase
+      .from('accounts')
+      .select('id, plaid_account_id')
+      .in('plaid_account_id', plaidAccountIds);
+
+    const existingByPlaidId = new Map(
+      (existingAccounts || []).map(a => [a.plaid_account_id, a.id])
+    );
+
+    // Store or update ALL accounts from this Plaid Item
     for (const plaidAccount of plaidAccounts) {
-      const accountId = uuidv4();
-      const account = {
-        id: accountId,
-        user_id: DEFAULT_USER_ID,
-        plaid_item_id: itemId,
-        plaid_access_token: accessToken,
-        institution_name: institutionName,
-        account_name: plaidAccount.name || 'Account',
-        account_type: plaidAccount.subtype || plaidAccount.type || 'unknown',
-        plaid_account_id: plaidAccount.account_id, // Store Plaid's account ID for matching transactions
-        current_balance: plaidAccount.balances?.current ?? null,
-        created_at: new Date().toISOString(),
-      };
+      const existingId = existingByPlaidId.get(plaidAccount.account_id);
 
-      const { data, error } = await supabase.from('accounts').insert(account).select().single();
+      if (existingId) {
+        // Account already exists — update with new access token/item ID instead of creating a duplicate
+        const { error } = await supabase
+          .from('accounts')
+          .update({
+            plaid_item_id: itemId,
+            plaid_access_token: accessToken,
+            institution_name: institutionName,
+            account_name: plaidAccount.name || 'Account',
+            account_type: plaidAccount.subtype || plaidAccount.type || 'unknown',
+            current_balance: plaidAccount.balances?.current ?? null,
+          })
+          .eq('id', existingId);
 
-      if (error) {
-        console.error(`Failed to create account ${plaidAccount.name}:`, error);
-        continue;
+        if (error) {
+          console.error(`Failed to update existing account ${plaidAccount.name}:`, error);
+          continue;
+        }
+
+        console.log(`Updated existing account: ${institutionName} - ${plaidAccount.name} (relinked)`);
+        createdAccounts.push({ id: existingId, plaid_account_id: plaidAccount.account_id });
+      } else {
+        // New account — create it
+        const accountId = uuidv4();
+        const account = {
+          id: accountId,
+          user_id: DEFAULT_USER_ID,
+          plaid_item_id: itemId,
+          plaid_access_token: accessToken,
+          institution_name: institutionName,
+          account_name: plaidAccount.name || 'Account',
+          account_type: plaidAccount.subtype || plaidAccount.type || 'unknown',
+          plaid_account_id: plaidAccount.account_id,
+          current_balance: plaidAccount.balances?.current ?? null,
+          created_at: new Date().toISOString(),
+        };
+
+        const { error } = await supabase.from('accounts').insert(account).select().single();
+
+        if (error) {
+          console.error(`Failed to create account ${plaidAccount.name}:`, error);
+          continue;
+        }
+        
+        console.log(`Created account: ${institutionName} - ${plaidAccount.name} (${plaidAccount.subtype || plaidAccount.type})`);
+        createdAccounts.push({ id: accountId, plaid_account_id: plaidAccount.account_id });
       }
-      
-      console.log(`Created account: ${institutionName} - ${plaidAccount.name} (${plaidAccount.subtype || plaidAccount.type})`);
-      createdAccounts.push({ id: accountId, plaid_account_id: plaidAccount.account_id });
     }
 
     if (createdAccounts.length === 0) {
