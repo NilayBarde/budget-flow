@@ -16,12 +16,12 @@ const getIcon = (iconName: string) => {
     .split('-')
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join('');
-  const IconComponent = (LucideIcons as Record<string, React.ComponentType<LucideIcons.LucideProps>>)[pascalName];
+  const IconComponent = (LucideIcons as unknown as Record<string, React.ComponentType<LucideIcons.LucideProps>>)[pascalName];
   return IconComponent || LucideIcons.PiggyBank;
 };
 
 export const SavingsGoalCard = ({ goal, onEdit, onDelete }: SavingsGoalCardProps) => {
-  const { percentage, projectedDate, remaining } = useMemo(() => {
+  const { percentage, projectedDate } = useMemo(() => {
     const pct = goal.target_amount > 0
       ? Math.min((goal.current_amount / goal.target_amount) * 100, 100)
       : 0;
@@ -38,7 +38,7 @@ export const SavingsGoalCard = ({ goal, onEdit, onDelete }: SavingsGoalCardProps
       projected = 'Completed!';
     }
 
-    return { percentage: pct, projectedDate: projected, remaining: rem };
+    return { percentage: pct, projectedDate: projected };
   }, [goal]);
 
   const Icon = getIcon(goal.icon);

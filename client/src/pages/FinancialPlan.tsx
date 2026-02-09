@@ -30,7 +30,7 @@ export const FinancialPlan = () => {
   const { data: budgetGoals, isLoading: budgetLoading } = useBudgetGoals(currentDate.month, currentDate.year);
   const { data: recurring } = useRecurringTransactions();
   const { data: savingsGoals = [], isLoading: savingsLoading } = useSavingsGoals();
-  const { expectedIncome } = useExpectedIncome();
+  const { expectedIncome, calculatedIncome, isManualOverride, monthsSampled } = useExpectedIncome();
   const updateSetting = useUpdateAppSetting();
 
   // Mutations
@@ -42,12 +42,16 @@ export const FinancialPlan = () => {
   const actualIncome = stats?.total_income || 0;
   const totalSpent = stats?.total_spent || 0;
 
-  const handleExpectedIncomeChange = useCallback(
+  const handleOverrideChange = useCallback(
     (value: number) => {
       updateSetting.mutate({ key: 'expected_monthly_income', value: value.toString() });
     },
     [updateSetting],
   );
+
+  const handleClearOverride = useCallback(() => {
+    updateSetting.mutate({ key: 'expected_monthly_income', value: '0' });
+  }, [updateSetting]);
 
   const fixedCosts = useMemo(() => {
     if (!recurring) return 0;
@@ -190,7 +194,11 @@ export const FinancialPlan = () => {
             goalContributions={totalGoalContributions}
             actualSpent={totalSpent}
             expectedIncome={expectedIncome}
-            onExpectedIncomeChange={handleExpectedIncomeChange}
+            calculatedIncome={calculatedIncome}
+            isManualOverride={isManualOverride}
+            monthsSampled={monthsSampled}
+            onOverrideChange={handleOverrideChange}
+            onClearOverride={handleClearOverride}
           />
 
           {/* Section 2: Savings Goals */}

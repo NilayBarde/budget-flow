@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { Pencil, Check, X, Calculator } from 'lucide-react';
+import { Pencil, Check, Calculator } from 'lucide-react';
 import { Card, CardHeader } from '../ui';
 import { formatCurrency } from '../../utils/formatters';
 
