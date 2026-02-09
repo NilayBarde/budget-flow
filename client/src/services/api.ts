@@ -15,6 +15,7 @@ import type {
   InvestmentHoldingsResponse,
   InvestmentSummary,
   InsightsData,
+  SavingsGoal,
 } from '../types';
 
 const fetchApi = async <T>(
@@ -464,6 +465,39 @@ export const backfillCsvReferences = async (
 
   return response.json();
 };
+
+// App Settings
+export const getAppSettings = () =>
+  fetchApi<Record<string, string>>('/settings');
+
+export const updateAppSetting = (key: string, value: string) =>
+  fetchApi<{ key: string; value: string; updated_at: string }>(`/settings/${key}`, {
+    method: 'PUT',
+    body: JSON.stringify({ value }),
+  });
+
+// Estimated Income
+export const getEstimatedIncome = () =>
+  fetchApi<{ estimated_monthly_income: number; months_sampled: number }>('/stats/estimated-income');
+
+// Savings Goals
+export const getSavingsGoals = () =>
+  fetchApi<SavingsGoal[]>('/savings-goals');
+
+export const createSavingsGoal = (data: Omit<SavingsGoal, 'id' | 'created_at' | 'updated_at'>) =>
+  fetchApi<SavingsGoal>('/savings-goals', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+
+export const updateSavingsGoal = (id: string, data: Partial<SavingsGoal>) =>
+  fetchApi<SavingsGoal>(`/savings-goals/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+
+export const deleteSavingsGoal = (id: string) =>
+  fetchApi<void>(`/savings-goals/${id}`, { method: 'DELETE' });
 
 // Investments
 export const getInvestmentHoldings = () =>

@@ -557,4 +557,46 @@ router.get('/insights', async (req, res) => {
   }
 });
 
+// Estimated monthly income — average of the last 3 complete months of income
+router.get('/estimated-income', async (req, res) => {
+  try {
+    const now = new Date();
+    // Go back 3 full months from the 1st of the current month
+    const endDate = new Date(now.getFullYear(), now.getMonth(), 1); // 1st of current month
+    const startDate = new Date(endDate);
+    startDate.setMonth(startDate.getMonth() - 3); // 3 months back
+
+    const { data: transactions, error } = await supabase
+      .from('transactions')
+      .select('amount, date, transaction_type')
+      .eq('transaction_type', 'income')
+      .gte('date', startDate.toISOString().split('T')[0])
+      .lt('date', endDate.toISOString().split('T')[0]);
+
+    if (error) throw error;
+
+    // Bucket income by month
+    const monthlyIncome = new Map<string, number>();
+    for (const t of transactions || []) {
+      const d = new Date(t.date);
+      const key = `${d.getFullYear()}-${d.getMonth()}`;
+      monthlyIncome.set(key, (monthlyIncome.get(key) || 0) + Math.abs(t.amount));
+    }
+
+    const monthValues = Array.from(monthlyIncome.values());
+    const monthsWithData = monthValues.length;
+    const totalIncome = monthValues.reduce((s, v) => s + v, 0);
+    const average = monthsWithData > 0 ? totalIncome / monthsWithData : 0;
+
+    res.json({
+      estimated_monthly_income: Math.round(average * 100) / 100,
+      months_sampled: monthsWithData,
+      monthly_breakdown: Object.fromEntries(monthlyIncome),
+    });
+  } catch (error) {
+    console.error('Error estimating income:', error);
+    res.status(500).json({ message: 'Failed to estimate income' });
+  }
+});
+
 export default router;

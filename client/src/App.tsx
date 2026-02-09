@@ -10,6 +10,7 @@ const dashboardImport = import('./pages/Dashboard');
 const Dashboard = lazy(() => dashboardImport.then(m => ({ default: m.Dashboard })));
 const Transactions = lazy(() => import('./pages/Transactions').then(m => ({ default: m.Transactions })));
 const Budget = lazy(() => import('./pages/Budget').then(m => ({ default: m.Budget })));
+const FinancialPlan = lazy(() => import('./pages/FinancialPlan').then(m => ({ default: m.FinancialPlan })));
 const YearOverview = lazy(() => import('./pages/YearOverview').then(m => ({ default: m.YearOverview })));
 const Insights = lazy(() => import('./pages/Insights').then(m => ({ default: m.Insights })));
 const Accounts = lazy(() => import('./pages/Accounts').then(m => ({ default: m.Accounts })));
@@ -36,6 +37,7 @@ function App() {
             <Route path="/" element={<Layout />}>
               <Route index element={<Dashboard />} />
               <Route path="transactions" element={<Transactions />} />
+              <Route path="plan" element={<FinancialPlan />} />
               <Route path="budget" element={<Budget />} />
               <Route path="investments" element={<Investments />} />
               <Route path="year" element={<YearOverview />} />

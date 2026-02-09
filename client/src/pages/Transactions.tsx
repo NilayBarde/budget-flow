@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { CheckSquare, X, Copy } from 'lucide-react';
 import { TransactionList, TransactionFilters, EditTransactionModal, SplitTransactionModal, BulkSplitModal, BulkActionBar, DuplicateReviewModal } from '../components/transactions';
 import { Button } from '../components/ui';
-import { useTransactions, useAccounts, useCategories, useTags, useBulkAddTagToTransactions } from '../hooks';
+import { useTransactions, useAccounts, useCategories, useTags, useBulkAddTagToTransactions, useExpectedIncome } from '../hooks';
 import type { Transaction, TransactionFilters as Filters, TransactionType } from '../types';
 import { getMonthYear } from '../utils/formatters';
 
@@ -64,6 +64,7 @@ export const Transactions = () => {
   const { data: categories = [] } = useCategories();
   const { data: tags = [] } = useTags();
   const bulkAddTag = useBulkAddTagToTransactions();
+  const { expectedIncome } = useExpectedIncome();
 
   const handleEdit = useCallback((transaction: Transaction) => {
     setEditingTransaction(transaction);
@@ -174,6 +175,9 @@ export const Transactions = () => {
             <span> • </span>
             <span className="text-rose-400">-${totals.expenses.toFixed(2)}</span>
             <span className="text-emerald-400 ml-2">+${totals.income.toFixed(2)}</span>
+            {expectedIncome > 0 && (
+              <span className="text-slate-500"> of ${expectedIncome.toFixed(2)}</span>
+            )}
             {totals.returns > 0 && (
               <span className="text-emerald-400 ml-2">+${totals.returns.toFixed(2)} returns</span>
             )}
@@ -189,7 +193,12 @@ export const Transactions = () => {
             <p>{transactions?.length || 0} transactions</p>
             <div className="flex items-center gap-3 flex-wrap">
               <span className="text-rose-400">-${totals.expenses.toFixed(2)}</span>
-              <span className="text-emerald-400">+${totals.income.toFixed(2)}</span>
+              <span className="text-emerald-400">
+                +${totals.income.toFixed(2)}
+                {expectedIncome > 0 && (
+                  <span className="text-slate-500"> / ${expectedIncome.toFixed(2)}</span>
+                )}
+              </span>
               {totals.returns > 0 && (
                 <span className="text-emerald-400">+${totals.returns.toFixed(2)} ret.</span>
               )}

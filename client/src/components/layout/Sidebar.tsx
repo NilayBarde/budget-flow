@@ -9,14 +9,15 @@ import {
   Tags,
   Settings,
   X,
-  TrendingUp
+  TrendingUp,
+  Target,
 } from 'lucide-react';
 import clsx from 'clsx';
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/transactions', icon: Receipt, label: 'Transactions' },
-  { to: '/budget', icon: PiggyBank, label: 'Budget' },
+  { to: '/plan', icon: Target, label: 'Plan' },
   { to: '/investments', icon: TrendingUp, label: 'Investments' },
   { to: '/year', icon: Calendar, label: 'Year Overview' },
   { to: '/insights', icon: BarChart3, label: 'Insights' },

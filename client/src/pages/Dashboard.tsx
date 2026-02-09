@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { ArrowUpRight, ArrowDownRight, TrendingUp, Wallet, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { Card, CardHeader, Spinner, Button } from '../components/ui';
-import { useMonthlyStats, useBudgetGoals } from '../hooks';
+import { useMonthlyStats, useBudgetGoals, useExpectedIncome } from '../hooks';
 import { formatCurrency, getMonthYear } from '../utils/formatters';
 import { ProgressBar } from '../components/ui/ProgressBar';
 import { MONTHS } from '../utils/constants';
@@ -14,6 +14,7 @@ export const Dashboard = () => {
   
   const { data: stats, isLoading: statsLoading, refetch: refetchStats } = useMonthlyStats(currentDate.month, currentDate.year);
   const { data: budgetGoals, isLoading: goalsLoading, refetch: refetchGoals } = useBudgetGoals(currentDate.month, currentDate.year);
+  const { expectedIncome } = useExpectedIncome();
   
   const handleRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ['stats'] });
@@ -148,6 +149,11 @@ export const Dashboard = () => {
               <p className="text-lg md:text-2xl font-bold text-slate-100 mt-0.5 md:mt-1">
                 {formatCurrency(totalIncome)}
               </p>
+              {expectedIncome > 0 && (
+                <p className="text-[10px] md:text-xs text-slate-500 mt-0.5">
+                  of {formatCurrency(expectedIncome)} expected
+                </p>
+              )}
             </div>
             <div className="p-2 md:p-3 bg-emerald-500/20 rounded-xl md:hidden">
               <ArrowDownRight className="h-5 w-5 text-emerald-400" />

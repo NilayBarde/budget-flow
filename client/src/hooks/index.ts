@@ -6,4 +6,6 @@ export * from './useTags';
 export * from './useRecurring';
 export * from './useInvestments';
 export * from './useInsights';
+export * from './useSavingsGoals';
+export * from './useAppSettings';
 

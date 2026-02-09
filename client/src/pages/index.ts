@@ -1,6 +1,7 @@
 export { Dashboard } from './Dashboard';
 export { Transactions } from './Transactions';
 export { Budget } from './Budget';
+export { FinancialPlan } from './FinancialPlan';
 export { YearOverview } from './YearOverview';
 export { Insights } from './Insights';
 export { Accounts } from './Accounts';
