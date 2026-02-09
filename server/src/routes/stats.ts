@@ -41,6 +41,9 @@ router.get('/monthly', async (req, res) => {
     let totalInvested = 0;
     const categoryTotals = new Map<string, { category: CategoryData; amount: number }>();
 
+    // Track uncategorized expense spending so totalSpent stays consistent with category totals
+    let uncategorizedSpent = 0;
+
     transactions?.forEach(t => {
       const transactionType = t.transaction_type || (t.amount > 0 ? 'expense' : 'income');
       
@@ -53,17 +56,7 @@ router.get('/monthly', async (req, res) => {
         totalInvested += Math.abs(t.amount);
       } else if (transactionType === 'expense') {
         // If transaction has splits, only count the "my share" portions
-        let amountToCount: number;
-        const splits = t.splits as { amount: number; is_my_share: boolean }[] | null;
-        if (t.is_split && splits && splits.length > 0) {
-          amountToCount = splits
-            .filter(s => s.is_my_share)
-            .reduce((sum, s) => sum + Math.abs(s.amount), 0);
-        } else {
-          amountToCount = Math.abs(t.amount);
-        }
-        
-        totalSpent += amountToCount;
+        const amountToCount = getExpenseAmount(t);
         
         const category = t.category as unknown as CategoryData | null;
         if (category && amountToCount > 0) {
@@ -73,19 +66,24 @@ router.get('/monthly', async (req, res) => {
           } else {
             categoryTotals.set(category.id, { category, amount: amountToCount });
           }
+        } else if (amountToCount > 0) {
+          uncategorizedSpent += amountToCount;
         }
       } else if (transactionType === 'return') {
-        // Returns reduce spending in their category (amount is negative in DB)
+        // Returns reduce spending — only subtract what the category can actually absorb
+        // so totalSpent stays consistent with the sum of displayed category amounts
         const returnAmount = Math.abs(t.amount);
-        totalSpent -= returnAmount; // Reduce total spent
         
         const category = t.category as unknown as CategoryData | null;
         if (category) {
           const existing = categoryTotals.get(category.id);
           if (existing) {
-            existing.amount = Math.max(0, existing.amount - returnAmount);
+            const actualReduction = Math.min(returnAmount, existing.amount);
+            existing.amount -= actualReduction;
           }
-          // If category doesn't exist yet, the return just won't reduce anything
+        } else {
+          // Uncategorized return reduces the uncategorized bucket
+          uncategorizedSpent = Math.max(0, uncategorizedSpent - returnAmount);
         }
       } else if (transactionType === 'income') {
         const incomeAmount = Math.abs(t.amount);
@@ -93,8 +91,8 @@ router.get('/monthly', async (req, res) => {
       }
     });
 
-    // Ensure totalSpent doesn't go negative
-    totalSpent = Math.max(0, totalSpent);
+    // Derive totalSpent from category totals so it's always consistent with what's displayed
+    totalSpent = Array.from(categoryTotals.values()).reduce((sum, c) => sum + c.amount, 0) + uncategorizedSpent;
 
     res.json({
       month: Number(month),
@@ -148,6 +146,8 @@ router.get('/yearly', async (req, res) => {
     let totalInvested = 0;
     const categoryTotals = new Map<string, { category: CategoryData; amount: number }>();
 
+    let uncategorizedSpent = 0;
+
     transactions?.forEach(t => {
       const month = new Date(t.date).getMonth(); // 0-indexed
       const transactionType = t.transaction_type || (t.amount > 0 ? 'expense' : 'income');
@@ -162,18 +162,8 @@ router.get('/yearly', async (req, res) => {
         totalInvested += amount;
         monthlyTotals[month].invested += amount;
       } else if (transactionType === 'expense') {
-        // If transaction has splits, only count the "my share" portions
-        let amountToCount: number;
-        const splits = t.splits as { amount: number; is_my_share: boolean }[] | null;
-        if (t.is_split && splits && splits.length > 0) {
-          amountToCount = splits
-            .filter(s => s.is_my_share)
-            .reduce((sum, s) => sum + Math.abs(s.amount), 0);
-        } else {
-          amountToCount = Math.abs(t.amount);
-        }
+        const amountToCount = getExpenseAmount(t);
         
-        totalSpent += amountToCount;
         monthlyTotals[month].spent += amountToCount;
         
         const category = t.category as unknown as CategoryData | null;
@@ -184,19 +174,25 @@ router.get('/yearly', async (req, res) => {
           } else {
             categoryTotals.set(category.id, { category, amount: amountToCount });
           }
+        } else if (amountToCount > 0) {
+          uncategorizedSpent += amountToCount;
         }
       } else if (transactionType === 'return') {
-        // Returns reduce spending in their category (amount is negative in DB)
+        // Returns reduce spending — only subtract what the category can actually absorb
         const returnAmount = Math.abs(t.amount);
-        totalSpent -= returnAmount;
-        monthlyTotals[month].spent = Math.max(0, monthlyTotals[month].spent - returnAmount);
         
         const category = t.category as unknown as CategoryData | null;
         if (category) {
           const existing = categoryTotals.get(category.id);
           if (existing) {
-            existing.amount = Math.max(0, existing.amount - returnAmount);
+            const actualReduction = Math.min(returnAmount, existing.amount);
+            existing.amount -= actualReduction;
+            monthlyTotals[month].spent = Math.max(0, monthlyTotals[month].spent - actualReduction);
           }
+        } else {
+          const actualReduction = Math.min(returnAmount, uncategorizedSpent);
+          uncategorizedSpent -= actualReduction;
+          monthlyTotals[month].spent = Math.max(0, monthlyTotals[month].spent - actualReduction);
         }
       } else if (transactionType === 'income') {
         const incomeAmount = Math.abs(t.amount);
@@ -205,8 +201,8 @@ router.get('/yearly', async (req, res) => {
       }
     });
 
-    // Ensure totalSpent doesn't go negative
-    totalSpent = Math.max(0, totalSpent);
+    // Derive totalSpent from category totals so it's always consistent with what's displayed
+    totalSpent = Array.from(categoryTotals.values()).reduce((sum, c) => sum + c.amount, 0) + uncategorizedSpent;
 
     res.json({
       year: Number(year),
