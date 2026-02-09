@@ -36,27 +36,27 @@ router.get('/monthly', async (req, res) => {
 
     if (error) throw error;
 
-    let totalSpent = 0;
+    let grossExpenses = 0;
+    let totalReturns = 0;
     let totalIncome = 0;
     let totalInvested = 0;
     const categoryTotals = new Map<string, { category: CategoryData; amount: number }>();
 
-    // Track uncategorized expense spending so totalSpent stays consistent with category totals
-    let uncategorizedSpent = 0;
+    // Two-pass approach: accumulate expenses first, then subtract returns
+    // This avoids order-dependent bugs where returns processed before expenses get swallowed
+    const returns: Array<{ amount: number; category: CategoryData | null }> = [];
 
+    // Pass 1: accumulate expenses, income, investments
     transactions?.forEach(t => {
       const transactionType = t.transaction_type || (t.amount > 0 ? 'expense' : 'income');
       
-      // Skip transfers - they shouldn't count as spending or income
-      if (transactionType === 'transfer') {
-        return;
-      }
+      if (transactionType === 'transfer') return;
       
       if (transactionType === 'investment') {
         totalInvested += Math.abs(t.amount);
       } else if (transactionType === 'expense') {
-        // If transaction has splits, only count the "my share" portions
         const amountToCount = getExpenseAmount(t);
+        grossExpenses += amountToCount;
         
         const category = t.category as unknown as CategoryData | null;
         if (category && amountToCount > 0) {
@@ -66,33 +66,28 @@ router.get('/monthly', async (req, res) => {
           } else {
             categoryTotals.set(category.id, { category, amount: amountToCount });
           }
-        } else if (amountToCount > 0) {
-          uncategorizedSpent += amountToCount;
         }
       } else if (transactionType === 'return') {
-        // Returns reduce spending — only subtract what the category can actually absorb
-        // so totalSpent stays consistent with the sum of displayed category amounts
         const returnAmount = Math.abs(t.amount);
-        
-        const category = t.category as unknown as CategoryData | null;
-        if (category) {
-          const existing = categoryTotals.get(category.id);
-          if (existing) {
-            const actualReduction = Math.min(returnAmount, existing.amount);
-            existing.amount -= actualReduction;
-          }
-        } else {
-          // Uncategorized return reduces the uncategorized bucket
-          uncategorizedSpent = Math.max(0, uncategorizedSpent - returnAmount);
-        }
+        totalReturns += returnAmount;
+        returns.push({ amount: returnAmount, category: t.category as unknown as CategoryData | null });
       } else if (transactionType === 'income') {
-        const incomeAmount = Math.abs(t.amount);
-        totalIncome += incomeAmount;
+        totalIncome += Math.abs(t.amount);
       }
     });
 
-    // Derive totalSpent from category totals so it's always consistent with what's displayed
-    totalSpent = Array.from(categoryTotals.values()).reduce((sum, c) => sum + c.amount, 0) + uncategorizedSpent;
+    // Pass 2: subtract returns from their respective categories (now fully accumulated)
+    for (const ret of returns) {
+      if (ret.category) {
+        const existing = categoryTotals.get(ret.category.id);
+        if (existing) {
+          existing.amount = Math.max(0, existing.amount - ret.amount);
+        }
+      }
+    }
+
+    // Total spent = gross expenses - returns (same formula as transactions page)
+    const totalSpent = Math.max(0, grossExpenses - totalReturns);
 
     res.json({
       month: Number(month),
@@ -141,21 +136,21 @@ router.get('/yearly', async (req, res) => {
       monthlyTotals.push({ month: i, spent: 0, income: 0, invested: 0 });
     }
 
-    let totalSpent = 0;
+    let grossExpenses = 0;
+    let totalReturns = 0;
     let totalIncome = 0;
     let totalInvested = 0;
     const categoryTotals = new Map<string, { category: CategoryData; amount: number }>();
 
-    let uncategorizedSpent = 0;
+    // Two-pass approach: accumulate expenses first, then subtract returns
+    const returns: Array<{ amount: number; month: number; category: CategoryData | null }> = [];
 
+    // Pass 1: accumulate expenses, income, investments
     transactions?.forEach(t => {
       const month = new Date(t.date).getMonth(); // 0-indexed
       const transactionType = t.transaction_type || (t.amount > 0 ? 'expense' : 'income');
       
-      // Skip transfers - they shouldn't count as spending or income
-      if (transactionType === 'transfer') {
-        return;
-      }
+      if (transactionType === 'transfer') return;
       
       if (transactionType === 'investment') {
         const amount = Math.abs(t.amount);
@@ -163,7 +158,7 @@ router.get('/yearly', async (req, res) => {
         monthlyTotals[month].invested += amount;
       } else if (transactionType === 'expense') {
         const amountToCount = getExpenseAmount(t);
-        
+        grossExpenses += amountToCount;
         monthlyTotals[month].spent += amountToCount;
         
         const category = t.category as unknown as CategoryData | null;
@@ -174,26 +169,11 @@ router.get('/yearly', async (req, res) => {
           } else {
             categoryTotals.set(category.id, { category, amount: amountToCount });
           }
-        } else if (amountToCount > 0) {
-          uncategorizedSpent += amountToCount;
         }
       } else if (transactionType === 'return') {
-        // Returns reduce spending — only subtract what the category can actually absorb
         const returnAmount = Math.abs(t.amount);
-        
-        const category = t.category as unknown as CategoryData | null;
-        if (category) {
-          const existing = categoryTotals.get(category.id);
-          if (existing) {
-            const actualReduction = Math.min(returnAmount, existing.amount);
-            existing.amount -= actualReduction;
-            monthlyTotals[month].spent = Math.max(0, monthlyTotals[month].spent - actualReduction);
-          }
-        } else {
-          const actualReduction = Math.min(returnAmount, uncategorizedSpent);
-          uncategorizedSpent -= actualReduction;
-          monthlyTotals[month].spent = Math.max(0, monthlyTotals[month].spent - actualReduction);
-        }
+        totalReturns += returnAmount;
+        returns.push({ amount: returnAmount, month, category: t.category as unknown as CategoryData | null });
       } else if (transactionType === 'income') {
         const incomeAmount = Math.abs(t.amount);
         totalIncome += incomeAmount;
@@ -201,8 +181,19 @@ router.get('/yearly', async (req, res) => {
       }
     });
 
-    // Derive totalSpent from category totals so it's always consistent with what's displayed
-    totalSpent = Array.from(categoryTotals.values()).reduce((sum, c) => sum + c.amount, 0) + uncategorizedSpent;
+    // Pass 2: subtract returns from their respective categories and monthly totals
+    for (const ret of returns) {
+      if (ret.category) {
+        const existing = categoryTotals.get(ret.category.id);
+        if (existing) {
+          existing.amount = Math.max(0, existing.amount - ret.amount);
+        }
+      }
+      monthlyTotals[ret.month].spent = Math.max(0, monthlyTotals[ret.month].spent - ret.amount);
+    }
+
+    // Total spent = gross expenses - returns (same formula as transactions page)
+    const totalSpent = Math.max(0, grossExpenses - totalReturns);
 
     res.json({
       year: Number(year),

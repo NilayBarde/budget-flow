@@ -60,6 +60,9 @@ export const Transactions = () => {
   }, [filters, typeFilter]);
 
   const { data: transactions, isLoading } = useTransactions(queryFilters);
+  // Separate unfiltered query for header totals — ensures totals always reflect the full month
+  // regardless of which type tab is active
+  const { data: allTransactions } = useTransactions(filters);
   const { data: accounts = [] } = useAccounts();
   const { data: categories = [] } = useCategories();
   const { data: tags = [] } = useTags();
@@ -132,18 +135,19 @@ export const Transactions = () => {
     setSelectionMode(false);
   }, []);
 
-  // Calculate totals using transaction_type
+  // Calculate totals from ALL transactions for the month (not just the filtered tab)
+  // so the header always shows the same numbers as the dashboard
   // For split transactions, only count the user's share (is_my_share === true)
   const totals = useMemo(() => {
-    if (!transactions) return { expenses: 0, returns: 0, income: 0, investments: 0, transfers: 0 };
+    if (!allTransactions) return { expenses: 0, returns: 0, income: 0, investments: 0, transfers: 0 };
     
-    return transactions.reduce(
+    return allTransactions.reduce(
       (acc, t) => {
         const type = t.transaction_type || (t.amount > 0 ? 'expense' : 'income');
         
         // For split transactions, sum only the user's share
         const amount = t.is_split && t.splits?.length
-          ? t.splits.filter(s => s.is_my_share).reduce((sum, s) => sum + s.amount, 0)
+          ? t.splits.filter(s => s.is_my_share).reduce((sum, s) => sum + Math.abs(s.amount), 0)
           : Math.abs(t.amount);
         
         if (type === 'expense') {
@@ -161,7 +165,7 @@ export const Transactions = () => {
       },
       { expenses: 0, returns: 0, income: 0, investments: 0, transfers: 0 }
     );
-  }, [transactions]);
+  }, [allTransactions]);
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -173,13 +177,13 @@ export const Transactions = () => {
           <p className="hidden sm:block text-slate-400 mt-1 text-base">
             <span>{transactions?.length || 0} transactions</span>
             <span> • </span>
-            <span className="text-rose-400">-${totals.expenses.toFixed(2)}</span>
+            <span className="text-rose-400">-${(totals.expenses - totals.returns).toFixed(2)}</span>
+            {totals.returns > 0 && (
+              <span className="text-slate-500 ml-1">(${totals.returns.toFixed(2)} in returns)</span>
+            )}
             <span className="text-emerald-400 ml-2">+${totals.income.toFixed(2)}</span>
             {expectedIncome > 0 && (
               <span className="text-slate-500"> of ${expectedIncome.toFixed(2)}</span>
-            )}
-            {totals.returns > 0 && (
-              <span className="text-emerald-400 ml-2">+${totals.returns.toFixed(2)} returns</span>
             )}
             {totals.investments > 0 && (
               <span className="text-violet-400 ml-2">(${totals.investments.toFixed(2)} invested)</span>
@@ -192,16 +196,16 @@ export const Transactions = () => {
           <div className="sm:hidden mt-1.5 text-xs text-slate-400 space-y-0.5">
             <p>{transactions?.length || 0} transactions</p>
             <div className="flex items-center gap-3 flex-wrap">
-              <span className="text-rose-400">-${totals.expenses.toFixed(2)}</span>
+              <span className="text-rose-400">-${(totals.expenses - totals.returns).toFixed(2)}</span>
+              {totals.returns > 0 && (
+                <span className="text-slate-500">(${totals.returns.toFixed(2)} ret.)</span>
+              )}
               <span className="text-emerald-400">
                 +${totals.income.toFixed(2)}
                 {expectedIncome > 0 && (
                   <span className="text-slate-500"> / ${expectedIncome.toFixed(2)}</span>
                 )}
               </span>
-              {totals.returns > 0 && (
-                <span className="text-emerald-400">+${totals.returns.toFixed(2)} ret.</span>
-              )}
             </div>
           </div>
         </div>
