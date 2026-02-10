@@ -163,7 +163,7 @@ export const TransactionFilters = ({
 
       {/* Mobile Filters Panel */}
       {showFilters && (
-        <div className="md:hidden bg-midnight-800 border border-midnight-600 rounded-xl p-4 space-y-3">
+        <div className="md:hidden bg-midnight-800 border border-midnight-600 rounded-xl p-4 space-y-3 overflow-hidden">
           <div className="flex items-center justify-between mb-2">
             <span className="font-medium text-slate-200">Filters</span>
             <button
@@ -234,7 +234,7 @@ export const TransactionFilters = ({
                 type="date"
                 value={filters.date || ''}
                 onChange={handleDateChange}
-                className="w-full bg-midnight-900 border border-midnight-600 rounded-lg px-4 py-2.5 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent transition-all text-base touch-manipulation"
+                className="w-full max-w-full box-border bg-midnight-900 border border-midnight-600 rounded-lg px-4 py-2.5 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent transition-all text-base touch-manipulation appearance-none"
               />
             </div>
           </div>
