@@ -39,6 +39,27 @@ export const useSyncAllInvestmentHoldings = () => {
   });
 };
 
+export const usePreviewHoldingsImport = () => {
+  return useMutation({
+    mutationFn: ({ accountId, file }: { accountId: string; file: File }) =>
+      api.previewHoldingsImport(accountId, file),
+  });
+};
+
+export const useImportHoldings = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ accountId, file }: { accountId: string; file: File }) =>
+      api.importHoldings(accountId, file),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['investment-holdings'] });
+      queryClient.invalidateQueries({ queryKey: ['investment-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+    },
+  });
+};
+
 export const useToggleAccountInvestmentExclusion = () => {
   const queryClient = useQueryClient();
 

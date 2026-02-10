@@ -1,7 +1,119 @@
 import { Router } from 'express';
+import multer from 'multer';
+import { parse } from 'csv-parse/sync';
 import { supabase } from '../db/supabase.js';
 import * as plaidService from '../services/plaid.js';
 import { v4 as uuidv4 } from 'uuid';
+
+// Configure multer for memory storage (same pattern as csv-import)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype === 'text/csv' || file.originalname.endsWith('.csv')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only CSV files are allowed'));
+    }
+  },
+});
+
+interface ParsedHolding {
+  symbol: string;
+  name: string;
+  quantity: number;
+  price: number;
+  value: number;
+  costBasis: number;
+}
+
+// Parse a Fidelity positions CSV into holdings
+const parseFidelityHoldings = (csvContent: string): ParsedHolding[] => {
+  // Fidelity CSVs sometimes have a trailing footer section - strip it
+  // The footer usually starts after a blank line
+  const lines = csvContent.split('\n');
+  const cleanedLines: string[] = [];
+  for (const line of lines) {
+    // Stop at blank lines or footer markers
+    if (line.trim() === '' && cleanedLines.length > 1) break;
+    cleanedLines.push(line);
+  }
+
+  const records = parse(cleanedLines.join('\n'), {
+    columns: true,
+    skip_empty_lines: true,
+    trim: true,
+    relax_column_count: true,
+  }) as Record<string, string>[];
+
+  if (records.length === 0) return [];
+
+  const headers = Object.keys(records[0]);
+  const normalizedHeaders = headers.map(h => h.toLowerCase().trim());
+
+  // Find column mappings - Fidelity uses various column names
+  const findCol = (patterns: string[]): string | undefined => {
+    const idx = normalizedHeaders.findIndex(h => 
+      patterns.some(p => h.includes(p))
+    );
+    return idx >= 0 ? headers[idx] : undefined;
+  };
+
+  const symbolCol = findCol(['symbol']);
+  const nameCol = findCol(['description', 'name', 'security']);
+  const quantityCol = findCol(['quantity', 'shares']);
+  // Use exact match first to avoid "Last Price Change" matching before "Last Price"
+  const findExactCol = (exact: string): string | undefined => {
+    const idx = normalizedHeaders.findIndex(h => h === exact);
+    return idx >= 0 ? headers[idx] : undefined;
+  };
+  const priceCol = findExactCol('last price') || findCol(['current price', 'price']);
+  const valueCol = findCol(['current value', 'market value', 'value']);
+  const costBasisCol = findCol(['cost basis total', 'cost basis', 'total cost']);
+
+  // Need at least a symbol or description column to identify holdings
+  if (!symbolCol && !nameCol) {
+    throw new Error('Unable to detect CSV format. Expected a "Symbol" or "Description" column.');
+  }
+
+  const parseNumber = (val: string | undefined): number => {
+    if (!val) return 0;
+    // Remove $, +, commas, and whitespace
+    const cleaned = val.replace(/[$,\s+]/g, '').replace(/[()]/g, '-');
+    const num = parseFloat(cleaned);
+    return isNaN(num) ? 0 : num;
+  };
+
+  const holdings: ParsedHolding[] = [];
+
+  for (const record of records) {
+    const rawSymbol = symbolCol ? record[symbolCol]?.trim() : '';
+    const name = nameCol ? record[nameCol]?.trim() || '' : '';
+
+    // Use symbol if present, otherwise fall back to description as identifier
+    const symbol = rawSymbol || name;
+
+    // Skip rows with no identifier at all
+    if (!symbol) continue;
+    // Skip header-like or footer rows
+    if (symbol.startsWith('***')) continue;
+    // Skip "Pending Activity" or similar non-holding rows
+    if (symbol.toLowerCase().includes('pending')) continue;
+
+    const quantity = quantityCol ? parseNumber(record[quantityCol]) : 0;
+    const price = priceCol ? parseNumber(record[priceCol]) : 0;
+    const value = valueCol ? parseNumber(record[valueCol]) : (quantity * price);
+    const costBasis = costBasisCol ? parseNumber(record[costBasisCol]) : 0;
+    const displayName = name || symbol;
+
+    // Skip rows with no meaningful data
+    if (value === 0 && quantity === 0) continue;
+
+    holdings.push({ symbol, name: displayName, quantity, price, value, costBasis });
+  }
+
+  return holdings;
+};
 
 const router = Router();
 
@@ -449,6 +561,172 @@ router.post('/sync-all', async (req, res) => {
   } catch (error) {
     console.error('Error syncing all holdings:', error);
     res.status(500).json({ message: 'Failed to sync holdings' });
+  }
+});
+
+// POST /investments/:accountId/preview-holdings - Preview a holdings CSV import
+router.post('/:accountId/preview-holdings', upload.single('file'), async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const file = req.file;
+
+    if (!file) {
+      return res.status(400).json({ message: 'No file uploaded' });
+    }
+
+    // Verify account exists
+    const { data: account, error: accountError } = await supabase
+      .from('accounts')
+      .select('id, institution_name')
+      .eq('id', accountId)
+      .single();
+
+    if (accountError || !account) {
+      return res.status(404).json({ message: 'Account not found' });
+    }
+
+    const csvContent = file.buffer.toString('utf-8');
+    const holdings = parseFidelityHoldings(csvContent);
+
+    if (holdings.length === 0) {
+      return res.status(400).json({ message: 'No holdings found in CSV file' });
+    }
+
+    const totalValue = holdings.reduce((sum, h) => sum + h.value, 0);
+    const totalCostBasis = holdings.reduce((sum, h) => sum + h.costBasis, 0);
+
+    res.json({
+      holdings,
+      count: holdings.length,
+      totalValue,
+      totalCostBasis,
+    });
+  } catch (error) {
+    console.error('Error previewing holdings CSV:', error);
+    const message = error instanceof Error ? error.message : 'Failed to preview holdings CSV';
+    res.status(500).json({ message });
+  }
+});
+
+// POST /investments/:accountId/import-holdings - Import holdings from a CSV file
+router.post('/:accountId/import-holdings', upload.single('file'), async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const file = req.file;
+
+    if (!file) {
+      return res.status(400).json({ message: 'No file uploaded' });
+    }
+
+    // Verify account exists
+    const { data: account, error: accountError } = await supabase
+      .from('accounts')
+      .select('id, institution_name')
+      .eq('id', accountId)
+      .single();
+
+    if (accountError || !account) {
+      return res.status(404).json({ message: 'Account not found' });
+    }
+
+    const csvContent = file.buffer.toString('utf-8');
+    const holdings = parseFidelityHoldings(csvContent);
+
+    if (holdings.length === 0) {
+      return res.status(400).json({ message: 'No holdings found in CSV file' });
+    }
+
+    // Upsert securities - use 'manual-{TICKER}' as plaid_security_id
+    for (const holding of holdings) {
+      const manualSecurityId = `manual-${holding.symbol}`;
+      const securityData = {
+        plaid_security_id: manualSecurityId,
+        ticker_symbol: holding.symbol,
+        name: holding.name,
+        type: 'equity',
+        close_price: holding.price || null,
+        close_price_as_of: new Date().toISOString().split('T')[0],
+        iso_currency_code: 'USD',
+        updated_at: new Date().toISOString(),
+      };
+
+      const { error: securityError } = await supabase
+        .from('securities')
+        .upsert(securityData, { onConflict: 'plaid_security_id' });
+
+      if (securityError) {
+        console.error(`Error upserting security ${holding.symbol}:`, securityError);
+      }
+    }
+
+    // Get security ID mapping for manual securities
+    const manualSecurityIds = holdings.map(h => `manual-${h.symbol}`);
+    const { data: securities } = await supabase
+      .from('securities')
+      .select('id, plaid_security_id')
+      .in('plaid_security_id', manualSecurityIds);
+
+    const securityIdMap = new Map(
+      securities?.map(s => [s.plaid_security_id, s.id]) || []
+    );
+
+    // Delete existing holdings for this account (fresh snapshot)
+    await supabase
+      .from('holdings')
+      .delete()
+      .eq('account_id', accountId);
+
+    // Insert new holdings
+    let importedCount = 0;
+    let totalValue = 0;
+
+    for (const holding of holdings) {
+      const dbSecurityId = securityIdMap.get(`manual-${holding.symbol}`);
+      if (!dbSecurityId) {
+        console.warn(`Missing security mapping for ${holding.symbol}`);
+        continue;
+      }
+
+      const { error: holdingError } = await supabase
+        .from('holdings')
+        .insert({
+          id: uuidv4(),
+          account_id: accountId,
+          security_id: dbSecurityId,
+          quantity: holding.quantity,
+          cost_basis: holding.costBasis || null,
+          institution_value: holding.value,
+          iso_currency_code: 'USD',
+          updated_at: new Date().toISOString(),
+        });
+
+      if (holdingError) {
+        console.error(`Error inserting holding ${holding.symbol}:`, holdingError);
+      } else {
+        importedCount++;
+        totalValue += holding.value;
+      }
+    }
+
+    // Update account balance and last import timestamp
+    await supabase
+      .from('accounts')
+      .update({
+        current_balance: totalValue,
+        last_csv_import_at: new Date().toISOString(),
+      })
+      .eq('id', accountId);
+
+    console.log(`Imported ${importedCount} holdings for account ${accountId} (${account.institution_name}), total value: $${totalValue.toFixed(2)}`);
+
+    res.json({
+      imported: importedCount,
+      totalValue,
+    });
+  } catch (error) {
+    console.error('Error importing holdings CSV:', error);
+    const message = error instanceof Error ? error.message : 'Failed to import holdings CSV';
+    res.status(500).json({ message });
   }
 });
 

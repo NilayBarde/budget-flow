@@ -170,9 +170,10 @@ router.get('/', async (req, res) => {
     }
 
     // Merge last import dates into accounts
+    // Use csv_imports table first, fall back to account's own last_csv_import_at (set by holdings import)
     const accountsWithLastImport = accounts?.map(account => ({
       ...account,
-      last_csv_import_at: lastImportMap.get(account.id) || null,
+      last_csv_import_at: lastImportMap.get(account.id) || account.last_csv_import_at || null,
     }));
 
     res.json(accountsWithLastImport);
@@ -185,7 +186,7 @@ router.get('/', async (req, res) => {
 // Create a manual account (for banks that can't be linked via Plaid, e.g., American Express)
 router.post('/manual', async (req, res) => {
   try {
-    const { institution_name, account_name, account_type } = req.body;
+    const { institution_name, account_name, account_type, current_balance } = req.body;
 
     if (!institution_name || !account_name || !account_type) {
       return res.status(400).json({ 
@@ -196,7 +197,7 @@ router.post('/manual', async (req, res) => {
     const accountId = uuidv4();
     const manualId = `manual-${accountId}`;
 
-    const account = {
+    const account: Record<string, unknown> = {
       id: accountId,
       user_id: 'default-user',
       plaid_item_id: manualId,
@@ -206,6 +207,10 @@ router.post('/manual', async (req, res) => {
       account_type,
       created_at: new Date().toISOString(),
     };
+
+    if (current_balance !== undefined && current_balance !== null) {
+      account.current_balance = parseFloat(current_balance);
+    }
 
     const { data, error } = await supabase
       .from('accounts')

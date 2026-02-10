@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { CreditCard, Plus } from 'lucide-react';
 import { Card, Spinner, EmptyState, Button } from '../components/ui';
-import { AccountCard, PlaidLinkButton, CreateManualAccountModal, CsvImportModal, ImportHistoryModal, BalanceAlertModal } from '../components/accounts';
+import { AccountCard, PlaidLinkButton, CreateManualAccountModal, CsvImportModal, ImportHistoryModal, BalanceAlertModal, HoldingsImportModal } from '../components/accounts';
 import { useAccounts } from '../hooks';
 import type { Account } from '../types';
 
@@ -11,6 +11,7 @@ export const Accounts = () => {
   const [csvImportAccount, setCsvImportAccount] = useState<Account | null>(null);
   const [historyAccount, setHistoryAccount] = useState<Account | null>(null);
   const [balanceAlertAccount, setBalanceAlertAccount] = useState<Account | null>(null);
+  const [holdingsImportAccount, setHoldingsImportAccount] = useState<Account | null>(null);
 
   const handleOpenManualModal = useCallback(() => {
     setShowManualAccountModal(true);
@@ -42,6 +43,14 @@ export const Accounts = () => {
 
   const handleCloseBalanceAlert = useCallback(() => {
     setBalanceAlertAccount(null);
+  }, []);
+
+  const handleImportHoldings = useCallback((account: Account) => {
+    setHoldingsImportAccount(account);
+  }, []);
+
+  const handleCloseHoldingsImport = useCallback(() => {
+    setHoldingsImportAccount(null);
   }, []);
 
   return (
@@ -94,6 +103,7 @@ export const Accounts = () => {
               key={account.id} 
               account={account} 
               onImportCsv={handleImportCsv}
+              onImportHoldings={handleImportHoldings}
               onViewHistory={handleViewHistory}
               onSetBalanceAlert={handleSetBalanceAlert}
             />
@@ -143,6 +153,14 @@ export const Accounts = () => {
           isOpen={!!balanceAlertAccount}
           onClose={handleCloseBalanceAlert}
           account={balanceAlertAccount}
+        />
+      )}
+
+      {holdingsImportAccount && (
+        <HoldingsImportModal
+          isOpen={!!holdingsImportAccount}
+          onClose={handleCloseHoldingsImport}
+          account={holdingsImportAccount}
         />
       )}
     </div>

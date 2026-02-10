@@ -1,7 +1,8 @@
 import { useState, useCallback, useMemo } from 'react';
 import { Plus, ChevronLeft, ChevronRight, Target } from 'lucide-react';
 import { Button, Card, CardHeader, Spinner, EmptyState, ProgressBar } from '../components/ui';
-import { AllocationBar, SavingsGoalCard, SavingsGoalModal } from '../components/plan';
+import { AllocationBar, SavingsGoalCard, SavingsGoalModal, NetWorthGoalCard } from '../components/plan';
+import type { RecurringContribution } from '../components/plan';
 import { BudgetGoalModal } from '../components/budget';
 import {
   useMonthlyStats,
@@ -13,6 +14,8 @@ import {
   useDeleteSavingsGoal,
   useExpectedIncome,
   useUpdateAppSetting,
+  useAppSettings,
+  useInvestmentSummary,
 } from '../hooks';
 import type { SavingsGoal, BudgetGoal } from '../types';
 import { formatCurrency, getMonthYear } from '../utils/formatters';
@@ -31,6 +34,8 @@ export const FinancialPlan = () => {
   const { data: recurring } = useRecurringTransactions();
   const { data: savingsGoals = [], isLoading: savingsLoading } = useSavingsGoals();
   const { expectedIncome, calculatedIncome, isManualOverride, monthsSampled } = useExpectedIncome();
+  const { data: appSettings } = useAppSettings();
+  const { data: investmentSummary } = useInvestmentSummary();
   const updateSetting = useUpdateAppSetting();
 
   // Mutations
@@ -41,6 +46,40 @@ export const FinancialPlan = () => {
   // Derived values
   const actualIncome = stats?.total_income || 0;
   const totalSpent = stats?.total_spent || 0;
+  const currentNetWorth = investmentSummary?.netWorth ?? 0;
+  const netWorthGoalAmount = appSettings?.net_worth_goal_amount
+    ? parseFloat(appSettings.net_worth_goal_amount)
+    : 0;
+  const netWorthGoalYear = appSettings?.net_worth_goal_year
+    ? parseInt(appSettings.net_worth_goal_year, 10)
+    : 0;
+  const netWorthContributions: RecurringContribution[] = useMemo(() => {
+    try {
+      return appSettings?.net_worth_contributions
+        ? JSON.parse(appSettings.net_worth_contributions)
+        : [];
+    } catch {
+      return [];
+    }
+  }, [appSettings?.net_worth_contributions]);
+
+  // Monthly savings rate = income - spending (a rough but useful proxy)
+  const monthlySavingsRate = Math.max(expectedIncome - totalSpent, 0);
+
+  const handleSaveNetWorthGoal = useCallback(
+    (amount: number, year: number) => {
+      updateSetting.mutate({ key: 'net_worth_goal_amount', value: amount.toString() });
+      updateSetting.mutate({ key: 'net_worth_goal_year', value: year.toString() });
+    },
+    [updateSetting],
+  );
+
+  const handleSaveContributions = useCallback(
+    (contributions: RecurringContribution[]) => {
+      updateSetting.mutate({ key: 'net_worth_contributions', value: JSON.stringify(contributions) });
+    },
+    [updateSetting],
+  );
 
   const handleOverrideChange = useCallback(
     (value: number) => {
@@ -201,7 +240,18 @@ export const FinancialPlan = () => {
             onClearOverride={handleClearOverride}
           />
 
-          {/* Section 2: Savings Goals */}
+          {/* Section 2: Net Worth Goal */}
+          <NetWorthGoalCard
+            currentNetWorth={currentNetWorth}
+            monthlySavingsRate={monthlySavingsRate}
+            goalAmount={netWorthGoalAmount}
+            goalYear={netWorthGoalYear}
+            contributions={netWorthContributions}
+            onSaveGoal={handleSaveNetWorthGoal}
+            onSaveContributions={handleSaveContributions}
+          />
+
+          {/* Section 3: Savings Goals */}
           <div>
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-lg md:text-xl font-semibold text-slate-100">Savings Goals</h2>
@@ -239,7 +289,7 @@ export const FinancialPlan = () => {
             )}
           </div>
 
-          {/* Section 3: Budget Guardrails */}
+          {/* Section 4: Budget Guardrails */}
           <Card>
             <CardHeader
               title="Budget Guardrails"

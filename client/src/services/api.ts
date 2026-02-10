@@ -103,6 +103,7 @@ export interface CreateManualAccountData {
   institution_name: string;
   account_name: string;
   account_type: string;
+  current_balance?: number;
 }
 
 // Accounts
@@ -517,6 +518,61 @@ export const syncAllInvestmentHoldings = () =>
     '/investments/sync-all',
     { method: 'POST' }
   );
+
+export interface HoldingsPreviewItem {
+  symbol: string;
+  name: string;
+  quantity: number;
+  price: number;
+  value: number;
+  costBasis: number;
+}
+
+export interface HoldingsPreviewResponse {
+  holdings: HoldingsPreviewItem[];
+  count: number;
+  totalValue: number;
+  totalCostBasis: number;
+}
+
+export interface HoldingsImportResponse {
+  imported: number;
+  totalValue: number;
+}
+
+export const previewHoldingsImport = async (accountId: string, file: File): Promise<HoldingsPreviewResponse> => {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const response = await fetch(`${API_BASE_URL}/investments/${accountId}/preview-holdings`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: 'Preview failed' }));
+    throw new Error(error.message || 'Preview failed');
+  }
+
+  return response.json();
+};
+
+export const importHoldings = async (accountId: string, file: File): Promise<HoldingsImportResponse> => {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const response = await fetch(`${API_BASE_URL}/investments/${accountId}/import-holdings`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: 'Import failed' }));
+    throw new Error(error.message || 'Import failed');
+  }
+
+  return response.json();
+};
 
 export const toggleAccountInvestmentExclusion = (
   accountId: string,

@@ -16,6 +16,7 @@ const INSTITUTION_OPTIONS = [
   { value: 'Capital One', label: 'Capital One' },
   { value: 'Discover', label: 'Discover' },
   { value: 'Citi', label: 'Citi' },
+  { value: 'Fidelity', label: 'Fidelity' },
   { value: 'US Bank', label: 'US Bank' },
   { value: 'Other', label: 'Other' },
 ];
@@ -25,7 +26,7 @@ const ACCOUNT_TYPE_OPTIONS = [
   { value: 'credit', label: 'Credit Card' },
   { value: 'checking', label: 'Checking' },
   { value: 'savings', label: 'Savings' },
-  { value: 'investment', label: 'Investment' },
+  { value: 'investment', label: 'Investment (401k, IRA, Brokerage)' },
   { value: 'loan', label: 'Loan' },
   { value: 'other', label: 'Other' },
 ];
@@ -35,6 +36,7 @@ export const CreateManualAccountModal = ({ isOpen, onClose }: CreateManualAccoun
   const [customInstitution, setCustomInstitution] = useState('');
   const [accountName, setAccountName] = useState('');
   const [accountType, setAccountType] = useState('');
+  const [balance, setBalance] = useState('');
 
   const createAccount = useCreateManualAccount();
 
@@ -45,11 +47,15 @@ export const CreateManualAccountModal = ({ isOpen, onClose }: CreateManualAccoun
     if (!isValid) return;
 
     try {
-      await createAccount.mutateAsync({
+      const data: Parameters<typeof createAccount.mutateAsync>[0] = {
         institution_name: finalInstitutionName,
         account_name: accountName,
         account_type: accountType,
-      });
+      };
+      if (balance) {
+        data.current_balance = parseFloat(balance);
+      }
+      await createAccount.mutateAsync(data);
       handleClose();
     } catch (error) {
       console.error('Failed to create account:', error);
@@ -61,6 +67,7 @@ export const CreateManualAccountModal = ({ isOpen, onClose }: CreateManualAccoun
     setCustomInstitution('');
     setAccountName('');
     setAccountType('');
+    setBalance('');
     onClose();
   };
 
@@ -100,6 +107,14 @@ export const CreateManualAccountModal = ({ isOpen, onClose }: CreateManualAccoun
           value={accountType}
           onChange={e => setAccountType(e.target.value)}
           options={ACCOUNT_TYPE_OPTIONS}
+        />
+
+        <Input
+          label="Current Balance (optional)"
+          type="number"
+          value={balance}
+          onChange={e => setBalance(e.target.value)}
+          placeholder="e.g., 15000"
         />
 
         <div className="flex flex-col-reverse md:flex-row gap-3 pt-4">

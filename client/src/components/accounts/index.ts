@@ -4,4 +4,5 @@ export { CreateManualAccountModal } from './CreateManualAccountModal';
 export { CsvImportModal } from './CsvImportModal';
 export { ImportHistoryModal } from './ImportHistoryModal';
 export { BalanceAlertModal } from './BalanceAlertModal';
+export { HoldingsImportModal } from './HoldingsImportModal';
 

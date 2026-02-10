@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { usePlaidLink } from 'react-plaid-link';
-import { RefreshCw, Trash2, Upload, History, Bell, BellOff, MoreVertical, KeyRound, Users } from 'lucide-react';
+import { RefreshCw, Trash2, Upload, History, Bell, BellOff, MoreVertical, KeyRound, Users, TrendingUp } from 'lucide-react';
 import { Card, Button } from '../ui';
 import type { Account } from '../../types';
 import { formatDate, formatCurrency } from '../../utils/formatters';
@@ -35,6 +35,7 @@ const PlaidLinkUpdate = ({ token, onSuccess, onExit, institutionName }: PlaidLin
 interface AccountCardProps {
   account: Account;
   onImportCsv?: (account: Account) => void;
+  onImportHoldings?: (account: Account) => void;
   onViewHistory?: (account: Account) => void;
   onSetBalanceAlert?: (account: Account) => void;
 }
@@ -49,6 +50,12 @@ const isCreditCardAccount = (accountType: string): boolean => {
   return type.includes('credit') || type === 'credit card';
 };
 
+// Check if account is an investment type
+const isInvestmentAccount = (accountType: string): boolean => {
+  const type = accountType.toLowerCase();
+  return ['investment', 'brokerage', '401k', 'ira', 'roth', 'hsa'].some(t => type.includes(t));
+};
+
 // Only use OAuth redirect URI on HTTPS
 const getOAuthRedirectUri = () => {
   if (typeof window === 'undefined') return;
@@ -61,7 +68,7 @@ const getOAuthRedirectUri = () => {
   return;
 };
 
-export const AccountCard = ({ account, onImportCsv, onViewHistory, onSetBalanceAlert }: AccountCardProps) => {
+export const AccountCard = ({ account, onImportCsv, onImportHoldings, onViewHistory, onSetBalanceAlert }: AccountCardProps) => {
   const syncAccount = useSyncAccount();
   const deleteAccount = useDeleteAccount();
   const refreshAccounts = useRefreshAccounts();
@@ -75,6 +82,7 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onSetBalanceA
 
   const isManual = isManualAccount(account);
   const isCreditCard = isCreditCardAccount(account.account_type);
+  const isInvestment = isInvestmentAccount(account.account_type);
   const hasBalance = account.current_balance !== null && account.current_balance !== undefined;
   const hasThreshold = account.balance_threshold !== null && account.balance_threshold !== undefined;
   const isOverThreshold = hasBalance && hasThreshold && account.current_balance! > account.balance_threshold!;
@@ -107,6 +115,10 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onSetBalanceA
   const handleImportCsv = useCallback(() => {
     onImportCsv?.(account);
   }, [onImportCsv, account]);
+
+  const handleImportHoldings = useCallback(() => {
+    onImportHoldings?.(account);
+  }, [onImportHoldings, account]);
 
   const handleViewHistory = useCallback(() => {
     onViewHistory?.(account);
@@ -293,24 +305,38 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onSetBalanceA
         <div className="flex gap-2 mt-3 pt-3 border-t border-midnight-700">
           {isManual ? (
             <>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={handleImportCsv}
-                className="flex-1"
-              >
-                <Upload className="h-4 w-4 mr-2" />
-                Import CSV
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleViewHistory}
-                className="text-slate-400 hover:text-slate-200"
-                title="Import History"
-              >
-                <History className="h-4 w-4" />
-              </Button>
+              {isInvestment ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleImportHoldings}
+                  className="flex-1"
+                >
+                  <TrendingUp className="h-4 w-4 mr-2" />
+                  Import Holdings
+                </Button>
+              ) : (
+                <>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleImportCsv}
+                    className="flex-1"
+                  >
+                    <Upload className="h-4 w-4 mr-2" />
+                    Import CSV
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleViewHistory}
+                    className="text-slate-400 hover:text-slate-200"
+                    title="Import History"
+                  >
+                    <History className="h-4 w-4" />
+                  </Button>
+                </>
+              )}
             </>
           ) : (
             <>
@@ -429,23 +455,36 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onSetBalanceA
         <div className="flex gap-2">
           {isManual ? (
             <>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={handleImportCsv}
-              >
-                <Upload className="h-4 w-4 mr-1" />
-                Import CSV
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleViewHistory}
-                className="text-slate-400 hover:text-slate-200"
-                title="Import History"
-              >
-                <History className="h-4 w-4" />
-              </Button>
+              {isInvestment ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleImportHoldings}
+                >
+                  <TrendingUp className="h-4 w-4 mr-1" />
+                  Import Holdings
+                </Button>
+              ) : (
+                <>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleImportCsv}
+                  >
+                    <Upload className="h-4 w-4 mr-1" />
+                    Import CSV
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleViewHistory}
+                    className="text-slate-400 hover:text-slate-200"
+                    title="Import History"
+                  >
+                    <History className="h-4 w-4" />
+                  </Button>
+                </>
+              )}
               <Button
                 variant="ghost"
                 size="sm"
