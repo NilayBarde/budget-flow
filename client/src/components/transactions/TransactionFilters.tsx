@@ -125,10 +125,10 @@ export const TransactionFilters = ({
           </div>
           <button
             onClick={handleClearDate}
-            className="p-1 text-accent-400 hover:text-accent-300 hover:bg-accent-500/20 rounded transition-colors"
+            className="p-2 -m-1 text-accent-400 hover:text-accent-300 active:text-accent-200 hover:bg-accent-500/20 rounded-lg transition-colors touch-target"
             aria-label="Clear date filter"
           >
-            <X className="h-4 w-4" />
+            <X className="h-5 w-5" />
           </button>
         </div>
       )}
@@ -230,12 +230,24 @@ export const TransactionFilters = ({
 
             <div className="space-y-1">
               <label className="block text-sm font-medium text-slate-300">Date</label>
-              <input
-                type="date"
-                value={filters.date || ''}
-                onChange={handleDateChange}
-                className="w-full max-w-full box-border bg-midnight-900 border border-midnight-600 rounded-lg px-4 py-2.5 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent transition-all text-base touch-manipulation appearance-none"
-              />
+              <div className="flex gap-2">
+                <input
+                  type="date"
+                  value={filters.date || ''}
+                  onChange={handleDateChange}
+                  className="flex-1 min-w-0 max-w-full box-border bg-midnight-900 border border-midnight-600 rounded-lg px-4 py-2.5 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent transition-all text-base touch-manipulation appearance-none"
+                />
+                {filters.date && (
+                  <button
+                    type="button"
+                    onClick={handleClearDate}
+                    className="flex-shrink-0 flex items-center justify-center w-11 h-11 bg-midnight-900 border border-midnight-600 rounded-lg text-slate-400 hover:text-slate-200 active:bg-midnight-700 transition-colors"
+                    aria-label="Clear date"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
