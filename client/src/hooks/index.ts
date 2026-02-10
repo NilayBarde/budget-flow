@@ -8,4 +8,6 @@ export * from './useInvestments';
 export * from './useInsights';
 export * from './useSavingsGoals';
 export * from './useAppSettings';
+export * from './useMonthNavigation';
+export * from './useModalState';
 

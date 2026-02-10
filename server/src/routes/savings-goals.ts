@@ -1,12 +1,14 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
 import { v4 as uuidv4 } from 'uuid';
+import { asyncHandler } from '../utils/asyncHandler.js';
 
 const router = Router();
 
 // Get all savings goals
-router.get('/', async (req, res) => {
-  try {
+router.get(
+  '/',
+  asyncHandler(async (_req, res) => {
     const { data, error } = await supabase
       .from('savings_goals')
       .select('*')
@@ -14,15 +16,13 @@ router.get('/', async (req, res) => {
 
     if (error) throw error;
     res.json(data);
-  } catch (error) {
-    console.error('Error fetching savings goals:', error);
-    res.status(500).json({ message: 'Failed to fetch savings goals' });
-  }
-});
+  }),
+);
 
 // Create savings goal
-router.post('/', async (req, res) => {
-  try {
+router.post(
+  '/',
+  asyncHandler(async (req, res) => {
     const { name, target_amount, current_amount, monthly_contribution, icon, color, deadline } = req.body;
 
     if (!name || !target_amount) {
@@ -49,15 +49,13 @@ router.post('/', async (req, res) => {
 
     if (error) throw error;
     res.status(201).json(data);
-  } catch (error) {
-    console.error('Error creating savings goal:', error);
-    res.status(500).json({ message: 'Failed to create savings goal' });
-  }
-});
+  }),
+);
 
 // Update savings goal
-router.patch('/:id', async (req, res) => {
-  try {
+router.patch(
+  '/:id',
+  asyncHandler(async (req, res) => {
     const { id } = req.params;
     const updates = { ...req.body, updated_at: new Date().toISOString() };
 
@@ -70,28 +68,20 @@ router.patch('/:id', async (req, res) => {
 
     if (error) throw error;
     res.json(data);
-  } catch (error) {
-    console.error('Error updating savings goal:', error);
-    res.status(500).json({ message: 'Failed to update savings goal' });
-  }
-});
+  }),
+);
 
 // Delete savings goal
-router.delete('/:id', async (req, res) => {
-  try {
+router.delete(
+  '/:id',
+  asyncHandler(async (req, res) => {
     const { id } = req.params;
 
-    const { error } = await supabase
-      .from('savings_goals')
-      .delete()
-      .eq('id', id);
+    const { error } = await supabase.from('savings_goals').delete().eq('id', id);
 
     if (error) throw error;
     res.status(204).send();
-  } catch (error) {
-    console.error('Error deleting savings goal:', error);
-    res.status(500).json({ message: 'Failed to delete savings goal' });
-  }
-});
+  }),
+);
 
 export default router;

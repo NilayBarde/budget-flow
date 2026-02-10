@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
 import { v4 as uuidv4 } from 'uuid';
 import { categorizeWithPlaid, cleanMerchantName } from '../services/categorizer.js';
+import { getCategoryIdForType } from '../services/category-lookup.js';
+import type { TransactionType } from '../services/transaction-type.js';
 
 const router = Router();
 
@@ -285,22 +287,9 @@ router.post('/', async (req, res) => {
           .single();
         finalCategoryId = category?.id || null;
         needsReview = result.needsReview;
-      } else if (finalTransactionType === 'income') {
-        // Auto-assign Income category to income transactions
-        const { data: incomeCategory } = await supabase
-          .from('categories')
-          .select('id')
-          .eq('name', 'Income')
-          .single();
-        finalCategoryId = incomeCategory?.id || null;
-      } else if (finalTransactionType === 'investment') {
-        // Auto-assign Investment category to investment transactions
-        const { data: investmentCategory } = await supabase
-          .from('categories')
-          .select('id')
-          .eq('name', 'Investment')
-          .single();
-        finalCategoryId = investmentCategory?.id || null;
+      } else if (finalTransactionType === 'income' || finalTransactionType === 'investment') {
+        // Auto-assign category based on transaction type
+        finalCategoryId = await getCategoryIdForType(finalTransactionType as TransactionType);
       }
     }
 
@@ -351,23 +340,10 @@ router.patch('/:id', async (req, res) => {
 
     // If changing transaction_type to 'income' or 'investment' and no category_id provided,
     // auto-assign the corresponding category
-    if (updates.transaction_type === 'income' && !updates.category_id) {
-      const { data: incomeCategory } = await supabase
-        .from('categories')
-        .select('id')
-        .eq('name', 'Income')
-        .single();
-      if (incomeCategory) {
-        updates.category_id = incomeCategory.id;
-      }
-    } else if (updates.transaction_type === 'investment' && !updates.category_id) {
-      const { data: investmentCategory } = await supabase
-        .from('categories')
-        .select('id')
-        .eq('name', 'Investment')
-        .single();
-      if (investmentCategory) {
-        updates.category_id = investmentCategory.id;
+    if ((updates.transaction_type === 'income' || updates.transaction_type === 'investment') && !updates.category_id) {
+      const categoryId = await getCategoryIdForType(updates.transaction_type as TransactionType);
+      if (categoryId) {
+        updates.category_id = categoryId;
       }
     }
 

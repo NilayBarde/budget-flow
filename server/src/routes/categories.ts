@@ -1,28 +1,25 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
 import { v4 as uuidv4 } from 'uuid';
+import { asyncHandler } from '../utils/asyncHandler.js';
 
 const router = Router();
 
 // Get all categories
-router.get('/', async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from('categories')
-      .select('*')
-      .order('name');
+router.get(
+  '/',
+  asyncHandler(async (_req, res) => {
+    const { data, error } = await supabase.from('categories').select('*').order('name');
 
     if (error) throw error;
     res.json(data);
-  } catch (error) {
-    console.error('Error fetching categories:', error);
-    res.status(500).json({ message: 'Failed to fetch categories' });
-  }
-});
+  }),
+);
 
 // Create category
-router.post('/', async (req, res) => {
-  try {
+router.post(
+  '/',
+  asyncHandler(async (req, res) => {
     const { name, icon, color } = req.body;
 
     const { data, error } = await supabase
@@ -39,15 +36,13 @@ router.post('/', async (req, res) => {
 
     if (error) throw error;
     res.json(data);
-  } catch (error) {
-    console.error('Error creating category:', error);
-    res.status(500).json({ message: 'Failed to create category' });
-  }
-});
+  }),
+);
 
 // Update category
-router.patch('/:id', async (req, res) => {
-  try {
+router.patch(
+  '/:id',
+  asyncHandler(async (req, res) => {
     const { id } = req.params;
     const updates = req.body;
 
@@ -60,15 +55,13 @@ router.patch('/:id', async (req, res) => {
 
     if (error) throw error;
     res.json(data);
-  } catch (error) {
-    console.error('Error updating category:', error);
-    res.status(500).json({ message: 'Failed to update category' });
-  }
-});
+  }),
+);
 
 // Delete category
-router.delete('/:id', async (req, res) => {
-  try {
+router.delete(
+  '/:id',
+  asyncHandler(async (req, res) => {
     const { id } = req.params;
 
     // Check if it's a default category
@@ -86,11 +79,7 @@ router.delete('/:id', async (req, res) => {
 
     if (error) throw error;
     res.status(204).send();
-  } catch (error) {
-    console.error('Error deleting category:', error);
-    res.status(500).json({ message: 'Failed to delete category' });
-  }
-});
+  }),
+);
 
 export default router;
-

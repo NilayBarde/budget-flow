@@ -1,6 +1,6 @@
-import { useState, useCallback, useMemo } from 'react';
-import { Plus, ChevronLeft, ChevronRight, Target } from 'lucide-react';
-import { Button, Card, CardHeader, Spinner, EmptyState, ProgressBar } from '../components/ui';
+import { useCallback, useMemo } from 'react';
+import { Plus, Target } from 'lucide-react';
+import { Button, Card, CardHeader, Spinner, EmptyState, ProgressBar, MonthSelector } from '../components/ui';
 import { AllocationBar, SavingsGoalCard, SavingsGoalModal, NetWorthGoalCard } from '../components/plan';
 import type { RecurringContribution } from '../components/plan';
 import { BudgetGoalModal } from '../components/budget';
@@ -16,17 +16,17 @@ import {
   useUpdateAppSetting,
   useAppSettings,
   useInvestmentSummary,
+  useMonthNavigation,
+  useModalState,
 } from '../hooks';
 import type { SavingsGoal, BudgetGoal } from '../types';
-import { formatCurrency, getMonthYear } from '../utils/formatters';
+import { formatCurrency } from '../utils/formatters';
 import { MONTHS } from '../utils/constants';
 
 export const FinancialPlan = () => {
-  const [currentDate, setCurrentDate] = useState(getMonthYear());
-  const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
-  const [editingGoal, setEditingGoal] = useState<SavingsGoal | null>(null);
-  const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
-  const [editingBudget, setEditingBudget] = useState<BudgetGoal | null>(null);
+  const { currentDate, handlePrevMonth, handleNextMonth } = useMonthNavigation();
+  const goalModal = useModalState<SavingsGoal>();
+  const budgetModal = useModalState<BudgetGoal>();
 
   // Data hooks
   const { data: stats, isLoading: statsLoading } = useMonthlyStats(currentDate.month, currentDate.year);
@@ -88,54 +88,48 @@ export const FinancialPlan = () => {
   const effectiveCashSavings = manualCashSavings ?? calculatedCashRetained;
   const effectiveInvestments = manualInvestments ?? calculatedMonthlyInvested;
 
+  // Generic setting save helper – avoids repeating updateSetting.mutate boilerplate
+  const saveSetting = useCallback(
+    (key: string, value: string) => updateSetting.mutate({ key, value }),
+    [updateSetting],
+  );
+
   const handleSaveNetWorthGoal = useCallback(
     (amount: number, year: number) => {
-      updateSetting.mutate({ key: 'net_worth_goal_amount', value: amount.toString() });
-      updateSetting.mutate({ key: 'net_worth_goal_year', value: year.toString() });
+      saveSetting('net_worth_goal_amount', amount.toString());
+      saveSetting('net_worth_goal_year', year.toString());
     },
-    [updateSetting],
+    [saveSetting],
   );
 
   const handleSaveContributions = useCallback(
     (contributions: RecurringContribution[]) => {
-      updateSetting.mutate({ key: 'net_worth_contributions', value: JSON.stringify(contributions) });
+      saveSetting('net_worth_contributions', JSON.stringify(contributions));
     },
-    [updateSetting],
+    [saveSetting],
   );
 
   const handleSaveReturnRate = useCallback(
-    (rate: number) => {
-      updateSetting.mutate({ key: 'net_worth_estimated_return', value: rate.toString() });
-    },
-    [updateSetting],
+    (rate: number) => saveSetting('net_worth_estimated_return', rate.toString()),
+    [saveSetting],
   );
 
   const handleSaveCashReturnRate = useCallback(
-    (rate: number) => {
-      updateSetting.mutate({ key: 'net_worth_cash_return_rate', value: rate.toString() });
-    },
-    [updateSetting],
+    (rate: number) => saveSetting('net_worth_cash_return_rate', rate.toString()),
+    [saveSetting],
   );
 
   const handleSaveMonthlyInputs = useCallback(
     (cashSavings: number | null, investments: number | null) => {
-      updateSetting.mutate({
-        key: 'net_worth_monthly_cash_savings',
-        value: cashSavings !== null ? cashSavings.toString() : '',
-      });
-      updateSetting.mutate({
-        key: 'net_worth_monthly_investments',
-        value: investments !== null ? investments.toString() : '',
-      });
+      saveSetting('net_worth_monthly_cash_savings', cashSavings !== null ? cashSavings.toString() : '');
+      saveSetting('net_worth_monthly_investments', investments !== null ? investments.toString() : '');
     },
-    [updateSetting],
+    [saveSetting],
   );
 
   const handleOverrideChange = useCallback(
-    (value: number) => {
-      updateSetting.mutate({ key: 'expected_monthly_income', value: value.toString() });
-    },
-    [updateSetting],
+    (value: number) => saveSetting('expected_monthly_income', value.toString()),
+    [saveSetting],
   );
 
   const handleClearOverride = useCallback(() => {
@@ -160,56 +154,16 @@ export const FinancialPlan = () => {
     [savingsGoals],
   );
 
-  // Navigation
-  const handlePrevMonth = useCallback(() => {
-    setCurrentDate((prev) => {
-      let newMonth = prev.month - 1;
-      let newYear = prev.year;
-      if (newMonth < 1) {
-        newMonth = 12;
-        newYear -= 1;
-      }
-      return { month: newMonth, year: newYear };
-    });
-  }, []);
-
-  const handleNextMonth = useCallback(() => {
-    setCurrentDate((prev) => {
-      let newMonth = prev.month + 1;
-      let newYear = prev.year;
-      if (newMonth > 12) {
-        newMonth = 1;
-        newYear += 1;
-      }
-      return { month: newMonth, year: newYear };
-    });
-  }, []);
-
   // Savings goal handlers
-  const handleAddGoal = useCallback(() => {
-    setEditingGoal(null);
-    setIsGoalModalOpen(true);
-  }, []);
-
-  const handleEditGoal = useCallback((goal: SavingsGoal) => {
-    setEditingGoal(goal);
-    setIsGoalModalOpen(true);
-  }, []);
-
-  const handleCloseGoalModal = useCallback(() => {
-    setIsGoalModalOpen(false);
-    setEditingGoal(null);
-  }, []);
-
   const handleSaveGoal = useCallback(
     async (data: Omit<SavingsGoal, 'id' | 'created_at' | 'updated_at'>) => {
-      if (editingGoal) {
-        await updateGoal.mutateAsync({ id: editingGoal.id, data });
+      if (goalModal.item) {
+        await updateGoal.mutateAsync({ id: goalModal.item.id, data });
       } else {
         await createGoal.mutateAsync(data);
       }
     },
-    [editingGoal, updateGoal, createGoal],
+    [goalModal.item, updateGoal, createGoal],
   );
 
   const handleDeleteGoal = useCallback(
@@ -218,22 +172,6 @@ export const FinancialPlan = () => {
     },
     [deleteGoal],
   );
-
-  // Budget guardrail handlers
-  const handleEditBudget = useCallback((goal: BudgetGoal) => {
-    setEditingBudget(goal);
-    setIsBudgetModalOpen(true);
-  }, []);
-
-  const handleAddBudget = useCallback(() => {
-    setEditingBudget(null);
-    setIsBudgetModalOpen(true);
-  }, []);
-
-  const handleCloseBudgetModal = useCallback(() => {
-    setIsBudgetModalOpen(false);
-    setEditingBudget(null);
-  }, []);
 
   const isLoading = statsLoading || savingsLoading;
 
@@ -245,32 +183,19 @@ export const FinancialPlan = () => {
           <h1 className="text-2xl md:text-3xl font-bold text-slate-100">Financial Plan</h1>
           <p className="text-slate-400 mt-1">Your income allocation & savings goals</p>
         </div>
-        <Button onClick={handleAddGoal} className="w-full md:w-auto">
+        <Button onClick={goalModal.open} className="w-full md:w-auto">
           <Plus className="h-4 w-4 mr-2" />
           New Savings Goal
         </Button>
       </div>
 
       {/* Month Selector */}
-      <div className="flex items-center justify-between bg-midnight-800 border border-midnight-600 rounded-xl p-3 md:p-4">
-        <button
-          onClick={handlePrevMonth}
-          className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 active:bg-midnight-600 rounded-lg transition-colors touch-target"
-          aria-label="Previous month"
-        >
-          <ChevronLeft className="h-5 w-5" />
-        </button>
-        <h2 className="text-lg md:text-xl font-semibold text-slate-100">
-          {MONTHS[currentDate.month - 1]} {currentDate.year}
-        </h2>
-        <button
-          onClick={handleNextMonth}
-          className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 active:bg-midnight-600 rounded-lg transition-colors touch-target"
-          aria-label="Next month"
-        >
-          <ChevronRight className="h-5 w-5" />
-        </button>
-      </div>
+      <MonthSelector
+        month={currentDate.month}
+        year={currentDate.year}
+        onPrevMonth={handlePrevMonth}
+        onNextMonth={handleNextMonth}
+      />
 
       {isLoading ? (
         <Spinner className="py-12" />
@@ -318,7 +243,7 @@ export const FinancialPlan = () => {
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-lg md:text-xl font-semibold text-slate-100">Savings Goals</h2>
               {savingsGoals.length > 0 && (
-                <Button variant="ghost" size="sm" onClick={handleAddGoal}>
+                <Button variant="ghost" size="sm" onClick={goalModal.open}>
                   <Plus className="h-4 w-4 mr-1" />
                   Add
                 </Button>
@@ -331,7 +256,7 @@ export const FinancialPlan = () => {
                   <SavingsGoalCard
                     key={goal.id}
                     goal={goal}
-                    onEdit={handleEditGoal}
+                    onEdit={goalModal.edit}
                     onDelete={handleDeleteGoal}
                   />
                 ))}
@@ -342,7 +267,7 @@ export const FinancialPlan = () => {
                 description="Set long-term goals to track your progress toward big milestones."
                 icon={<Target className="h-8 w-8 text-slate-400" />}
                 action={
-                  <Button onClick={handleAddGoal}>
+                  <Button onClick={goalModal.open}>
                     <Plus className="h-4 w-4 mr-2" />
                     Create Your First Goal
                   </Button>
@@ -357,7 +282,7 @@ export const FinancialPlan = () => {
               title="Budget Guardrails"
               subtitle="Category spending limits for this month"
               action={
-                <Button variant="ghost" size="sm" onClick={handleAddBudget}>
+                <Button variant="ghost" size="sm" onClick={budgetModal.open}>
                   <Plus className="h-4 w-4 mr-1" />
                   Add
                 </Button>
@@ -376,7 +301,7 @@ export const FinancialPlan = () => {
                   return (
                     <button
                       key={goal.id}
-                      onClick={() => handleEditBudget(goal)}
+                      onClick={() => budgetModal.edit(goal)}
                       className="w-full flex items-center gap-3 p-2.5 rounded-lg hover:bg-midnight-700/50 active:bg-midnight-700 transition-colors text-left"
                     >
                       <div
@@ -403,7 +328,7 @@ export const FinancialPlan = () => {
             ) : (
               <p className="text-sm text-slate-400 text-center py-4">
                 No budget limits set for {MONTHS[currentDate.month - 1]}.{' '}
-                <button onClick={handleAddBudget} className="text-accent-400 hover:underline">
+                <button onClick={budgetModal.open} className="text-accent-400 hover:underline">
                   Add one
                 </button>
               </p>
@@ -414,17 +339,17 @@ export const FinancialPlan = () => {
 
       {/* Modals */}
       <SavingsGoalModal
-        isOpen={isGoalModalOpen}
-        onClose={handleCloseGoalModal}
-        goal={editingGoal}
+        isOpen={goalModal.isOpen}
+        onClose={goalModal.close}
+        goal={goalModal.item}
         onSave={handleSaveGoal}
         onDelete={handleDeleteGoal}
       />
 
       <BudgetGoalModal
-        isOpen={isBudgetModalOpen}
-        onClose={handleCloseBudgetModal}
-        goal={editingBudget}
+        isOpen={budgetModal.isOpen}
+        onClose={budgetModal.close}
+        goal={budgetModal.item}
         month={currentDate.month}
         year={currentDate.year}
       />

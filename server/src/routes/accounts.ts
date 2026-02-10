@@ -3,147 +3,11 @@ import { supabase } from '../db/supabase.js';
 import * as plaidService from '../services/plaid.js';
 import { categorizeWithPlaid, cleanMerchantName, PlaidPFC } from '../services/categorizer.js';
 import { checkAccountBalance, fetchAndUpdateBalance } from '../services/balance-alerts.js';
+import { detectTransactionType } from '../services/transaction-type.js';
+import { getCategoryIdForType } from '../services/category-lookup.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
-
-type TransactionType = 'income' | 'expense' | 'transfer' | 'investment' | 'return';
-
-// Investment detection patterns (checked AFTER transfers)
-const INVESTMENT_PATTERNS = [
-  /robinhood[- ]?debits?/i,  // Robinhood recurring investment debits (e.g., "Robinhood-Debits-123")
-  /fidelity/i,
-  /vanguard/i,
-  /schwab/i,
-  /etrade/i,
-  /e-trade/i,
-  /td\s*ameritrade/i,
-  /coinbase/i,
-  /webull/i,
-  /acorns/i,
-  /betterment/i,
-];
-
-// Transfer detection patterns
-const TRANSFER_PATTERNS = [
-  /credit\s*card[- ]?auto[- ]?pay/i,  // Credit card auto pay (e.g., "Credit Card-auto Pay", "Credit Card Auto Pay")
-  /credit\s*card[- ]?payment/i,       // Credit card payment (e.g., "Credit Card-Payment")
-  /card[- ]?payment/i,                 // Generic card payment (e.g., "Card-Payment", "Card Payment")
-  /payment.*thank\s*you/i,
-  /autopay/i,
-  /auto[- ]?pay/i,                     // Auto pay or auto-pay (must come after credit card patterns)
-  /credit\s*crd/i,                     // "CREDIT CRD AUTOPAY"
-  /crd\s*autopay/i,                    // Abbreviated card autopay
-  /epayment/i,                         // Electronic payment
-  /e-payment/i,
-  /\btransfer\b/i,                     // Any transfer (but not "Robinhood-transfer" investment patterns)
-  /wire\s*transfer/i,
-  /^payment$/i,
-  /bill\s*pay/i,
-  /billpay/i,
-  /direct\s*debit/i,
-  /loan\s*payment/i,
-  /mortgage\s*payment/i,
-  /\bpmt\b/i,                          // Common abbreviation for payment
-  /zelle/i,                            // Zelle transfers
-  /cash\s*app/i,                       // Cash App transfers
-  /acctverify/i,                       // Account verification micro-deposits
-  /account\s*verification/i,
-  /bank\s*xfer/i,                      // Bank transfer (e.g., Apple Cash-Bank Xfer)
-  /mobile\s*pmt/i,                     // Mobile payment
-  /-ach\s*pmt/i,                       // ACH payment (e.g., "Amex Epayment-Ach Pmt")
-  /money\s*out\s*cash/i,               // Wealthfront internal transfers (e.g., "Emergency Fund Money Out Cash")
-  /money\s*in\s*cash/i,                // Wealthfront internal transfers (e.g., "Emergency Fund Money In Cash")
-  /\bfund\b.*money\s*(out|in)/i,       // Wealthfront bucket transfers (e.g., "Emergency Fund Money Out")
-  // Note: Venmo intentionally excluded - users often receive reimbursements via Venmo
-];
-
-// Plaid categories that indicate transfers (legacy category field)
-const TRANSFER_CATEGORIES = ['Transfer', 'Payment', 'Credit Card', 'Loan Payments'];
-
-// Plaid personal_finance_category primary values that indicate transfers
-const TRANSFER_PFC_PRIMARY = ['TRANSFER_IN', 'TRANSFER_OUT', 'LOAN_PAYMENTS', 'BANK_FEES'];
-
-interface PlaidPersonalFinanceCategory {
-  primary?: string;
-  detailed?: string;
-}
-
-/**
- * Detect transaction type based on amount and patterns
- * Priority: transfers > investments > amount sign
- * - Transfer pattern match = transfer (most specific, checked first)
- * - Investment pattern match = investment
- * - Plaid says it's a transfer = transfer
- * - Plaid says INCOME + negative amount = income
- * - Negative amount (not income) = return/refund
- * - Positive amount = expense
- */
-const detectTransactionType = (
-  amount: number,
-  merchantName: string | null,
-  fullName: string | null,
-  plaidCategories: string[] | undefined,
-  personalFinanceCategory?: PlaidPersonalFinanceCategory | null,
-  originalDescription?: string | null
-): TransactionType => {
-  const textsToCheck = [merchantName || '', fullName || '', originalDescription || ''];
-  
-  // Check for TRANSFERS FIRST - card payments, etc. should be transfers even from investment platforms
-  const matchesTransferPattern = textsToCheck.some(text => 
-    TRANSFER_PATTERNS.some(pattern => pattern.test(text))
-  );
-  
-  if (matchesTransferPattern) {
-    return 'transfer';
-  }
-  
-  // Check for INVESTMENTS (after transfers ruled out)
-  const matchesInvestmentPattern = textsToCheck.some(text =>
-    INVESTMENT_PATTERNS.some(pattern => pattern.test(text))
-  );
-  
-  if (matchesInvestmentPattern) {
-    return 'investment';
-  }
-
-  // Check Plaid's personal_finance_category
-  const pfcPrimary = personalFinanceCategory?.primary;
-  const pfcDetailed = personalFinanceCategory?.detailed;
-  
-  // Check if it's an investment based on Plaid's detailed category
-  if (pfcDetailed?.includes('INVESTMENT') || pfcDetailed?.includes('RETIREMENT')) {
-    return 'investment';
-  }
-  
-  // Check if Plaid says it's a transfer
-  if (pfcPrimary && TRANSFER_PFC_PRIMARY.some(t => pfcPrimary.startsWith(t.split('_')[0]))) {
-    if (pfcPrimary.startsWith('TRANSFER') || pfcPrimary.startsWith('LOAN')) {
-      return 'transfer';
-    }
-  }
-  
-  // Check if Plaid legacy category indicates transfer
-  const hasTransferCategory = plaidCategories?.some(cat => 
-    TRANSFER_CATEGORIES.some(tc => cat.includes(tc))
-  ) || false;
-
-  if (hasTransferCategory) {
-    return 'transfer';
-  }
-
-  // Negative amounts (money coming in)
-  if (amount < 0) {
-    // Only actual income (paychecks, dividends, etc.) from Plaid should be income
-    if (pfcPrimary === 'INCOME') {
-      return 'income';
-    }
-    // Everything else negative is a return/refund
-    return 'return';
-  }
-
-  return 'expense';
-};
 
 // Get all accounts
 router.get('/', async (req, res) => {
@@ -288,14 +152,7 @@ router.post('/:id/sync', async (req, res) => {
       const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
       
       // Detect transaction type with Plaid PFC
-      const transactionType = (() => {
-        if (texts.some(t => TRANSFER_PATTERNS.some(p => p.test(t)))) return 'transfer';
-        if (texts.some(t => INVESTMENT_PATTERNS.some(p => p.test(t)))) return 'investment';
-        if (plaidPFC?.primary?.startsWith('TRANSFER') || plaidPFC?.primary?.startsWith('LOAN_PAYMENTS')) return 'transfer';
-        if (plaidPFC?.primary === 'INCOME') return 'income';
-        if (tx.amount < 0) return 'return'; // Negative non-income = return/refund
-        return 'expense';
-      })() as TransactionType;
+      const transactionType = detectTransactionType(tx.amount, texts, plaidPFC);
 
       // Auto-assign category only for expenses and returns
       // Income, investment, and transfer types don't need categories - the type is sufficient
@@ -344,13 +201,7 @@ router.post('/:id/sync', async (req, res) => {
       const displayName = cleanMerchantName(tx.merchant_name || tx.name);
       const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
       
-      const transactionType = (() => {
-        if (texts.some(t => TRANSFER_PATTERNS.some(p => p.test(t)))) return 'transfer';
-        if (texts.some(t => INVESTMENT_PATTERNS.some(p => p.test(t)))) return 'investment';
-        if (plaidPFC?.primary === 'INCOME') return 'income';
-        if (tx.amount < 0) return 'return';
-        return 'expense';
-      })() as TransactionType;
+      const transactionType = detectTransactionType(tx.amount, texts, plaidPFC);
 
       await supabase
         .from('transactions')
@@ -702,12 +553,8 @@ router.post('/reclassify-transactions', async (req, res) => {
       // Detect transaction type using both merchant_name and original_description
       // Note: personal_finance_category not available for reclassification (not stored)
       const detectedType = detectTransactionType(
-        tx.amount, 
-        tx.merchant_name, 
-        tx.original_description,
-        undefined,
-        undefined,
-        tx.original_description  // Also pass as originalDescription for investment detection
+        tx.amount,
+        [tx.merchant_name || '', tx.original_description || ''],
       );
       
       
@@ -750,51 +597,31 @@ router.post('/assign-type-categories', async (req, res) => {
   try {
     console.log('Assigning categories to income/investment transactions...');
     
-    // Get category IDs
-    const { data: categories } = await supabase
-      .from('categories')
-      .select('id, name')
-      .in('name', ['Income', 'Investment']);
-    
-    const incomeCategory = categories?.find(c => c.name === 'Income');
-    const investmentCategory = categories?.find(c => c.name === 'Investment');
-    
-    let incomeUpdated = 0;
-    let investmentUpdated = 0;
-    
-    // Update income transactions that don't have a category
-    if (incomeCategory) {
-      const { data: incomeResult } = await supabase
-        .from('transactions')
-        .update({ category_id: incomeCategory.id })
-        .eq('transaction_type', 'income')
-        .is('category_id', null)
-        .select('id');
-      
-      incomeUpdated = incomeResult?.length || 0;
-    }
-    
-    // Update investment transactions that don't have a category
-    if (investmentCategory) {
-      const { data: investmentResult } = await supabase
-        .from('transactions')
-        .update({ category_id: investmentCategory.id })
-        .eq('transaction_type', 'investment')
-        .is('category_id', null)
-        .select('id');
-      
-      investmentUpdated = investmentResult?.length || 0;
-    }
-    
-    res.json({
-      updated: {
-        income: incomeUpdated,
-        investment: investmentUpdated
-      },
-      categories_found: {
-        income: !!incomeCategory,
-        investment: !!investmentCategory
+    const typesToAssign = ['income', 'investment'] as const;
+    const results: Record<string, number> = {};
+    const categoriesFound: Record<string, boolean> = {};
+
+    for (const type of typesToAssign) {
+      const categoryId = await getCategoryIdForType(type);
+      categoriesFound[type] = !!categoryId;
+
+      if (categoryId) {
+        const { data: updated } = await supabase
+          .from('transactions')
+          .update({ category_id: categoryId })
+          .eq('transaction_type', type)
+          .is('category_id', null)
+          .select('id');
+
+        results[type] = updated?.length || 0;
+      } else {
+        results[type] = 0;
       }
+    }
+
+    res.json({
+      updated: results,
+      categories_found: categoriesFound,
     });
   } catch (error) {
     console.error('Error assigning type categories:', error);

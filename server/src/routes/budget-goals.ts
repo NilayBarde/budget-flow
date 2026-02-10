@@ -1,12 +1,14 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
 import { v4 as uuidv4 } from 'uuid';
+import { asyncHandler } from '../utils/asyncHandler.js';
 
 const router = Router();
 
 // Get budget goals for a month/year
-router.get('/', async (req, res) => {
-  try {
+router.get(
+  '/',
+  asyncHandler(async (req, res) => {
     const { month, year } = req.query;
 
     if (!month || !year) {
@@ -46,19 +48,19 @@ router.get('/', async (req, res) => {
 
     // Sum by category, accounting for splits and netting out returns
     const spentByCategory = new Map<string, number>();
-    transactions?.forEach(t => {
+    transactions?.forEach((t) => {
       if (t.category_id) {
         // If transaction has splits, only count the "my share" portions
         let amountToCount: number;
         const splits = t.splits as { amount: number; is_my_share: boolean }[] | null;
         if (t.is_split && splits && splits.length > 0) {
           amountToCount = splits
-            .filter(s => s.is_my_share)
+            .filter((s) => s.is_my_share)
             .reduce((sum, s) => sum + Math.abs(s.amount), 0);
         } else {
           amountToCount = Math.abs(t.amount);
         }
-        
+
         const current = spentByCategory.get(t.category_id) || 0;
         if (t.transaction_type === 'expense') {
           // Add expenses
@@ -71,21 +73,19 @@ router.get('/', async (req, res) => {
     });
 
     // Attach spent to goals
-    const goalsWithSpent = goals?.map(g => ({
+    const goalsWithSpent = goals?.map((g) => ({
       ...g,
       spent: spentByCategory.get(g.category_id) || 0,
     }));
 
     res.json(goalsWithSpent);
-  } catch (error) {
-    console.error('Error fetching budget goals:', error);
-    res.status(500).json({ message: 'Failed to fetch budget goals' });
-  }
-});
+  }),
+);
 
 // Create budget goal
-router.post('/', async (req, res) => {
-  try {
+router.post(
+  '/',
+  asyncHandler(async (req, res) => {
     const { category_id, month, year, limit_amount } = req.body;
     const skipExisting = req.query.skipExisting === 'true';
 
@@ -129,15 +129,13 @@ router.post('/', async (req, res) => {
 
     if (error) throw error;
     res.json(data);
-  } catch (error) {
-    console.error('Error creating budget goal:', error);
-    res.status(500).json({ message: 'Failed to create budget goal' });
-  }
-});
+  }),
+);
 
 // Update budget goal
-router.patch('/:id', async (req, res) => {
-  try {
+router.patch(
+  '/:id',
+  asyncHandler(async (req, res) => {
     const { id } = req.params;
     const updates = req.body;
 
@@ -153,26 +151,20 @@ router.patch('/:id', async (req, res) => {
 
     if (error) throw error;
     res.json(data);
-  } catch (error) {
-    console.error('Error updating budget goal:', error);
-    res.status(500).json({ message: 'Failed to update budget goal' });
-  }
-});
+  }),
+);
 
 // Delete budget goal
-router.delete('/:id', async (req, res) => {
-  try {
+router.delete(
+  '/:id',
+  asyncHandler(async (req, res) => {
     const { id } = req.params;
 
     const { error } = await supabase.from('budget_goals').delete().eq('id', id);
 
     if (error) throw error;
     res.status(204).send();
-  } catch (error) {
-    console.error('Error deleting budget goal:', error);
-    res.status(500).json({ message: 'Failed to delete budget goal' });
-  }
-});
+  }),
+);
 
 export default router;
-

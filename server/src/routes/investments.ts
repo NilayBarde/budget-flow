@@ -117,6 +117,98 @@ const parseFidelityHoldings = (csvContent: string): ParsedHolding[] => {
 
 const router = Router();
 
+/**
+ * Shared helper: sync holdings for a single Plaid item.
+ * Upserts securities, maps IDs, deletes old holdings, inserts new ones.
+ * Returns counts of synced holdings and securities.
+ */
+const syncHoldingsForItem = async (
+  accessToken: string,
+  plaidItemId: string,
+): Promise<{ syncedCount: number; securitiesCount: number }> => {
+  const result = await plaidService.getInvestmentHoldings(accessToken);
+
+  // Upsert securities
+  for (const security of result.securities) {
+    const securityData = {
+      plaid_security_id: security.security_id,
+      ticker_symbol: security.ticker_symbol,
+      name: security.name || 'Unknown Security',
+      type: security.type || 'unknown',
+      close_price: security.close_price,
+      close_price_as_of: security.close_price_as_of,
+      iso_currency_code: security.iso_currency_code || 'USD',
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error: securityError } = await supabase
+      .from('securities')
+      .upsert(securityData, { onConflict: 'plaid_security_id' });
+
+    if (securityError) {
+      console.error('Error upserting security:', securityError);
+    }
+  }
+
+  // Get security ID mapping
+  const { data: securities } = await supabase
+    .from('securities')
+    .select('id, plaid_security_id');
+
+  const securityIdMap = new Map(
+    securities?.map((s) => [s.plaid_security_id, s.id]) || [],
+  );
+
+  // Get account ID mapping for this item
+  const { data: itemAccounts } = await supabase
+    .from('accounts')
+    .select('id, plaid_account_id')
+    .eq('plaid_item_id', plaidItemId);
+
+  const accountIdMap = new Map(
+    itemAccounts?.map((a) => [a.plaid_account_id, a.id]) || [],
+  );
+
+  // Delete existing holdings for accounts in this item, then insert fresh
+  const accountIds = itemAccounts?.map((a) => a.id) || [];
+  if (accountIds.length > 0) {
+    await supabase.from('holdings').delete().in('account_id', accountIds);
+  }
+
+  // Insert new holdings
+  let syncedCount = 0;
+  for (const holding of result.holdings) {
+    const dbAccountId = accountIdMap.get(holding.account_id);
+    const dbSecurityId = securityIdMap.get(holding.security_id);
+
+    if (!dbAccountId || !dbSecurityId) {
+      console.warn(
+        `Missing mapping for holding: account=${holding.account_id}, security=${holding.security_id}`,
+      );
+      continue;
+    }
+
+    const { error: holdingError } = await supabase.from('holdings').insert({
+      id: uuidv4(),
+      account_id: dbAccountId,
+      security_id: dbSecurityId,
+      quantity: holding.quantity,
+      cost_basis: holding.cost_basis,
+      institution_value: holding.institution_value,
+      iso_currency_code: holding.iso_currency_code || 'USD',
+      updated_at: new Date().toISOString(),
+    });
+
+    if (holdingError) {
+      console.error('Error inserting holding:', holdingError);
+    } else {
+      syncedCount++;
+    }
+  }
+
+  return { syncedCount, securitiesCount: result.securities.length };
+};
+
 // Investment account types that should have holdings
 const INVESTMENT_ACCOUNT_TYPES = [
   'investment',
@@ -343,98 +435,17 @@ router.post('/:accountId/sync', async (req, res) => {
       return res.status(400).json({ message: 'This account does not support investment sync' });
     }
 
-    // Fetch holdings from Plaid
-    const result = await plaidService.getInvestmentHoldings(account.plaid_access_token);
-
-    // Upsert securities
-    for (const security of result.securities) {
-      const securityData = {
-        plaid_security_id: security.security_id,
-        ticker_symbol: security.ticker_symbol,
-        name: security.name || 'Unknown Security',
-        type: security.type || 'unknown',
-        close_price: security.close_price,
-        close_price_as_of: security.close_price_as_of,
-        iso_currency_code: security.iso_currency_code || 'USD',
-        updated_at: new Date().toISOString(),
-      };
-
-      const { error: securityError } = await supabase
-        .from('securities')
-        .upsert(securityData, { onConflict: 'plaid_security_id' });
-
-      if (securityError) {
-        console.error('Error upserting security:', securityError);
-      }
-    }
-
-    // Get security ID mapping
-    const { data: securities } = await supabase
-      .from('securities')
-      .select('id, plaid_security_id');
-    
-    const securityIdMap = new Map(
-      securities?.map(s => [s.plaid_security_id, s.id]) || []
+    const { syncedCount, securitiesCount } = await syncHoldingsForItem(
+      account.plaid_access_token,
+      account.plaid_item_id,
     );
-
-    // Find the correct account ID for holdings (match by Plaid account ID)
-    const { data: allAccounts } = await supabase
-      .from('accounts')
-      .select('id, plaid_account_id')
-      .eq('plaid_item_id', account.plaid_item_id);
-
-    const accountIdMap = new Map(
-      allAccounts?.map(a => [a.plaid_account_id, a.id]) || []
-    );
-
-    // Delete existing holdings for accounts in this item, then insert fresh
-    const accountIds = allAccounts?.map(a => a.id) || [];
-    if (accountIds.length > 0) {
-      await supabase
-        .from('holdings')
-        .delete()
-        .in('account_id', accountIds);
-    }
-
-    // Insert new holdings
-    let syncedCount = 0;
-    for (const holding of result.holdings) {
-      const dbAccountId = accountIdMap.get(holding.account_id);
-      const dbSecurityId = securityIdMap.get(holding.security_id);
-
-      if (!dbAccountId || !dbSecurityId) {
-        console.warn(`Missing mapping for holding: account=${holding.account_id}, security=${holding.security_id}`);
-        continue;
-      }
-
-      const holdingData = {
-        id: uuidv4(),
-        account_id: dbAccountId,
-        security_id: dbSecurityId,
-        quantity: holding.quantity,
-        cost_basis: holding.cost_basis,
-        institution_value: holding.institution_value,
-        iso_currency_code: holding.iso_currency_code || 'USD',
-        updated_at: new Date().toISOString(),
-      };
-
-      const { error: holdingError } = await supabase
-        .from('holdings')
-        .insert(holdingData);
-
-      if (holdingError) {
-        console.error('Error inserting holding:', holdingError);
-      } else {
-        syncedCount++;
-      }
-    }
 
     console.log(`Synced ${syncedCount} holdings for account ${accountId}`);
 
     res.json({
       message: 'Holdings synced successfully',
       synced: syncedCount,
-      securities: result.securities.length,
+      securities: securitiesCount,
     });
   } catch (error) {
     console.error('Error syncing holdings:', error);
@@ -465,78 +476,12 @@ router.post('/sync-all', async (req, res) => {
       processedItems.add(account.plaid_item_id);
 
       try {
-        // Fetch holdings from Plaid
-        const result = await plaidService.getInvestmentHoldings(account.plaid_access_token);
-
-        // Upsert securities
-        for (const security of result.securities) {
-          const securityData = {
-            plaid_security_id: security.security_id,
-            ticker_symbol: security.ticker_symbol,
-            name: security.name || 'Unknown Security',
-            type: security.type || 'unknown',
-            close_price: security.close_price,
-            close_price_as_of: security.close_price_as_of,
-            iso_currency_code: security.iso_currency_code || 'USD',
-            updated_at: new Date().toISOString(),
-          };
-
-          await supabase
-            .from('securities')
-            .upsert(securityData, { onConflict: 'plaid_security_id' });
-        }
-
-        // Get security ID mapping
-        const { data: securities } = await supabase
-          .from('securities')
-          .select('id, plaid_security_id');
-        
-        const securityIdMap = new Map(
-          securities?.map(s => [s.plaid_security_id, s.id]) || []
+        const { syncedCount, securitiesCount } = await syncHoldingsForItem(
+          account.plaid_access_token,
+          account.plaid_item_id,
         );
-
-        // Get account ID mapping for this item
-        const { data: itemAccounts } = await supabase
-          .from('accounts')
-          .select('id, plaid_account_id')
-          .eq('plaid_item_id', account.plaid_item_id);
-
-        const accountIdMap = new Map(
-          itemAccounts?.map(a => [a.plaid_account_id, a.id]) || []
-        );
-
-        // Delete existing holdings for accounts in this item
-        const accountIds = itemAccounts?.map(a => a.id) || [];
-        if (accountIds.length > 0) {
-          await supabase
-            .from('holdings')
-            .delete()
-            .in('account_id', accountIds);
-        }
-
-        // Insert new holdings
-        for (const holding of result.holdings) {
-          const dbAccountId = accountIdMap.get(holding.account_id);
-          const dbSecurityId = securityIdMap.get(holding.security_id);
-
-          if (!dbAccountId || !dbSecurityId) continue;
-
-          await supabase
-            .from('holdings')
-            .insert({
-              id: uuidv4(),
-              account_id: dbAccountId,
-              security_id: dbSecurityId,
-              quantity: holding.quantity,
-              cost_basis: holding.cost_basis,
-              institution_value: holding.institution_value,
-              iso_currency_code: holding.iso_currency_code || 'USD',
-              updated_at: new Date().toISOString(),
-            });
-          
-          totalSynced++;
-        }
-        totalSecurities += result.securities.length;
+        totalSynced += syncedCount;
+        totalSecurities += securitiesCount;
       } catch (itemError: unknown) {
         // Check if it's an ADDITIONAL_CONSENT_REQUIRED error (expected for non-updated items)
         const plaidError = (itemError as { response?: { data?: { error_code?: string } } })?.response?.data;

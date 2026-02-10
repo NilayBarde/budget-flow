@@ -5,56 +5,9 @@ import { categorizeWithPlaid, cleanMerchantName, PlaidPFC } from '../services/ca
 import { checkAccountBalance } from '../services/balance-alerts.js';
 import { v4 as uuidv4 } from 'uuid';
 
+import { detectTransactionType } from '../services/transaction-type.js';
+
 const router = Router();
-
-type TransactionType = 'income' | 'expense' | 'transfer' | 'investment' | 'return';
-
-const TRANSFER_PATTERNS = [
-  /credit\s*card[- ]?auto[- ]?pay/i,
-  /credit\s*card[- ]?payment/i,
-  /card[- ]?payment/i,
-  /payment.*thank\s*you/i,
-  /autopay/i,
-  /auto[- ]?pay/i,
-  /epayment/i,
-  /\btransfer\b/i,
-  /bill\s*pay/i,
-  /zelle/i,
-  /cash\s*app/i,
-  /acctverify/i,
-];
-
-const INVESTMENT_PATTERNS = [
-  /robinhood[- ]?debits?/i,
-  /fidelity/i,
-  /vanguard/i,
-  /schwab/i,
-  /coinbase/i,
-  /webull/i,
-  /acorns/i,
-  /betterment/i,
-];
-
-const detectTransactionType = (amount: number, texts: string[], plaidPFC?: PlaidPFC | null): TransactionType => {
-  if (texts.some(t => TRANSFER_PATTERNS.some(p => p.test(t)))) return 'transfer';
-  if (texts.some(t => INVESTMENT_PATTERNS.some(p => p.test(t)))) return 'investment';
-  
-  if (plaidPFC?.primary) {
-    if (plaidPFC.primary.startsWith('TRANSFER') || plaidPFC.primary.startsWith('LOAN_PAYMENTS')) {
-      return 'transfer';
-    }
-    if (plaidPFC.primary === 'INCOME') {
-      return 'income';
-    }
-  }
-  
-  // Negative amounts: actual income vs return/refund
-  if (amount < 0) {
-    if (plaidPFC?.primary === 'INCOME') return 'income';
-    return 'return';
-  }
-  return 'expense';
-};
 
 // Process synced transactions and save to database
 const processSyncedTransactions = async (

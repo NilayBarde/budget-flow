@@ -21,16 +21,7 @@ import { Card, CardHeader, Spinner, Badge, EmptyState } from '../components/ui';
 import { ProgressBar } from '../components/ui/ProgressBar';
 import { useInsights, useRecurringTransactions, useUpdateRecurringTransaction } from '../hooks';
 import { formatCurrency } from '../utils/formatters';
-import { MONTHS } from '../utils/constants';
-const CHART_TOOLTIP_STYLE = {
-  backgroundColor: '#252a3d',
-  border: '1px solid #3a4160',
-  borderRadius: '8px',
-  fontSize: '12px',
-  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
-};
-const CHART_LABEL_STYLE = { color: '#f1f5f9', fontWeight: 500 };
-const CHART_ITEM_STYLE = { color: '#cbd5e1' };
+import { MONTHS, CHART_TOOLTIP_STYLE, CHART_LABEL_STYLE, CHART_ITEM_STYLE } from '../utils/constants';
 
 // Format a change percent as a readable string
 const formatChangePercent = (pct: number): string => {

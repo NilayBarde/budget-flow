@@ -1,15 +1,14 @@
-import { useState, useMemo } from 'react';
-import { ArrowUpRight, ArrowDownRight, TrendingUp, Wallet, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
-import { Card, CardHeader, Spinner, Button } from '../components/ui';
-import { useMonthlyStats, useBudgetGoals, useExpectedIncome } from '../hooks';
-import { formatCurrency, getMonthYear } from '../utils/formatters';
+import { useMemo } from 'react';
+import { ArrowUpRight, ArrowDownRight, TrendingUp, Wallet, RefreshCw } from 'lucide-react';
+import { Card, CardHeader, Spinner, Button, MonthSelector, CategoryPieChart } from '../components/ui';
+import { useMonthlyStats, useBudgetGoals, useExpectedIncome, useMonthNavigation } from '../hooks';
+import { formatCurrency } from '../utils/formatters';
 import { ProgressBar } from '../components/ui/ProgressBar';
 import { MONTHS } from '../utils/constants';
 import { useQueryClient } from '@tanstack/react-query';
 
 export const Dashboard = () => {
-  const [currentDate, setCurrentDate] = useState(getMonthYear());
+  const { currentDate, handlePrevMonth, handleNextMonth } = useMonthNavigation();
   const queryClient = useQueryClient();
   
   const { data: stats, isLoading: statsLoading, refetch: refetchStats } = useMonthlyStats(currentDate.month, currentDate.year);
@@ -21,30 +20,6 @@ export const Dashboard = () => {
     queryClient.invalidateQueries({ queryKey: ['budget-goals'] });
     refetchStats();
     refetchGoals();
-  };
-
-  const handlePrevMonth = () => {
-    setCurrentDate(prev => {
-      let newMonth = prev.month - 1;
-      let newYear = prev.year;
-      if (newMonth < 1) {
-        newMonth = 12;
-        newYear -= 1;
-      }
-      return { month: newMonth, year: newYear };
-    });
-  };
-
-  const handleNextMonth = () => {
-    setCurrentDate(prev => {
-      let newMonth = prev.month + 1;
-      let newYear = prev.year;
-      if (newMonth > 12) {
-        newMonth = 1;
-        newYear += 1;
-      }
-      return { month: newMonth, year: newYear };
-    });
   };
 
   const totalSpent = stats?.total_spent || 0;
@@ -99,25 +74,13 @@ export const Dashboard = () => {
           </Button>
           
           {/* Month Selector */}
-          <div className="flex flex-1 md:flex-initial items-center gap-1 md:gap-2 bg-midnight-800 border border-midnight-600 rounded-xl p-1.5 md:p-2">
-            <button
-              onClick={handlePrevMonth}
-              className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 active:bg-midnight-600 rounded-lg transition-colors touch-target"
-              aria-label="Previous month"
-            >
-              <ChevronLeft className="h-5 w-5" />
-            </button>
-            <span className="flex-1 md:flex-initial text-base md:text-lg font-semibold text-slate-100 px-2 md:px-4 md:min-w-[160px] text-center">
-              {MONTHS[currentDate.month - 1]} {currentDate.year}
-            </span>
-            <button
-              onClick={handleNextMonth}
-              className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 active:bg-midnight-600 rounded-lg transition-colors touch-target"
-              aria-label="Next month"
-            >
-              <ChevronRight className="h-5 w-5" />
-            </button>
-          </div>
+          <MonthSelector
+            month={currentDate.month}
+            year={currentDate.year}
+            onPrevMonth={handlePrevMonth}
+            onNextMonth={handleNextMonth}
+            className="flex-1 md:flex-initial !p-1.5 md:!p-2"
+          />
         </div>
       </div>
 
@@ -210,62 +173,10 @@ export const Dashboard = () => {
         {/* Spending by Category */}
         <Card padding="sm">
           <CardHeader title="Spending by Category" subtitle={`${MONTHS[currentDate.month - 1]} ${currentDate.year}`} />
-          {categoryData.length > 0 ? (
-            <div className="flex flex-col md:flex-row md:items-center gap-4 md:gap-6">
-              <div className="w-full md:w-40 h-40 mx-auto md:mx-0">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={categoryData}
-                      dataKey="amount"
-                      nameKey="category.name"
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={35}
-                      outerRadius={60}
-                      paddingAngle={2}
-                    >
-                      {categoryData.map((entry, index) => (
-                        <Cell 
-                          key={`cell-${index}`} 
-                          fill={entry.category.color} 
-                        />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      formatter={(value) => formatCurrency(value as number)}
-                      contentStyle={{
-                        backgroundColor: '#252a3d',
-                        border: '1px solid #3a4160',
-                        borderRadius: '8px',
-                        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
-                      }}
-                      labelStyle={{ color: '#f1f5f9', fontWeight: 500 }}
-                      itemStyle={{ color: '#cbd5e1' }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="flex-1 space-y-2">
-                {categoryData.map((item) => (
-                  <div key={item.category.id} className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div 
-                        className="w-3 h-3 rounded-full flex-shrink-0"
-                        style={{ backgroundColor: item.category.color }}
-                      />
-                      <span className="text-sm text-slate-300 truncate">{item.category.name}</span>
-                    </div>
-                    <span className="text-sm font-medium text-slate-100 ml-2">
-                      {formatCurrency(item.amount)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <p className="text-slate-400 text-center py-8">No spending data for this month</p>
-          )}
+          <CategoryPieChart
+            data={categoryData}
+            emptyMessage="No spending data for this month"
+          />
         </Card>
 
         {/* Budget Status */}

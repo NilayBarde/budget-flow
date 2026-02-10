@@ -22,46 +22,7 @@ const upload = multer({
   },
 });
 
-type TransactionType = 'income' | 'expense' | 'transfer' | 'investment' | 'return';
-
-// Transfer detection patterns
-const TRANSFER_PATTERNS = [
-  /credit\s*card[- ]?auto[- ]?pay/i,
-  /credit\s*card[- ]?payment/i,
-  /card[- ]?payment/i,
-  /payment.*thank\s*you/i,
-  /autopay/i,
-  /auto[- ]?pay/i,
-  /\btransfer\b/i,
-  /bill\s*pay/i,
-  /zelle/i,
-];
-
-// Investment detection patterns
-const INVESTMENT_PATTERNS = [
-  /robinhood/i,
-  /fidelity/i,
-  /vanguard/i,
-  /schwab/i,
-  /coinbase/i,
-  /webull/i,
-  /acorns/i,
-  /betterment/i,
-];
-
-// Detect transaction type based on description and amount
-const detectTransactionType = (description: string, amount: number): TransactionType => {
-  const matchesTransfer = TRANSFER_PATTERNS.some(p => p.test(description));
-  if (matchesTransfer) return 'transfer';
-
-  const matchesInvestment = INVESTMENT_PATTERNS.some(p => p.test(description));
-  if (matchesInvestment) return 'investment';
-
-  // Negative amount = money coming in (for credit cards, payments reduce balance)
-  if (amount < 0) return 'return';
-
-  return 'expense';
-};
+import { detectTransactionType, type TransactionType } from '../services/transaction-type.js';
 
 // Column mapping types for different CSV formats
 interface ColumnMapping {
@@ -358,7 +319,7 @@ router.post('/:accountId/preview', upload.single('file'), async (req, res) => {
           duplicateCount++;
         }
 
-        const transactionType = detectTransactionType(description, amount);
+        const transactionType = detectTransactionType(amount, [description]);
         
         // Categorize the transaction - only expenses and returns get categories
         // Income, investment, and transfer types don't need categories - the type is sufficient
@@ -536,7 +497,7 @@ router.post('/:accountId/import', upload.single('file'), async (req, res) => {
           continue;
         }
 
-        const transactionType = detectTransactionType(description, amount);
+        const transactionType = detectTransactionType(amount, [description]);
 
         // Check for merchant mapping
         const merchantMapping = merchantMappingMap.get(description.toLowerCase());

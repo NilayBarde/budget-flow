@@ -1,7 +1,7 @@
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { Plus, Edit2, Trash2, Tag } from 'lucide-react';
 import { Card, Button, Input, Modal, Spinner, EmptyState, Badge } from '../components/ui';
-import { useTags, useCreateTag, useUpdateTag, useDeleteTag } from '../hooks';
+import { useTags, useCreateTag, useUpdateTag, useDeleteTag, useModalState } from '../hooks';
 import type { Tag as TagType } from '../types';
 
 const TAG_COLORS = [
@@ -11,8 +11,7 @@ const TAG_COLORS = [
 ];
 
 export const Tags = () => {
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingTag, setEditingTag] = useState<TagType | null>(null);
+  const tagModal = useModalState<TagType>();
   const [name, setName] = useState('');
   const [color, setColor] = useState(TAG_COLORS[0]);
 
@@ -21,32 +20,30 @@ export const Tags = () => {
   const updateTag = useUpdateTag();
   const deleteTag = useDeleteTag();
 
-  const handleOpenModal = useCallback((tag?: TagType) => {
+  const handleOpenModal = (tag?: TagType) => {
     if (tag) {
-      setEditingTag(tag);
       setName(tag.name);
       setColor(tag.color);
+      tagModal.edit(tag);
     } else {
-      setEditingTag(null);
       setName('');
       setColor(TAG_COLORS[Math.floor(Math.random() * TAG_COLORS.length)]);
+      tagModal.open();
     }
-    setIsModalOpen(true);
-  }, []);
+  };
 
-  const handleCloseModal = useCallback(() => {
-    setIsModalOpen(false);
-    setEditingTag(null);
+  const handleCloseModal = () => {
+    tagModal.close();
     setName('');
     setColor(TAG_COLORS[0]);
-  }, []);
+  };
 
   const handleSave = async () => {
     if (!name.trim()) return;
 
-    if (editingTag) {
+    if (tagModal.item) {
       await updateTag.mutateAsync({
-        id: editingTag.id,
+        id: tagModal.item.id,
         data: { name, color },
       });
     } else {
@@ -127,9 +124,9 @@ export const Tags = () => {
 
       {/* Tag Modal */}
       <Modal
-        isOpen={isModalOpen}
+        isOpen={tagModal.isOpen}
         onClose={handleCloseModal}
-        title={editingTag ? 'Edit Tag' : 'Create Tag'}
+        title={tagModal.item ? 'Edit Tag' : 'Create Tag'}
       >
         <div className="space-y-4">
           <Input
@@ -172,7 +169,7 @@ export const Tags = () => {
               disabled={!name.trim()}
               className="flex-1"
             >
-              {editingTag ? 'Save' : 'Create'}
+              {tagModal.item ? 'Save' : 'Create'}
             </Button>
           </div>
         </div>

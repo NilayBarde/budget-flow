@@ -1,8 +1,7 @@
 import { useState, useCallback } from 'react';
-import { Search, ChevronLeft, ChevronRight, AlertCircle, Filter, X, Repeat, CalendarDays } from 'lucide-react';
-import { Input, Select, Button } from '../ui';
+import { Search, AlertCircle, Filter, X, Repeat, CalendarDays } from 'lucide-react';
+import { Input, Select, Button, MonthSelector } from '../ui';
 import type { Category, Account, Tag, TransactionFilters as Filters } from '../../types';
-import { MONTHS } from '../../utils/constants';
 import clsx from 'clsx';
 
 interface TransactionFiltersProps {
@@ -96,25 +95,12 @@ export const TransactionFilters = ({
   return (
     <div className="space-y-3">
       {/* Month Selector */}
-      <div className="flex items-center justify-between bg-midnight-800 border border-midnight-600 rounded-xl p-3 md:p-4">
-        <button
-          onClick={handlePrevMonth}
-          className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 active:bg-midnight-600 rounded-lg transition-colors touch-target"
-          aria-label="Previous month"
-        >
-          <ChevronLeft className="h-5 w-5" />
-        </button>
-        <h2 className="text-lg md:text-xl font-semibold text-slate-100">
-          {MONTHS[currentMonth - 1]} {currentYear}
-        </h2>
-        <button
-          onClick={handleNextMonth}
-          className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 active:bg-midnight-600 rounded-lg transition-colors touch-target"
-          aria-label="Next month"
-        >
-          <ChevronRight className="h-5 w-5" />
-        </button>
-      </div>
+      <MonthSelector
+        month={currentMonth}
+        year={currentYear}
+        onPrevMonth={handlePrevMonth}
+        onNextMonth={handleNextMonth}
+      />
 
       {/* Active Date Filter Banner */}
       {dateLabel && (

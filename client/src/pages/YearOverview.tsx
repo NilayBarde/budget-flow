@@ -1,13 +1,10 @@
 import { useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { 
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, 
-  PieChart, Pie, Cell 
-} from 'recharts';
-import { Card, CardHeader, Spinner } from '../components/ui';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { Card, CardHeader, Spinner, CategoryPieChart } from '../components/ui';
 import { useYearlyStats } from '../hooks';
 import { formatCurrency } from '../utils/formatters';
-import { MONTHS } from '../utils/constants';
+import { MONTHS, CHART_TOOLTIP_STYLE, CHART_LABEL_STYLE, CHART_ITEM_STYLE } from '../utils/constants';
 
 export const YearOverview = () => {
   const [year, setYear] = useState(new Date().getFullYear());
@@ -118,15 +115,9 @@ export const YearOverview = () => {
               />
               <Tooltip
                 formatter={(value) => formatCurrency(value as number)}
-                contentStyle={{
-                  backgroundColor: '#252a3d',
-                  border: '1px solid #3a4160',
-                  borderRadius: '8px',
-                  fontSize: '12px',
-                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
-                }}
-                labelStyle={{ color: '#f1f5f9', fontWeight: 500 }}
-                itemStyle={{ color: '#cbd5e1' }}
+                contentStyle={CHART_TOOLTIP_STYLE}
+                labelStyle={CHART_LABEL_STYLE}
+                itemStyle={CHART_ITEM_STYLE}
               />
               <Bar dataKey="spent" fill="#f43f5e" radius={[4, 4, 0, 0]} name="Expenses" />
               <Bar dataKey="income" fill="#10b981" radius={[4, 4, 0, 0]} name="Income" />
@@ -140,59 +131,11 @@ export const YearOverview = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
         <Card padding="sm">
           <CardHeader title="Spending by Category" subtitle="Where your money went" />
-          {categoryData.length > 0 ? (
-            <div className="flex flex-col md:flex-row md:items-center gap-4 md:gap-6">
-              <div className="w-full md:w-48 h-40 md:h-48 mx-auto md:mx-0">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={categoryData}
-                      dataKey="amount"
-                      nameKey="category.name"
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={35}
-                      outerRadius={60}
-                      paddingAngle={2}
-                    >
-                      {categoryData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.category.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      formatter={(value) => formatCurrency(value as number)}
-                      contentStyle={{
-                        backgroundColor: '#252a3d',
-                        border: '1px solid #3a4160',
-                        borderRadius: '8px',
-                        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
-                      }}
-                      labelStyle={{ color: '#f1f5f9', fontWeight: 500 }}
-                      itemStyle={{ color: '#cbd5e1' }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="flex-1 space-y-2">
-                {categoryData.map((item) => (
-                  <div key={item.category.id} className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div 
-                        className="w-3 h-3 rounded-full flex-shrink-0"
-                        style={{ backgroundColor: item.category.color }}
-                      />
-                      <span className="text-sm text-slate-300 truncate">{item.category.name}</span>
-                    </div>
-                    <span className="text-sm font-medium text-slate-100 ml-2">
-                      {formatCurrency(item.amount)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <p className="text-slate-400 text-center py-8">No spending data for {year}</p>
-          )}
+          <CategoryPieChart
+            data={categoryData}
+            emptyMessage={`No spending data for ${year}`}
+            chartClassName="w-full md:w-48 h-40 md:h-48"
+          />
         </Card>
 
         {/* Monthly Cards - 2x6 grid on mobile */}

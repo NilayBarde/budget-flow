@@ -1,11 +1,13 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
 
 const router = Router();
 
 // Get all recurring transactions
-router.get('/', async (req, res) => {
-  try {
+router.get(
+  '/',
+  asyncHandler(async (_req, res) => {
     const { data, error } = await supabase
       .from('recurring_transactions')
       .select('*')
@@ -14,15 +16,13 @@ router.get('/', async (req, res) => {
 
     if (error) throw error;
     res.json(data);
-  } catch (error) {
-    console.error('Error fetching recurring transactions:', error);
-    res.status(500).json({ message: 'Failed to fetch recurring transactions' });
-  }
-});
+  }),
+);
 
 // Update recurring transaction (e.g., mark as inactive)
-router.patch('/:id', async (req, res) => {
-  try {
+router.patch(
+  '/:id',
+  asyncHandler(async (req, res) => {
     const { id } = req.params;
     const updates = req.body;
 
@@ -35,10 +35,7 @@ router.patch('/:id', async (req, res) => {
 
     if (error) throw error;
     res.json(data);
-  } catch (error) {
-    console.error('Error updating recurring transaction:', error);
-    res.status(500).json({ message: 'Failed to update recurring transaction' });
-  }
-});
+  }),
+);
 
 export default router;

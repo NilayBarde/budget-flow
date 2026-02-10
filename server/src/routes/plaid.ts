@@ -2,67 +2,12 @@ import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
 import * as plaidService from '../services/plaid.js';
 import { categorizeWithPlaid, cleanMerchantName, PlaidPFC } from '../services/categorizer.js';
+import { detectTransactionType } from '../services/transaction-type.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
 const DEFAULT_USER_ID = 'default-user';
-
-// Helper to detect transaction type
-type TransactionType = 'income' | 'expense' | 'transfer' | 'investment' | 'return';
-
-const TRANSFER_PATTERNS = [
-  /credit\s*card[- ]?auto[- ]?pay/i,
-  /credit\s*card[- ]?payment/i,
-  /card[- ]?payment/i,
-  /payment.*thank\s*you/i,
-  /autopay/i,
-  /auto[- ]?pay/i,
-  /epayment/i,
-  /\btransfer\b/i,
-  /bill\s*pay/i,
-  /zelle/i,
-  /cash\s*app/i,
-  /acctverify/i,
-];
-
-const INVESTMENT_PATTERNS = [
-  /robinhood[- ]?debits?/i,
-  /fidelity/i,
-  /vanguard/i,
-  /schwab/i,
-  /coinbase/i,
-  /webull/i,
-  /acorns/i,
-  /betterment/i,
-];
-
-const detectTransactionType = (amount: number, texts: string[], plaidPFC?: PlaidPFC | null): TransactionType => {
-  // Check text patterns first
-  if (texts.some(t => TRANSFER_PATTERNS.some(p => p.test(t)))) return 'transfer';
-  if (texts.some(t => INVESTMENT_PATTERNS.some(p => p.test(t)))) return 'investment';
-  
-  // Check Plaid's category for transfers
-  if (plaidPFC?.primary) {
-    if (plaidPFC.primary.startsWith('TRANSFER') || plaidPFC.primary.startsWith('LOAN_PAYMENTS')) {
-      return 'transfer';
-    }
-    // Only actual income (paychecks, dividends, etc.) should be income
-    if (plaidPFC.primary === 'INCOME') {
-      return 'income';
-    }
-  }
-  
-  // Negative amounts: if Plaid says it's income, it's income; otherwise it's a return/refund
-  if (amount < 0) {
-    // If Plaid explicitly says INCOME, it's income; otherwise treat as return
-    if (plaidPFC?.primary === 'INCOME') {
-      return 'income';
-    }
-    return 'return';
-  }
-  return 'expense';
-};
 
 // Create link token for Plaid Link
 router.post('/create-link-token', async (req, res) => {

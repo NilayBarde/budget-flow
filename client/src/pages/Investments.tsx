@@ -4,6 +4,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { Card, CardHeader, Spinner, Button, EmptyState } from '../components/ui';
 import { useInvestmentHoldings, useInvestmentSummary, useSyncAllInvestmentHoldings, useToggleAccountInvestmentExclusion, useAccounts } from '../hooks';
 import { formatCurrency } from '../utils/formatters';
+import { CHART_TOOLTIP_STYLE, CHART_LABEL_STYLE, CHART_ITEM_STYLE } from '../utils/constants';
 import type { Holding, HoldingsByAccount } from '../types';
 
 // Colors for the pie chart
@@ -389,14 +390,9 @@ export const Investments = () => {
                         </Pie>
                         <Tooltip
                           formatter={(value) => formatCurrency(value as number)}
-                          contentStyle={{
-                            backgroundColor: '#252a3d',
-                            border: '1px solid #3a4160',
-                            borderRadius: '8px',
-                            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
-                          }}
-                          labelStyle={{ color: '#f1f5f9', fontWeight: 500 }}
-                          itemStyle={{ color: '#cbd5e1' }}
+                          contentStyle={CHART_TOOLTIP_STYLE}
+                          labelStyle={CHART_LABEL_STYLE}
+                          itemStyle={CHART_ITEM_STYLE}
                         />
                       </PieChart>
                     </ResponsiveContainer>

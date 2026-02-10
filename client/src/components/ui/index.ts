@@ -7,4 +7,6 @@ export { Card, CardHeader } from './Card';
 export { ProgressBar } from './ProgressBar';
 export { Spinner } from './Spinner';
 export { EmptyState } from './EmptyState';
+export { MonthSelector } from './MonthSelector';
+export { CategoryPieChart } from './CategoryPieChart';
 

@@ -1,12 +1,14 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
 import { v4 as uuidv4 } from 'uuid';
+import { asyncHandler } from '../utils/asyncHandler.js';
 
 const router = Router();
 
 // Get all merchant mappings
-router.get('/', async (req, res) => {
-  try {
+router.get(
+  '/',
+  asyncHandler(async (_req, res) => {
     const { data, error } = await supabase
       .from('merchant_mappings')
       .select('*')
@@ -14,15 +16,13 @@ router.get('/', async (req, res) => {
 
     if (error) throw error;
     res.json(data);
-  } catch (error) {
-    console.error('Error fetching merchant mappings:', error);
-    res.status(500).json({ message: 'Failed to fetch merchant mappings' });
-  }
-});
+  }),
+);
 
 // Create merchant mapping
-router.post('/', async (req, res) => {
-  try {
+router.post(
+  '/',
+  asyncHandler(async (req, res) => {
     const { original_name, display_name, default_category_id } = req.body;
 
     const { data, error } = await supabase
@@ -39,26 +39,20 @@ router.post('/', async (req, res) => {
 
     if (error) throw error;
     res.json(data);
-  } catch (error) {
-    console.error('Error creating merchant mapping:', error);
-    res.status(500).json({ message: 'Failed to create merchant mapping' });
-  }
-});
+  }),
+);
 
 // Delete merchant mapping
-router.delete('/:id', async (req, res) => {
-  try {
+router.delete(
+  '/:id',
+  asyncHandler(async (req, res) => {
     const { id } = req.params;
 
     const { error } = await supabase.from('merchant_mappings').delete().eq('id', id);
 
     if (error) throw error;
     res.status(204).send();
-  } catch (error) {
-    console.error('Error deleting merchant mapping:', error);
-    res.status(500).json({ message: 'Failed to delete merchant mapping' });
-  }
-});
+  }),
+);
 
 export default router;
-

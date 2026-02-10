@@ -1,59 +1,16 @@
-import { useState, useCallback } from 'react';
-import { Plus, ChevronLeft, ChevronRight } from 'lucide-react';
-import { Button, Card, Spinner, EmptyState } from '../components/ui';
+import { Plus, PiggyBank } from 'lucide-react';
+import { Button, Card, Spinner, EmptyState, MonthSelector } from '../components/ui';
 import { BudgetCard, BudgetGoalModal } from '../components/budget';
-import { useBudgetGoals, useMonthlyStats } from '../hooks';
+import { useBudgetGoals, useMonthlyStats, useMonthNavigation, useModalState } from '../hooks';
 import type { BudgetGoal } from '../types';
-import { formatCurrency, getMonthYear } from '../utils/formatters';
-import { MONTHS } from '../utils/constants';
-import { PiggyBank } from 'lucide-react';
+import { formatCurrency } from '../utils/formatters';
 
 export const Budget = () => {
-  const [currentDate, setCurrentDate] = useState(getMonthYear());
-  const [editingGoal, setEditingGoal] = useState<BudgetGoal | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const { currentDate, handlePrevMonth, handleNextMonth } = useMonthNavigation();
+  const goalModal = useModalState<BudgetGoal>();
 
   const { data: goals, isLoading: goalsLoading } = useBudgetGoals(currentDate.month, currentDate.year);
   const { data: monthlyStats, isLoading: statsLoading } = useMonthlyStats(currentDate.month, currentDate.year);
-
-  const handlePrevMonth = () => {
-    setCurrentDate(prev => {
-      let newMonth = prev.month - 1;
-      let newYear = prev.year;
-      if (newMonth < 1) {
-        newMonth = 12;
-        newYear -= 1;
-      }
-      return { month: newMonth, year: newYear };
-    });
-  };
-
-  const handleNextMonth = () => {
-    setCurrentDate(prev => {
-      let newMonth = prev.month + 1;
-      let newYear = prev.year;
-      if (newMonth > 12) {
-        newMonth = 1;
-        newYear += 1;
-      }
-      return { month: newMonth, year: newYear };
-    });
-  };
-
-  const handleEditGoal = useCallback((goal: BudgetGoal) => {
-    setEditingGoal(goal);
-    setIsModalOpen(true);
-  }, []);
-
-  const handleAddGoal = useCallback(() => {
-    setEditingGoal(null);
-    setIsModalOpen(true);
-  }, []);
-
-  const handleCloseModal = useCallback(() => {
-    setIsModalOpen(false);
-    setEditingGoal(null);
-  }, []);
 
   const isLoading = goalsLoading || statsLoading;
 
@@ -71,32 +28,19 @@ export const Budget = () => {
           <h1 className="text-2xl md:text-3xl font-bold text-slate-100">Budget</h1>
           <p className="text-slate-400 mt-1">Set and track your spending limits</p>
         </div>
-        <Button onClick={handleAddGoal} className="w-full md:w-auto">
+        <Button onClick={goalModal.open} className="w-full md:w-auto">
           <Plus className="h-4 w-4 mr-2" />
           Add Budget
         </Button>
       </div>
 
       {/* Month Selector */}
-      <div className="flex items-center justify-between bg-midnight-800 border border-midnight-600 rounded-xl p-3 md:p-4">
-        <button
-          onClick={handlePrevMonth}
-          className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 active:bg-midnight-600 rounded-lg transition-colors touch-target"
-          aria-label="Previous month"
-        >
-          <ChevronLeft className="h-5 w-5" />
-        </button>
-        <h2 className="text-lg md:text-xl font-semibold text-slate-100">
-          {MONTHS[currentDate.month - 1]} {currentDate.year}
-        </h2>
-        <button
-          onClick={handleNextMonth}
-          className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 active:bg-midnight-600 rounded-lg transition-colors touch-target"
-          aria-label="Next month"
-        >
-          <ChevronRight className="h-5 w-5" />
-        </button>
-      </div>
+      <MonthSelector
+        month={currentDate.month}
+        year={currentDate.year}
+        onPrevMonth={handlePrevMonth}
+        onNextMonth={handleNextMonth}
+      />
 
       {/* Summary Cards - Stack vertically on very small screens */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
@@ -126,7 +70,7 @@ export const Budget = () => {
       ) : goals && goals.length > 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
           {goals.map(goal => (
-            <BudgetCard key={goal.id} goal={goal} onEdit={handleEditGoal} />
+            <BudgetCard key={goal.id} goal={goal} onEdit={goalModal.edit} />
           ))}
         </div>
       ) : (
@@ -135,7 +79,7 @@ export const Budget = () => {
           description="Create budget goals to track your spending by category."
           icon={<PiggyBank className="h-8 w-8 text-slate-400" />}
           action={
-            <Button onClick={handleAddGoal}>
+            <Button onClick={goalModal.open}>
               <Plus className="h-4 w-4 mr-2" />
               Add Your First Budget
             </Button>
@@ -144,9 +88,9 @@ export const Budget = () => {
       )}
 
       <BudgetGoalModal
-        isOpen={isModalOpen}
-        onClose={handleCloseModal}
-        goal={editingGoal}
+        isOpen={goalModal.isOpen}
+        onClose={goalModal.close}
+        goal={goalModal.item}
         month={currentDate.month}
         year={currentDate.year}
       />
