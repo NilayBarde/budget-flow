@@ -88,11 +88,23 @@
 
 }
 
+/* Dark color scheme for native date/time inputs on mobile */
+input[type="date"],
+input[type="datetime-local"] {
+  color-scheme: dark;
+}
+
 /* Make native date/time picker icons white for dark theme */
 input[type="date"]::-webkit-calendar-picker-indicator,
 input[type="datetime-local"]::-webkit-calendar-picker-indicator {
   filter: invert(1);
   cursor: pointer;
+}
+
+/* Ensure date input text is visible on dark backgrounds (iOS/Safari) */
+input[type="date"]::-webkit-date-and-time-value {
+  color: #f1f5f9;
+  text-align: left;
 }
 
 @layer utilities {
