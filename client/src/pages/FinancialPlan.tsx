@@ -62,9 +62,31 @@ export const FinancialPlan = () => {
       return [];
     }
   }, [appSettings?.net_worth_contributions]);
+  const estimatedReturnRate = appSettings?.net_worth_estimated_return
+    ? parseFloat(appSettings.net_worth_estimated_return)
+    : 0;
+  const cashReturnRate = appSettings?.net_worth_cash_return_rate
+    ? parseFloat(appSettings.net_worth_cash_return_rate)
+    : 0;
+  const totalInvestmentValue = investmentSummary?.investments.totalValue ?? 0;
 
-  // Monthly savings rate = income - spending (a rough but useful proxy)
-  const monthlySavingsRate = Math.max(expectedIncome - totalSpent, 0);
+  // Calculated values from transactions
+  const calculatedSavingsRate = Math.max(expectedIncome - totalSpent, 0);
+  const calculatedMonthlyInvested = stats?.total_invested || 0;
+  const calculatedCashRetained = Math.max(calculatedSavingsRate - calculatedMonthlyInvested, 0);
+
+  // Manual overrides for projection inputs
+  const manualCashSavings = appSettings?.net_worth_monthly_cash_savings
+    ? parseFloat(appSettings.net_worth_monthly_cash_savings)
+    : null;
+  const manualInvestments = appSettings?.net_worth_monthly_investments
+    ? parseFloat(appSettings.net_worth_monthly_investments)
+    : null;
+  const isManualSavings = manualCashSavings !== null || manualInvestments !== null;
+
+  // Effective values for projection (manual if set, calculated otherwise)
+  const effectiveCashSavings = manualCashSavings ?? calculatedCashRetained;
+  const effectiveInvestments = manualInvestments ?? calculatedMonthlyInvested;
 
   const handleSaveNetWorthGoal = useCallback(
     (amount: number, year: number) => {
@@ -77,6 +99,34 @@ export const FinancialPlan = () => {
   const handleSaveContributions = useCallback(
     (contributions: RecurringContribution[]) => {
       updateSetting.mutate({ key: 'net_worth_contributions', value: JSON.stringify(contributions) });
+    },
+    [updateSetting],
+  );
+
+  const handleSaveReturnRate = useCallback(
+    (rate: number) => {
+      updateSetting.mutate({ key: 'net_worth_estimated_return', value: rate.toString() });
+    },
+    [updateSetting],
+  );
+
+  const handleSaveCashReturnRate = useCallback(
+    (rate: number) => {
+      updateSetting.mutate({ key: 'net_worth_cash_return_rate', value: rate.toString() });
+    },
+    [updateSetting],
+  );
+
+  const handleSaveMonthlyInputs = useCallback(
+    (cashSavings: number | null, investments: number | null) => {
+      updateSetting.mutate({
+        key: 'net_worth_monthly_cash_savings',
+        value: cashSavings !== null ? cashSavings.toString() : '',
+      });
+      updateSetting.mutate({
+        key: 'net_worth_monthly_investments',
+        value: investments !== null ? investments.toString() : '',
+      });
     },
     [updateSetting],
   );
@@ -243,12 +293,24 @@ export const FinancialPlan = () => {
           {/* Section 2: Net Worth Goal */}
           <NetWorthGoalCard
             currentNetWorth={currentNetWorth}
-            monthlySavingsRate={monthlySavingsRate}
+            effectiveCashSavings={effectiveCashSavings}
+            effectiveInvestments={effectiveInvestments}
+            calculatedCashRetained={calculatedCashRetained}
+            calculatedMonthlyInvested={calculatedMonthlyInvested}
+            isManualSavings={isManualSavings}
+            manualCashSavings={manualCashSavings}
+            manualInvestments={manualInvestments}
+            totalInvestmentValue={totalInvestmentValue}
+            estimatedReturnRate={estimatedReturnRate}
+            cashReturnRate={cashReturnRate}
             goalAmount={netWorthGoalAmount}
             goalYear={netWorthGoalYear}
             contributions={netWorthContributions}
             onSaveGoal={handleSaveNetWorthGoal}
             onSaveContributions={handleSaveContributions}
+            onSaveReturnRate={handleSaveReturnRate}
+            onSaveCashReturnRate={handleSaveCashReturnRate}
+            onSaveMonthlyInputs={handleSaveMonthlyInputs}
           />
 
           {/* Section 3: Savings Goals */}
