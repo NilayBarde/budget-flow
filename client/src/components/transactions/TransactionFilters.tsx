@@ -230,15 +230,12 @@ export const TransactionFilters = ({
 
             <div className="space-y-1">
               <label className="block text-sm font-medium text-slate-300">Date</label>
-              <div className="relative">
-                <CalendarDays className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-300 pointer-events-none" />
-                <input
-                  type="date"
-                  value={filters.date || ''}
-                  onChange={handleDateChange}
-                  className="w-full bg-midnight-900 border border-midnight-600 rounded-lg pl-10 pr-4 py-2.5 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent transition-all text-base touch-manipulation [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:cursor-pointer"
-                />
-              </div>
+              <input
+                type="date"
+                value={filters.date || ''}
+                onChange={handleDateChange}
+                className="w-full bg-midnight-900 border border-midnight-600 rounded-lg px-4 py-2.5 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent transition-all text-base touch-manipulation"
+              />
             </div>
           </div>
         </div>
