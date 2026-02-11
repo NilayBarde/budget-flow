@@ -3,6 +3,7 @@ import { formatCurrency } from '../../utils/formatters';
 import { CHART_TOOLTIP_STYLE, CHART_LABEL_STYLE, CHART_ITEM_STYLE } from '../../utils/constants';
 
 interface CategoryDataItem {
+  [key: string]: unknown;
   amount: number;
   category: {
     id: string;
