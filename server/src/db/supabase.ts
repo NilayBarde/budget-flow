@@ -3,7 +3,9 @@ import { createClient } from '@supabase/supabase-js';
 // env is loaded in index.ts
 
 const supabaseUrl = process.env.SUPABASE_URL || '';
-const supabaseKey = process.env.SUPABASE_ANON_KEY || '';
+// Prefer the service-role key so the server bypasses RLS.
+// Fall back to the anon key for backwards compatibility.
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '';
 
 if (!supabaseUrl || !supabaseKey) {
   console.warn('Warning: Supabase credentials not configured. Database operations will fail.');

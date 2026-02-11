@@ -18,6 +18,7 @@ console.log('  PLAID_CLIENT_ID:', process.env.PLAID_CLIENT_ID ? 'Set' : 'NOT SET
 console.log('  PLAID_SECRET:', process.env.PLAID_SECRET ? 'Set' : 'NOT SET');
 console.log('  PLAID_ENV:', process.env.PLAID_ENV || 'NOT SET');
 console.log('  SUPABASE_URL:', process.env.SUPABASE_URL ? 'Set' : 'NOT SET');
+console.log('  SUPABASE_KEY:', process.env.SUPABASE_SERVICE_ROLE_KEY ? 'service_role' : process.env.SUPABASE_ANON_KEY ? 'anon' : 'NOT SET');
 
 // Now import routes (env vars are already loaded)
 const { default: accountsRouter } = await import('./routes/accounts.js');
