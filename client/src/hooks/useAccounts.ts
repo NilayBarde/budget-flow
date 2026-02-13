@@ -52,6 +52,7 @@ export const useSyncAccount = () => {
   return useMutation({
     mutationFn: (accountId: string) => api.syncAccount(accountId),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
       queryClient.invalidateQueries({ queryKey: ['stats'] });
     },
