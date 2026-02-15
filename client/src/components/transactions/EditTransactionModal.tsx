@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Trash2, AlertCircle } from 'lucide-react';
 import { Modal, Button, Input, Select } from '../ui';
 import type { Transaction, Category, Tag, TransactionType } from '../../types';
-import { useUpdateTransaction, useCategories, useTags, useAddTagToTransaction, useRemoveTagFromTransaction, useSimilarTransactionsCount } from '../../hooks';
+import { useUpdateTransaction, useDeleteTransaction, useCategories, useTags, useAddTagToTransaction, useRemoveTagFromTransaction, useSimilarTransactionsCount } from '../../hooks';
 import { Badge } from '../ui/Badge';
 
 const TRANSACTION_TYPE_OPTIONS = [
@@ -28,7 +29,10 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction }: EditTrans
   const [selectedTags, setSelectedTags] = useState<Tag[]>([]);
   const [applyToAll, setApplyToAll] = useState(false);
   
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  
   const updateTransaction = useUpdateTransaction();
+  const deleteTransactionMutation = useDeleteTransaction();
   const { data: categories = [] } = useCategories();
   const { data: tags = [] } = useTags();
   const addTag = useAddTagToTransaction();
@@ -55,6 +59,7 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction }: EditTrans
       setRecurringAmount('');
       setSelectedTags(transaction.tags || []);
       setApplyToAll(false);
+      setConfirmDelete(false);
     }
   }, [isOpen, transaction]);
 
@@ -92,6 +97,13 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction }: EditTrans
 
     onClose();
   };
+
+  const handleDelete = useCallback(async () => {
+    if (!transaction) return;
+    await deleteTransactionMutation.mutateAsync(transaction.id);
+    setConfirmDelete(false);
+    onClose();
+  }, [transaction, deleteTransactionMutation, onClose]);
 
   const handleAddTag = useCallback((tagId: string) => {
     const tag = tags.find(t => t.id === tagId);
@@ -221,14 +233,52 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction }: EditTrans
           placeholder="Add notes..."
         />
 
+        {/* Delete confirmation */}
+        {confirmDelete && (
+          <div className="flex items-start gap-2 p-3 bg-rose-500/10 border border-rose-500/20 rounded-lg">
+            <AlertCircle className="h-5 w-5 text-rose-400 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm text-rose-400">
+                Are you sure you want to delete this transaction? This action cannot be undone.
+              </p>
+              <div className="flex gap-2 mt-2">
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={handleDelete}
+                  isLoading={deleteTransactionMutation.isPending}
+                >
+                  Delete
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setConfirmDelete(false)}
+                  disabled={deleteTransactionMutation.isPending}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-col-reverse md:flex-row gap-3 pt-4">
-          <Button variant="secondary" onClick={onClose} className="flex-1">
+          <Button
+            variant="ghost"
+            onClick={() => setConfirmDelete(true)}
+            className="md:mr-auto text-rose-400 hover:text-rose-300"
+            disabled={confirmDelete}
+          >
+            <Trash2 className="h-4 w-4 mr-2" />
+            Delete
+          </Button>
+          <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
           <Button
             onClick={handleSave}
             isLoading={updateTransaction.isPending}
-            className="flex-1"
           >
             Save Changes
           </Button>

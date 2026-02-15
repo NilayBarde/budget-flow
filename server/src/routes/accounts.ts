@@ -9,6 +9,11 @@ import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
+// In-memory cooldown map: accountId → last sync timestamp
+// Prevents rapid repeated syncs from burning Plaid API calls
+const SYNC_COOLDOWN_MS = 30_000; // 30 seconds
+const lastSyncByAccount = new Map<string, number>();
+
 // Get all accounts
 router.get('/', async (req, res) => {
   try {
@@ -98,6 +103,15 @@ router.post('/:id/sync', async (req, res) => {
     const { id } = req.params;
     const { use_legacy } = req.query; // Optional: use old /transactions/get method
 
+    // Throttle: reject if this account was synced recently
+    const lastSync = lastSyncByAccount.get(id);
+    if (lastSync && (Date.now() - lastSync) < SYNC_COOLDOWN_MS) {
+      const secondsLeft = Math.ceil((SYNC_COOLDOWN_MS - (Date.now() - lastSync)) / 1000);
+      return res.status(429).json({ 
+        message: `Sync was just performed. Please wait ${secondsLeft}s before syncing again.` 
+      });
+    }
+
     const { data: account, error: accountError } = await supabase
       .from('accounts')
       .select('*')
@@ -107,6 +121,9 @@ router.post('/:id/sync', async (req, res) => {
     if (accountError || !account) {
       return res.status(404).json({ message: 'Account not found' });
     }
+
+    // Record sync timestamp before making Plaid calls
+    lastSyncByAccount.set(id, Date.now());
 
     // Use new /transactions/sync method (recommended by Plaid)
     console.log(`Syncing transactions for account ${id} using /transactions/sync...`);

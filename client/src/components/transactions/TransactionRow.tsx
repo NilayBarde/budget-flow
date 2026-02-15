@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { MoreHorizontal, Split, Tag, Edit2, AlertCircle, Clock } from 'lucide-react';
+import { MoreHorizontal, Split, Tag, Edit2, AlertCircle, Clock, Trash2 } from 'lucide-react';
 import clsx from 'clsx';
 import type { Transaction } from '../../types';
 import { formatCurrency, formatDate } from '../../utils/formatters';
@@ -9,12 +9,13 @@ interface TransactionRowProps {
   transaction: Transaction;
   onEdit: (transaction: Transaction) => void;
   onSplit: (transaction: Transaction) => void;
+  onDelete: (transaction: Transaction) => void;
   isSelected?: boolean;
   onSelect?: (transactionId: string, selected: boolean) => void;
   selectionMode?: boolean;
 }
 
-export const TransactionRow = ({ transaction, onEdit, onSplit, isSelected = false, onSelect, selectionMode = false }: TransactionRowProps) => {
+export const TransactionRow = ({ transaction, onEdit, onSplit, onDelete, isSelected = false, onSelect, selectionMode = false }: TransactionRowProps) => {
   const [showMenu, setShowMenu] = useState(false);
   const [openUpward, setOpenUpward] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
@@ -48,6 +49,11 @@ export const TransactionRow = ({ transaction, onEdit, onSplit, isSelected = fals
     setShowMenu(false);
     onSplit(transaction);
   }, [onSplit, transaction]);
+
+  const handleDelete = useCallback(() => {
+    setShowMenu(false);
+    onDelete(transaction);
+  }, [onDelete, transaction]);
 
   const handleCheckboxChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     e.stopPropagation();
@@ -222,6 +228,13 @@ export const TransactionRow = ({ transaction, onEdit, onSplit, isSelected = fals
                   <Tag className="h-4 w-4" />
                   Add Tag
                 </button>
+                <button
+                  onClick={handleDelete}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-rose-400 hover:bg-midnight-600 transition-colors"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete
+                </button>
               </div>
             </>
           )}
@@ -330,6 +343,13 @@ export const TransactionRow = ({ transaction, onEdit, onSplit, isSelected = fals
             aria-label="Split transaction"
           >
             <Split className="h-4 w-4" />
+          </button>
+          <button
+            onClick={handleDelete}
+            className="p-2.5 text-slate-400 hover:text-rose-400 active:bg-midnight-600 rounded-lg transition-colors touch-target"
+            aria-label="Delete transaction"
+          >
+            <Trash2 className="h-4 w-4" />
           </button>
         </div>
       </div>

@@ -24,6 +24,10 @@ export const createLinkToken = async (userId: string, redirectUri?: string, webh
     client_name: 'BudgetFlow',
     products: [Products.Transactions],  // Only require Transactions - widely supported
     optional_products: [Products.Investments],  // Request Investments if institution supports it
+    // NOTE: Plaid's "Recurring Transactions" product ($0.15/account/month) is NOT used
+    // by this app — our recurring transaction tracking is entirely local (Supabase).
+    // Make sure Products.RecurringTransactions is NOT listed here and is DISABLED in
+    // your Plaid Dashboard (dashboard.plaid.com → Products) to avoid unnecessary charges.
     country_codes: [CountryCode.Us],
     language: 'en',
     transactions: {

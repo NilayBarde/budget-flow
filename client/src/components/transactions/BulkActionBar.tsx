@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { X, Tag, Check, Split } from 'lucide-react';
+import { X, Tag, Check, Split, Trash2 } from 'lucide-react';
 import clsx from 'clsx';
 import type { Tag as TagType } from '../../types';
 import { Badge } from '../ui/Badge';
@@ -10,9 +10,11 @@ interface BulkActionBarProps {
   tags: TagType[];
   onAddTag: (tagId: string) => void;
   onSplit: () => void;
+  onDelete: () => void;
   onDone: () => void;
   onCancel: () => void;
   isLoading?: boolean;
+  isDeleting?: boolean;
   addedTagIds?: Set<string>;
 }
 
@@ -21,12 +23,15 @@ export const BulkActionBar = ({
   tags, 
   onAddTag,
   onSplit,
+  onDelete,
   onDone,
   onCancel,
   isLoading = false,
+  isDeleting = false,
   addedTagIds = new Set(),
 }: BulkActionBarProps) => {
   const [showTagPicker, setShowTagPicker] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const handleTagSelect = useCallback((tagId: string) => {
     onAddTag(tagId);
@@ -145,6 +150,44 @@ export const BulkActionBar = ({
               </>
             )}
           </div>
+
+          {/* Delete Button */}
+          {confirmDelete ? (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => { onDelete(); setConfirmDelete(false); }}
+                disabled={isDeleting}
+                className={clsx(
+                  "flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors",
+                  "bg-rose-600 text-white hover:bg-rose-700",
+                  isDeleting && "opacity-50 cursor-not-allowed"
+                )}
+              >
+                <Trash2 className="h-4 w-4" />
+                {isDeleting ? 'Deleting...' : 'Confirm Delete'}
+              </button>
+              <button
+                onClick={() => setConfirmDelete(false)}
+                disabled={isDeleting}
+                className="px-3 py-2 rounded-lg text-sm text-slate-400 hover:text-slate-200 hover:bg-midnight-600 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              disabled={isLoading}
+              className={clsx(
+                "flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors",
+                "bg-midnight-700 text-rose-400 hover:bg-midnight-600",
+                isLoading && "opacity-50 cursor-not-allowed"
+              )}
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete
+            </button>
+          )}
 
           {/* Done button - shown when tags have been added */}
           {addedTags.length > 0 && (

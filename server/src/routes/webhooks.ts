@@ -9,6 +9,14 @@ import { detectTransactionType } from '../services/transaction-type.js';
 
 const router = Router();
 
+// Per-item cooldown for webhook-triggered syncs.
+// Each transactionsSync call costs $0.12 ("Transactions Refresh").
+// Plaid can fire multiple SYNC_UPDATES_AVAILABLE webhooks in rapid succession;
+// batching them with a 5-minute cooldown means the cursor-based sync picks up
+// all accumulated changes in a single call instead of one call per webhook.
+const WEBHOOK_SYNC_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+const lastWebhookSyncByItem = new Map<string, number>();
+
 // Process synced transactions and save to database
 const processSyncedTransactions = async (
   accountId: string,
@@ -167,35 +175,49 @@ router.post('/plaid', async (req, res) => {
         console.log(`  initial_update_complete: ${initial_update_complete}`);
         console.log(`  historical_update_complete: ${historical_update_complete}`);
 
-        // Sync transactions using the stored cursor
-        const syncResult = await plaidService.syncTransactions(
-          account.plaid_access_token,
-          account.plaid_cursor
-        );
+        // Cooldown: skip if we already synced this item recently.
+        // Each transactionsSync call costs $0.12, and Plaid can fire multiple
+        // SYNC_UPDATES_AVAILABLE webhooks in quick succession. The cursor-based
+        // sync will pick up all accumulated changes on the next call, so
+        // skipping intermediate webhooks is safe and saves money.
+        const lastSync = lastWebhookSyncByItem.get(item_id);
+        if (lastSync && (Date.now() - lastSync) < WEBHOOK_SYNC_COOLDOWN_MS) {
+          const minutesLeft = ((WEBHOOK_SYNC_COOLDOWN_MS - (Date.now() - lastSync)) / 60000).toFixed(1);
+          console.log(`Skipping webhook sync for item ${item_id} — cooldown active (${minutesLeft}m remaining). Next webhook or manual sync will catch up.`);
+        } else {
+          // Record sync timestamp
+          lastWebhookSyncByItem.set(item_id, Date.now());
 
-        // Process the synced transactions
-        const counts = await processSyncedTransactions(account.id, syncResult);
-        console.log(`Processed: +${counts.addedCount} added, ~${counts.modifiedCount} modified, -${counts.removedCount} removed`);
+          // Sync transactions using the stored cursor
+          const syncResult = await plaidService.syncTransactions(
+            account.plaid_access_token,
+            account.plaid_cursor
+          );
 
-        // Update the cursor and historical_sync_complete flag
-        await supabase
-          .from('accounts')
-          .update({
-            plaid_cursor: syncResult.nextCursor,
-            historical_sync_complete: historical_update_complete || false,
-          })
-          .eq('id', account.id);
+          // Process the synced transactions
+          const counts = await processSyncedTransactions(account.id, syncResult);
+          console.log(`Processed: +${counts.addedCount} added, ~${counts.modifiedCount} modified, -${counts.removedCount} removed`);
 
-        console.log(`Cursor updated for account ${account.id}`);
+          // Update the cursor and historical_sync_complete flag
+          await supabase
+            .from('accounts')
+            .update({
+              plaid_cursor: syncResult.nextCursor,
+              historical_sync_complete: historical_update_complete || false,
+            })
+            .eq('id', account.id);
 
-        // Check balance and send alert if threshold exceeded
-        try {
-          const alertSent = await checkAccountBalance(account.id);
-          if (alertSent) {
-            console.log(`Balance alert sent for account ${account.id}`);
+          console.log(`Cursor updated for account ${account.id}`);
+
+          // Check balance and send alert if threshold exceeded
+          try {
+            const alertSent = await checkAccountBalance(account.id);
+            if (alertSent) {
+              console.log(`Balance alert sent for account ${account.id}`);
+            }
+          } catch (balanceError) {
+            console.error('Error checking balance after webhook sync:', balanceError);
           }
-        } catch (balanceError) {
-          console.error('Error checking balance after webhook sync:', balanceError);
         }
       } else if (webhook_code === 'INITIAL_UPDATE') {
         console.log(`Initial update received for account ${account.id}`);

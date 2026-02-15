@@ -317,8 +317,18 @@ router.post('/exchange-token', async (req, res) => {
       console.error('Auto-sync failed (accounts created, but transactions need manual sync):', syncError);
     }
 
-    // Auto-sync investment holdings if this item has investment accounts
-    try {
+    // Auto-sync investment holdings only if this item has investment accounts
+    const INVESTMENT_TYPES = ['investment', 'brokerage', '401k', '401a', '403b', 'ira', 'roth', 'pension', 'retirement', 'stock plan', 'crypto exchange'];
+    const hasInvestmentAccounts = plaidAccounts.some(a => {
+      const accountType = (a.subtype || a.type || '').toLowerCase();
+      return INVESTMENT_TYPES.some(t => accountType.includes(t));
+    });
+
+    if (!hasInvestmentAccounts) {
+      console.log('No investment accounts in this item — skipping investment holdings sync');
+    }
+
+    if (hasInvestmentAccounts) try {
       console.log('Attempting to sync investment holdings...');
       const holdingsResult = await plaidService.getInvestmentHoldings(accessToken);
       

@@ -9,6 +9,7 @@ interface TransactionListProps {
   isLoading: boolean;
   onEdit: (transaction: Transaction) => void;
   onSplit: (transaction: Transaction) => void;
+  onDelete: (transaction: Transaction) => void;
   selectedIds?: Set<string>;
   onSelectionChange?: (ids: Set<string>) => void;
   selectionMode?: boolean;
@@ -19,6 +20,7 @@ export const TransactionList = ({
   isLoading, 
   onEdit, 
   onSplit,
+  onDelete,
   selectedIds = new Set(),
   onSelectionChange,
   selectionMode = false,
@@ -90,6 +92,7 @@ export const TransactionList = ({
           transaction={transaction}
           onEdit={onEdit}
           onSplit={onSplit}
+          onDelete={onDelete}
           isSelected={selectedIds.has(transaction.id)}
           onSelect={handleSelectTransaction}
           selectionMode={selectionMode}

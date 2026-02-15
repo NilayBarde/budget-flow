@@ -464,6 +464,17 @@ router.post('/sync-all', async (req, res) => {
 
     if (error) throw error;
 
+    // Pre-filter: collect Plaid items that have at least one investment account
+    // This avoids calling Plaid for items that only have checking/savings/credit accounts
+    const itemsWithInvestments = new Set<string>();
+    for (const account of accounts || []) {
+      if (account.plaid_item_id && isInvestmentAccount(account.account_type)) {
+        itemsWithInvestments.add(account.plaid_item_id);
+      }
+    }
+
+    console.log(`Found ${itemsWithInvestments.size} Plaid items with investment accounts (out of ${accounts?.length || 0} total accounts)`);
+
     // Get unique items (multiple accounts can share the same access token)
     const processedItems = new Set<string>();
     let totalSynced = 0;
@@ -473,6 +484,12 @@ router.post('/sync-all', async (req, res) => {
       if (!account.plaid_item_id || processedItems.has(account.plaid_item_id)) {
         continue;
       }
+
+      // Skip items that have no investment accounts — saves a Plaid API call per item
+      if (!itemsWithInvestments.has(account.plaid_item_id)) {
+        continue;
+      }
+
       processedItems.add(account.plaid_item_id);
 
       try {

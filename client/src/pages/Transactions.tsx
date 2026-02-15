@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { CheckSquare, X, Copy } from 'lucide-react';
 import { TransactionList, TransactionFilters, EditTransactionModal, SplitTransactionModal, BulkSplitModal, BulkActionBar, DuplicateReviewModal } from '../components/transactions';
 import { Button } from '../components/ui';
-import { useTransactions, useAccounts, useCategories, useTags, useBulkAddTagToTransactions, useExpectedIncome } from '../hooks';
+import { useTransactions, useAccounts, useCategories, useTags, useBulkAddTagToTransactions, useDeleteTransaction, useBulkDeleteTransactions, useExpectedIncome } from '../hooks';
 import type { Transaction, TransactionFilters as Filters, TransactionType } from '../types';
 import { getMonthYear } from '../utils/formatters';
 
@@ -67,7 +67,10 @@ export const Transactions = () => {
   const { data: categories = [] } = useCategories();
   const { data: tags = [] } = useTags();
   const bulkAddTag = useBulkAddTagToTransactions();
+  const deleteTransactionMutation = useDeleteTransaction();
+  const bulkDeleteMutation = useBulkDeleteTransactions();
   const { expectedIncome } = useExpectedIncome();
+  const [deletingTransaction, setDeletingTransaction] = useState<Transaction | null>(null);
 
   const handleEdit = useCallback((transaction: Transaction) => {
     setEditingTransaction(transaction);
@@ -76,6 +79,28 @@ export const Transactions = () => {
   const handleSplit = useCallback((transaction: Transaction) => {
     setSplittingTransaction(transaction);
   }, []);
+
+  const handleDelete = useCallback((transaction: Transaction) => {
+    setDeletingTransaction(transaction);
+  }, []);
+
+  const handleConfirmDelete = useCallback(async () => {
+    if (!deletingTransaction) return;
+    await deleteTransactionMutation.mutateAsync(deletingTransaction.id);
+    setDeletingTransaction(null);
+  }, [deletingTransaction, deleteTransactionMutation]);
+
+  const handleCloseDelete = useCallback(() => {
+    setDeletingTransaction(null);
+  }, []);
+
+  const handleBulkDelete = useCallback(async () => {
+    if (selectedIds.size === 0) return;
+    await bulkDeleteMutation.mutateAsync(Array.from(selectedIds));
+    setSelectedIds(new Set());
+    setAddedTagIds(new Set());
+    setSelectionMode(false);
+  }, [selectedIds, bulkDeleteMutation]);
 
   const handleCloseEdit = useCallback(() => {
     setEditingTransaction(null);
@@ -275,6 +300,7 @@ export const Transactions = () => {
         isLoading={isLoading}
         onEdit={handleEdit}
         onSplit={handleSplit}
+        onDelete={handleDelete}
         selectedIds={selectedIds}
         onSelectionChange={handleSelectionChange}
         selectionMode={selectionMode}
@@ -287,9 +313,11 @@ export const Transactions = () => {
           tags={tags}
           onAddTag={handleBulkAddTag}
           onSplit={handleBulkSplit}
+          onDelete={handleBulkDelete}
           onDone={handleBulkDone}
           onCancel={handleCancelSelection}
           isLoading={bulkAddTag.isPending}
+          isDeleting={bulkDeleteMutation.isPending}
           addedTagIds={addedTagIds}
         />
       )}
@@ -317,6 +345,41 @@ export const Transactions = () => {
         isOpen={showDuplicates}
         onClose={() => setShowDuplicates(false)}
       />
+
+      {/* Delete Confirmation Modal */}
+      {deletingTransaction && (
+        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={handleCloseDelete} />
+          <div className="relative bg-midnight-800 border border-midnight-600 rounded-xl shadow-2xl p-6 w-full max-w-md mx-4 mb-4 md:mb-0">
+            <h3 className="text-lg font-semibold text-slate-100 mb-2">Delete Transaction</h3>
+            <p className="text-sm text-slate-400 mb-1">
+              Are you sure you want to delete this transaction?
+            </p>
+            <div className="bg-midnight-700 rounded-lg p-3 mb-4">
+              <div className="font-medium text-slate-200">
+                {deletingTransaction.merchant_display_name || deletingTransaction.merchant_name}
+              </div>
+              <div className="text-sm text-slate-400">
+                ${Math.abs(deletingTransaction.amount).toFixed(2)} • {deletingTransaction.date}
+              </div>
+            </div>
+            <p className="text-sm text-rose-400 mb-4">This action cannot be undone.</p>
+            <div className="flex flex-col-reverse md:flex-row gap-3">
+              <Button variant="secondary" onClick={handleCloseDelete} className="flex-1">
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                onClick={handleConfirmDelete}
+                isLoading={deleteTransactionMutation.isPending}
+                className="flex-1"
+              >
+                Delete
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

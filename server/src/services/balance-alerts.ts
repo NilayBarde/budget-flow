@@ -209,17 +209,16 @@ export const checkBalanceThreshold = async (
 };
 
 /**
- * Check balance for a single account and send alert if needed
+ * Check balance for a single account and send alert if needed.
+ * Short-circuits before calling Plaid if the account doesn't qualify
+ * (not a credit card, no threshold set, manual account, etc.)
  * @param accountId - The account ID to check
  * @returns True if an alert was sent
  */
 export const checkAccountBalance = async (accountId: string): Promise<boolean> => {
   console.log(`Checking balance for account ${accountId}...`);
-  
-  // Fetch latest balance from Plaid
-  await fetchAndUpdateBalance(accountId);
 
-  // Get account with updated balance
+  // Read account from DB first to decide if a Plaid call is even needed
   const { data: account, error } = await supabase
     .from('accounts')
     .select('id, plaid_access_token, institution_name, account_name, account_type, current_balance, balance_threshold, last_balance_alert_at')
@@ -231,9 +230,42 @@ export const checkAccountBalance = async (accountId: string): Promise<boolean> =
     return false;
   }
 
-  console.log(`Balance check for ${account.account_name}: type=${account.account_type}, balance=${account.current_balance}, threshold=${account.balance_threshold}`);
+  // Short-circuit: skip Plaid call if the account can never trigger an alert
+  const { plaid_access_token, account_type, balance_threshold, account_name } = account;
 
-  return checkBalanceThreshold(account as AccountWithBalance);
+  if (isManualAccount(plaid_access_token)) {
+    console.log(`Skipping balance check for manual account: ${account_name}`);
+    return false;
+  }
+
+  if (!isCreditCardAccount(account_type)) {
+    console.log(`Skipping balance check for non-credit-card account: ${account_name} (type: ${account_type})`);
+    return false;
+  }
+
+  if (balance_threshold === null) {
+    console.log(`Skipping balance check for ${account_name} — no threshold set`);
+    return false;
+  }
+
+  // Account qualifies — now fetch the latest balance from Plaid
+  await fetchAndUpdateBalance(accountId);
+
+  // Re-read account with updated balance
+  const { data: updatedAccount } = await supabase
+    .from('accounts')
+    .select('id, plaid_access_token, institution_name, account_name, account_type, current_balance, balance_threshold, last_balance_alert_at')
+    .eq('id', accountId)
+    .single();
+
+  if (!updatedAccount) {
+    console.error(`Failed to re-read account ${accountId} after balance update`);
+    return false;
+  }
+
+  console.log(`Balance check for ${updatedAccount.account_name}: type=${updatedAccount.account_type}, balance=${updatedAccount.current_balance}, threshold=${updatedAccount.balance_threshold}`);
+
+  return checkBalanceThreshold(updatedAccount as AccountWithBalance);
 };
 
 /**
