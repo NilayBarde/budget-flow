@@ -5,8 +5,16 @@ import { useTransactions } from '../../hooks';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import { Link } from 'react-router-dom';
 
-export const RecentActivity = () => {
-    const { data: transactions, isLoading } = useTransactions();
+interface RecentActivityProps {
+    month: number;
+    year: number;
+}
+
+export const RecentActivity = ({ month, year }: RecentActivityProps) => {
+    const { data: transactions, isLoading } = useTransactions({
+        month,
+        year
+    });
 
     if (isLoading) {
         return (

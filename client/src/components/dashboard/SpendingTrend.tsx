@@ -1,12 +1,13 @@
 
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { Card, Spinner } from '../ui';
-import { useYearlyStats } from '../../hooks';
+import { useYearlyStats, useMonthNavigation } from '../../hooks';
 import { formatCurrency } from '../../utils/formatters';
 import { MONTHS } from '../../utils/constants';
 
 export const SpendingTrend = () => {
-    const currentYear = new Date().getFullYear();
+    const { currentDate } = useMonthNavigation();
+    const currentYear = currentDate.year;
     const { data: yearlyStats, isLoading } = useYearlyStats(currentYear);
 
     if (isLoading) {

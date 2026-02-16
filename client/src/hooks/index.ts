@@ -10,4 +10,6 @@ export * from './useSavingsGoals';
 export * from './useAppSettings';
 export * from './useMonthNavigation';
 export * from './useModalState';
+export * from './useFinancialHealth';
+
 

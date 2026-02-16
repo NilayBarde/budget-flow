@@ -5,19 +5,19 @@ import { AllocationBar, SavingsGoalCard, SavingsGoalModal, NetWorthGoalCard } fr
 import type { RecurringContribution } from '../components/plan';
 import { BudgetGoalModal } from '../components/budget';
 import {
-  useMonthlyStats,
   useBudgetGoals,
   useRecurringTransactions,
   useSavingsGoals,
   useCreateSavingsGoal,
   useUpdateSavingsGoal,
   useDeleteSavingsGoal,
-  useExpectedIncome,
   useUpdateAppSetting,
   useAppSettings,
+  useExpectedIncome,
   useInvestmentSummary,
   useMonthNavigation,
   useModalState,
+  useFinancialHealth,
 } from '../hooks';
 import type { SavingsGoal, BudgetGoal } from '../types';
 import { formatCurrency } from '../utils/formatters';
@@ -29,14 +29,33 @@ export const FinancialPlan = () => {
   const budgetModal = useModalState<BudgetGoal>();
 
   // Data hooks
-  const { data: stats, isLoading: statsLoading } = useMonthlyStats(currentDate.month, currentDate.year);
   const { data: budgetGoals, isLoading: budgetLoading } = useBudgetGoals(currentDate.month, currentDate.year);
   const { data: recurring } = useRecurringTransactions();
   const { data: savingsGoals = [], isLoading: savingsLoading } = useSavingsGoals();
-  const { expectedIncome, calculatedIncome, isManualOverride, monthsSampled } = useExpectedIncome();
   const { data: appSettings } = useAppSettings();
-  const { data: investmentSummary } = useInvestmentSummary();
   const updateSetting = useUpdateAppSetting();
+
+  // Use centralized financial hook
+  const {
+    expectedIncome,
+    actualIncome,
+    totalSpent,
+    totalInvested,
+    estimatedSavings,
+    netWorth,
+    isLoading: healthLoading,
+    // We also need these specific details from the hook related to income
+  } = useFinancialHealth(currentDate.month, currentDate.year);
+
+  // Create a separate call for income specifics if needed by child components (AllocationBar)
+  // or pass necessary props. Looking at AllocationBar props, it needs calculation details.
+  // We should actually extend the hook or use useExpectedIncome directly for the detailed breakdown if needed.
+  // For now, let's keep useExpectedIncome just for the breakdown details used in AllocationBar
+  // but use the hook for the main numbers.
+  // Wait, AllocationBar needs: calculatedIncome, isManualOverride, monthsSampled.
+  // Let's bring those back from useExpectedIncome for now to feed the UI component,
+  // but use the hook's outputs for the calculations below.
+  const { calculatedIncome, isManualOverride, monthsSampled } = useExpectedIncome();
 
   // Mutations
   const createGoal = useCreateSavingsGoal();
@@ -44,9 +63,7 @@ export const FinancialPlan = () => {
   const deleteGoal = useDeleteSavingsGoal();
 
   // Derived values
-  const actualIncome = stats?.total_income || 0;
-  const totalSpent = stats?.total_spent || 0;
-  const currentNetWorth = investmentSummary?.netWorth ?? 0;
+  const currentNetWorth = netWorth;
   const netWorthGoalAmount = appSettings?.net_worth_goal_amount
     ? parseFloat(appSettings.net_worth_goal_amount)
     : 0;
@@ -68,11 +85,31 @@ export const FinancialPlan = () => {
   const cashReturnRate = appSettings?.net_worth_cash_return_rate
     ? parseFloat(appSettings.net_worth_cash_return_rate)
     : 0;
+
+  // Use totalInvested from our centralized hook instead of investmentSummary.investments.totalValue for consistency?
+  // Wait, totalInvestmentValue usually refers to Portfolio Value (Net Worth - Cash).
+  // The original code used investmentSummary?.investments.totalValue.
+  // Our hook exposes netWorth.
+  // If we want totalInvestmentValue, we might still need useInvestmentSummary OR assume totalInvested is monthly flow.
+  // Correct: totalInvested is MONTHLY FLOW. totalInvestmentValue is PORTFOLIO VALUE.
+  // So we still need useInvestmentSummary for portfolio value unless we add it to the hook.
+  // Let's add it to the hook? The hook returns netWorth. 
+  // Let's re-add useInvestmentSummary for the portfolio usage to be safe, or just use what we have.
+  // The hook returns netWorth. 
+  // Let's keep useInvestmentSummary for the detailed breakdown if needed, or better, update the hook later to include portfolio value.
+  // For now, I'll re-import useInvestmentSummary just for the portfolio value to avoid breaking it,
+  // OR calculated it from NetWorth - Cash if possible.
+  // Let's look at the hook again. It returns netWorth.
+  // Originally: const totalInvestmentValue = investmentSummary?.investments.totalValue ?? 0;
+
+  // I will re-add useInvestmentSummary here just for totalInvestmentValue to be safe.
+  const { data: investmentSummary } = useInvestmentSummary();
   const totalInvestmentValue = investmentSummary?.investments.totalValue ?? 0;
 
-  // Calculated values from transactions
-  const calculatedSavingsRate = Math.max(expectedIncome - totalSpent, 0);
-  const calculatedMonthlyInvested = stats?.total_invested || 0;
+  // Calculated values from financial hook
+  const calculatedSavingsRate = Math.max(estimatedSavings, 0);
+  const calculatedMonthlyInvested = totalInvested;
+
   const calculatedCashRetained = Math.max(calculatedSavingsRate - calculatedMonthlyInvested, 0);
 
   // Manual overrides for projection inputs
@@ -185,7 +222,7 @@ export const FinancialPlan = () => {
     [deleteGoal],
   );
 
-  const isLoading = statsLoading || savingsLoading;
+  const isLoading = healthLoading || savingsLoading;
 
   return (
     <div className="space-y-4 md:space-y-6">

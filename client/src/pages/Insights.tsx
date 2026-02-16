@@ -1,37 +1,26 @@
 import { useState, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
-  ArrowUpRight,
-  ArrowDownRight,
   TrendingUp,
   ChevronDown,
   ChevronUp,
   X,
   Repeat,
+  DollarSign,
+  Activity,
+  PiggyBank
 } from 'lucide-react';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-} from 'recharts';
-import { Card, CardHeader, Spinner, Badge, EmptyState } from '../components/ui';
-import { ProgressBar } from '../components/ui/ProgressBar';
-import { useInsights, useRecurringTransactions, useUpdateRecurringTransaction } from '../hooks';
-import { formatCurrency } from '../utils/formatters';
-import { MONTHS, CHART_TOOLTIP_STYLE, CHART_LABEL_STYLE, CHART_ITEM_STYLE } from '../utils/constants';
 
-// Format a change percent as a readable string
-const formatChangePercent = (pct: number): string => {
-  const sign = pct >= 0 ? '+' : '';
-  return `${sign}${pct.toFixed(1)}%`;
-};
+import { Card, CardHeader, Spinner, Badge, EmptyState } from '../components/ui';
+import { useInsights, useRecurringTransactions, useUpdateRecurringTransaction, useYearlyStats, useMonthNavigation } from '../hooks';
+import { SpendingTrend } from '../components/dashboard/SpendingTrend';
+import { formatCurrency } from '../utils/formatters';
+import { MONTHS } from '../utils/constants';
 
 export const Insights = () => {
-  const navigate = useNavigate();
-  const { data: insights, isLoading } = useInsights();
+  const { currentDate } = useMonthNavigation();
+  const { data: insights, isLoading: insightsLoading } = useInsights();
+  const { data: yearlyStats, isLoading: yearlyLoading } = useYearlyStats(currentDate.year);
+
   const { data: recurring } = useRecurringTransactions();
   const updateRecurring = useUpdateRecurringTransaction();
   const [subscriptionsOpen, setSubscriptionsOpen] = useState(false);
@@ -47,21 +36,27 @@ export const Insights = () => {
     setSubscriptionsOpen(prev => !prev);
   }, []);
 
-  // Navigate to transactions page filtered by the clicked day
-  const handleDayBarClick = useCallback(
-    (data: { day: number }) => {
-      if (!insights) return;
-      const { month, year } = insights.monthOverMonth.currentMonth;
-      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(data.day).padStart(2, '0')}`;
-      navigate(`/transactions?date=${dateStr}`);
-    },
-    [navigate, insights],
-  );
-
   const activeSubscriptions = useMemo(
     () => recurring?.filter(r => r.is_active) || [],
     [recurring],
   );
+
+  // Calculate YTD Stats
+  const ytdStats = useMemo(() => {
+    if (!yearlyStats?.monthly_totals) return { income: 0, spent: 0, net: 0, savingsRate: 0 };
+
+    // Sum up totals for all available months in the yearly stats
+    // Note: This assumes monthly_totals includes all months so far or all months in data
+    const totals = yearlyStats.monthly_totals.reduce((acc, curr) => ({
+      income: acc.income + curr.income,
+      spent: acc.spent + curr.spent,
+    }), { income: 0, spent: 0 });
+
+    const net = totals.income - totals.spent;
+    const savingsRate = totals.income > 0 ? (net / totals.income) * 100 : 0;
+
+    return { ...totals, net, savingsRate };
+  }, [yearlyStats]);
 
   // Max spend values for relative bar widths
   const maxMerchantSpend = useMemo(() => {
@@ -74,8 +69,12 @@ export const Insights = () => {
     return categories.length > 0 ? categories[0].totalSpent : 1;
   }, [insights?.topCategories]);
 
-  if (isLoading) {
-    return <Spinner className="py-12" />;
+  if (insightsLoading || yearlyLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <Spinner size="lg" />
+      </div>
+    );
   }
 
   if (!insights) {
@@ -88,24 +87,7 @@ export const Insights = () => {
     );
   }
 
-  const { monthOverMonth, spendingVelocity, topCategories, topMerchants, dailySpending } = insights;
-  const { currentMonth, previousMonth, spentChangePercent, incomeChangePercent } = monthOverMonth;
-  const netChangePercent =
-    previousMonth.net !== 0
-      ? ((currentMonth.net - previousMonth.net) / Math.abs(previousMonth.net)) * 100
-      : 0;
-  const isSpentUp = spentChangePercent > 0;
-  const isIncomeUp = incomeChangePercent > 0;
-  const isNetUp = netChangePercent > 0;
-
-  // Spending velocity — use projected total vs last month to determine pace.
-  // The old naive % comparison breaks when fixed costs (rent, etc.) are paid early in the month.
-  const pacePercent = spendingVelocity.daysInMonth > 0
-    ? (spendingVelocity.daysElapsed / spendingVelocity.daysInMonth) * 100
-    : 0;
-  const isOnPace = spendingVelocity.lastMonthTotal > 0
-    ? spendingVelocity.projectedTotal <= spendingVelocity.lastMonthTotal * 1.05 // 5% grace
-    : true;
+  const { topCategories, topMerchants } = insights;
 
   const subscriptionMonthlyTotal = activeSubscriptions
     .filter(r => r.frequency === 'monthly')
@@ -116,142 +98,84 @@ export const Insights = () => {
   const estimatedSubscriptionMonthly = subscriptionMonthlyTotal + subscriptionYearlyTotal / 12;
 
   return (
-    <div className="space-y-4 md:space-y-6">
+    <div className="space-y-4 md:space-y-6 animate-in fade-in duration-500">
       {/* Header */}
       <div>
         <h1 className="text-2xl md:text-3xl font-bold text-slate-100">Insights</h1>
-        <p className="text-slate-400 mt-1">Trends, patterns, and spending analysis</p>
+        <p className="text-slate-400 mt-1">Yearly overview for {currentDate.year}</p>
       </div>
 
-      {/* ── This Month vs Last ──────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
-        {/* Spent */}
+      {/* ── Yearly Overview Cards ───────────────────────────────────── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+        {/* YTD Income */}
         <Card padding="sm">
-          <p className="text-xs md:text-sm text-slate-400">Spent</p>
-          <p className="text-lg md:text-2xl font-bold text-slate-100 mt-0.5 md:mt-1">
-            {formatCurrency(currentMonth.spent)}
-          </p>
-          <div className="flex items-center gap-2 mt-1">
-            <Badge
-              className={`text-xs ${isSpentUp ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}`}
-            >
-              {isSpentUp ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
-              {formatChangePercent(spentChangePercent)}
-            </Badge>
-            <span className="text-xs text-slate-500">vs last month</span>
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs md:text-sm text-slate-400">YTD Income</p>
+              <p className="text-lg md:text-2xl font-bold text-emerald-400 mt-1">
+                {formatCurrency(ytdStats.income)}
+              </p>
+            </div>
+            <div className="p-2 bg-emerald-500/10 rounded-lg">
+              <DollarSign className="h-5 w-5 text-emerald-400" />
+            </div>
           </div>
         </Card>
 
-        {/* Income */}
+        {/* YTD Spent */}
         <Card padding="sm">
-          <p className="text-xs md:text-sm text-slate-400">Income</p>
-          <p className="text-lg md:text-2xl font-bold text-emerald-400 mt-0.5 md:mt-1">
-            {formatCurrency(currentMonth.income)}
-          </p>
-          <div className="flex items-center gap-2 mt-1">
-            <Badge
-              className={`text-xs ${isIncomeUp ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}
-            >
-              {isIncomeUp ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
-              {formatChangePercent(incomeChangePercent)}
-            </Badge>
-            <span className="text-xs text-slate-500">vs last month</span>
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs md:text-sm text-slate-400">YTD Spent</p>
+              <p className="text-lg md:text-2xl font-bold text-slate-100 mt-1">
+                {formatCurrency(ytdStats.spent)}
+              </p>
+            </div>
+            <div className="p-2 bg-rose-500/10 rounded-lg">
+              <Activity className="h-5 w-5 text-rose-400" />
+            </div>
           </div>
         </Card>
 
-        {/* Net */}
+        {/* YTD Net */}
         <Card padding="sm">
-          <p className="text-xs md:text-sm text-slate-400">Net</p>
-          <p className={`text-lg md:text-2xl font-bold mt-0.5 md:mt-1 ${currentMonth.net >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-            {formatCurrency(currentMonth.net)}
-          </p>
-          <div className="flex items-center gap-2 mt-1">
-            <Badge
-              className={`text-xs ${isNetUp ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}
-            >
-              {isNetUp ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
-              {formatChangePercent(netChangePercent)}
-            </Badge>
-            <span className="text-xs text-slate-500">vs last month</span>
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs md:text-sm text-slate-400">YTD Net</p>
+              <p className={`text-lg md:text-2xl font-bold mt-1 ${ytdStats.net >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {formatCurrency(ytdStats.net)}
+              </p>
+            </div>
+            <div className="p-2 bg-blue-500/10 rounded-lg">
+              <PiggyBank className="h-5 w-5 text-blue-400" />
+            </div>
+          </div>
+        </Card>
+
+        {/* Savings Rate */}
+        <Card padding="sm">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs md:text-sm text-slate-400">Savings Rate</p>
+              <p className={`text-lg md:text-2xl font-bold mt-1 ${ytdStats.savingsRate >= 20 ? 'text-emerald-400' : ytdStats.savingsRate > 0 ? 'text-blue-400' : 'text-slate-400'}`}>
+                {ytdStats.savingsRate.toFixed(1)}%
+              </p>
+            </div>
+            <div className="p-2 bg-indigo-500/10 rounded-lg">
+              <TrendingUp className="h-5 w-5 text-indigo-400" />
+            </div>
           </div>
         </Card>
       </div>
 
-      {/* ── Spending Pace ───────────────────────────────────────────── */}
-      <Card padding="sm">
-        <CardHeader
-          title="Spending Pace"
-          subtitle={`${MONTHS[currentMonth.month - 1]} ${currentMonth.year} — Day ${spendingVelocity.daysElapsed} of ${spendingVelocity.daysInMonth}`}
-        />
-        <div className="space-y-3">
-          {/* Progress bar: current spend vs last month total */}
-          <div>
-            <div className="flex justify-between text-xs text-slate-400 mb-1.5">
-              <span>Spent so far: {formatCurrency(spendingVelocity.spentSoFar)}</span>
-              <span>Last month: {formatCurrency(spendingVelocity.lastMonthTotal)}</span>
-            </div>
-            <ProgressBar
-              value={spendingVelocity.spentSoFar}
-              max={spendingVelocity.lastMonthTotal || 1}
-              color={isOnPace ? 'success' : 'warning'}
-              showLabel={false}
-              size="md"
-            />
-            {/* Expected pace marker */}
-            <div className="relative h-0">
-              <div
-                className="absolute -top-2.5 w-0.5 h-2.5 bg-slate-400 rounded-full"
-                style={{ left: `${Math.min(pacePercent, 100)}%` }}
-                title={`Expected pace: ${pacePercent.toFixed(0)}%`}
-              />
-            </div>
-          </div>
-
-          {/* Stats row */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
-            <div>
-              <p className="text-xs text-slate-500">Fixed Costs</p>
-              <p className="text-sm font-medium text-slate-200">
-                {formatCurrency(spendingVelocity.fixedCosts)}
-              </p>
-              {spendingVelocity.fixedCosts > 0 && (
-                <p className="text-[10px] text-slate-500 mt-0.5">
-                  {formatCurrency(spendingVelocity.recurringSpent)} paid
-                </p>
-              )}
-            </div>
-            <div>
-              <p className="text-xs text-slate-500">Variable / day</p>
-              <p className="text-sm font-medium text-slate-200">
-                {formatCurrency(spendingVelocity.dailyAverage)}
-              </p>
-              {spendingVelocity.variableSpent > 0 && (
-                <p className="text-[10px] text-slate-500 mt-0.5">
-                  {formatCurrency(spendingVelocity.variableSpent)} so far
-                </p>
-              )}
-            </div>
-            <div>
-              <p className="text-xs text-slate-500">Projected Total</p>
-              <p className={`text-sm font-medium ${spendingVelocity.projectedTotal > spendingVelocity.lastMonthTotal ? 'text-rose-400' : 'text-emerald-400'}`}>
-                {formatCurrency(spendingVelocity.projectedTotal)}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-slate-500">Status</p>
-              <p className={`text-sm font-medium ${isOnPace ? 'text-emerald-400' : 'text-amber-400'}`}>
-                {isOnPace ? 'On pace' : 'Over pace'}
-              </p>
-            </div>
-          </div>
-        </div>
-      </Card>
+      {/* ── Yearly Trend Chart ────────────────────────────────────── */}
+      <SpendingTrend />
 
       {/* ── Top Categories & Top Merchants (side by side on lg) ────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
         {/* Top Categories */}
         <Card padding="sm">
-          <CardHeader title="Top Categories" subtitle="Last 6 months by spend" />
+          <CardHeader title="Top Categories" subtitle={`Spending in ${currentDate.year}`} />
           {topCategories.length > 0 ? (
             <div className="space-y-3">
               {topCategories.map(cat => {
@@ -297,7 +221,7 @@ export const Insights = () => {
 
         {/* Top Merchants */}
         <Card padding="sm">
-          <CardHeader title="Top Merchants" subtitle="Last 6 months by spend" />
+          <CardHeader title="Top Merchants" subtitle={`Spending in ${currentDate.year}`} />
           {topMerchants.length > 0 ? (
             <div className="space-y-3">
               {topMerchants.map((merchant, index) => {
@@ -340,48 +264,6 @@ export const Insights = () => {
           )}
         </Card>
       </div>
-
-      {/* ── Daily Spending ──────────────────────────────────────────── */}
-      <Card padding="sm">
-        <CardHeader
-          title="Daily Spending"
-          subtitle={`${MONTHS[currentMonth.month - 1]} ${currentMonth.year} · Click a bar to view transactions`}
-        />
-        <div className="h-48 md:h-56 -mx-2 md:mx-0">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart
-              data={dailySpending}
-              style={{ cursor: 'pointer' }}
-              onClick={(state) => {
-                if (state?.activeLabel != null) {
-                  handleDayBarClick({ day: Number(state.activeLabel) });
-                }
-              }}
-            >
-              <XAxis
-                dataKey="day"
-                stroke="#64748b"
-                tick={{ fill: '#94a3b8', fontSize: 10 }}
-                interval="preserveStartEnd"
-              />
-              <YAxis
-                stroke="#64748b"
-                tick={{ fill: '#94a3b8', fontSize: 11 }}
-                tickFormatter={(v) => `$${v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v.toFixed(0)}`}
-                width={45}
-              />
-              <Tooltip
-                formatter={(value) => formatCurrency(value as number)}
-                labelFormatter={(label) => `Day ${label}`}
-                contentStyle={CHART_TOOLTIP_STYLE}
-                labelStyle={CHART_LABEL_STYLE}
-                itemStyle={CHART_ITEM_STYLE}
-              />
-              <Bar dataKey="amount" fill="#6366f1" radius={[3, 3, 0, 0]} name="Spent" cursor="pointer" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </Card>
 
       {/* ── Recurring Charges (collapsible) ─────────────────────────── */}
       <Card padding="none">

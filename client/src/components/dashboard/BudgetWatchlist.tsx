@@ -6,9 +6,13 @@ import { formatCurrency } from '../../utils/formatters';
 import { Link } from 'react-router-dom';
 import { ProgressBar } from '../ui/ProgressBar';
 
-export const BudgetWatchlist = () => {
-    const date = new Date();
-    const { data: budgetGoals, isLoading } = useBudgetGoals(date.getMonth() + 1, date.getFullYear());
+interface BudgetWatchlistProps {
+    month: number;
+    year: number;
+}
+
+export const BudgetWatchlist = ({ month, year }: BudgetWatchlistProps) => {
+    const { data: budgetGoals, isLoading } = useBudgetGoals(month, year);
 
     if (isLoading) {
         return (

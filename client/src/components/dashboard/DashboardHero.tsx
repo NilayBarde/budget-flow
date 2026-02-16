@@ -2,7 +2,7 @@
 import { Wallet, PiggyBank, Target } from 'lucide-react';
 import { Card, Spinner } from '../ui';
 import { formatCurrency } from '../../utils/formatters';
-import { useInvestmentSummary, useMonthlyStats, useBudgetGoals, useAppSettings } from '../../hooks';
+import { useBudgetGoals, useAppSettings, useFinancialHealth } from '../../hooks';
 
 interface StatCardProps {
     label: string;
@@ -39,14 +39,21 @@ const StatCard = ({
     </div>
 );
 
-export const DashboardHero = () => {
-    const date = new Date();
-    const { data: investmentSummary, isLoading: investmentsLoading } = useInvestmentSummary();
-    const { data: monthlyStats, isLoading: statsLoading } = useMonthlyStats(date.getMonth() + 1, date.getFullYear());
-    const { data: budgetGoals, isLoading: budgetLoading } = useBudgetGoals(date.getMonth() + 1, date.getFullYear());
+
+export const DashboardHero = ({ month, year }: { month: number; year: number }) => {
+    // Use centralized hook for financial data
+    const {
+        netPosition,
+        totalInvested,
+        netWorth,
+        totalSpent,
+        isLoading: healthLoading
+    } = useFinancialHealth(month, year);
+
+    const { data: budgetGoals, isLoading: budgetLoading } = useBudgetGoals(month, year);
     const { data: appSettings } = useAppSettings();
 
-    const isLoading = investmentsLoading || statsLoading || budgetLoading;
+    const isLoading = healthLoading || budgetLoading;
 
     if (isLoading) {
         return (
@@ -56,21 +63,16 @@ export const DashboardHero = () => {
         );
     }
 
-    const netWorth = investmentSummary?.netWorth ?? 0;
-
     // Budget Calculations
     const manualBudgetLimit = appSettings?.monthly_budget_limit ? parseFloat(appSettings.monthly_budget_limit) : 0;
     const totalBudgeted = manualBudgetLimit > 0
         ? manualBudgetLimit
         : (budgetGoals?.reduce((sum, goal) => sum + goal.limit_amount, 0) || 0);
 
-    const totalSpent = monthlyStats?.total_spent || 0;
     const remainingBudget = Math.max(0, totalBudgeted - totalSpent);
     const budgetHealth = totalBudgeted > 0 ? (totalSpent / totalBudgeted) * 100 : 0;
 
-    // Savings
-    const income = monthlyStats?.total_income || 0;
-    const savings = income - totalSpent;
+
 
     return (
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -124,14 +126,23 @@ export const DashboardHero = () => {
                     className="bg-indigo-950/20 border-indigo-900/50"
                     iconClassName="text-indigo-400"
                 />
-                <StatCard
-                    label="Estimated Savings"
-                    value={savings}
-                    icon={PiggyBank}
-                    subtext={savings > 0 ? "You're saving nicely!" : "Spending exceeds income"}
-                    className="bg-midnight-800/50"
-                    iconClassName={savings >= 0 ? "text-emerald-400" : "text-rose-400"}
-                />
+
+                <div className="grid grid-cols-2 gap-4">
+                    <StatCard
+                        label="Est. Cash Flow"
+                        value={netPosition}
+                        icon={PiggyBank}
+                        className="bg-midnight-800/50"
+                        iconClassName={netPosition >= 0 ? "text-emerald-400" : "text-rose-400"}
+                    />
+                    <StatCard
+                        label="Investments"
+                        value={totalInvested}
+                        icon={Target} // Using Target icon for investments
+                        className="bg-midnight-800/50"
+                        iconClassName="text-blue-400"
+                    />
+                </div>
             </div>
         </section>
     );
