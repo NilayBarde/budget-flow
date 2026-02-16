@@ -40,7 +40,7 @@ export const YearOverview = () => {
           <h1 className="text-2xl md:text-3xl font-bold text-slate-100">Year Overview</h1>
           <p className="text-slate-400 mt-1">Your spending across the entire year</p>
         </div>
-        
+
         {/* Year Selector */}
         <div className="flex flex-1 md:flex-initial items-center gap-1 md:gap-2 bg-midnight-800 border border-midnight-600 rounded-xl p-1.5 md:p-2 md:w-fit">
           <button
@@ -101,14 +101,14 @@ export const YearOverview = () => {
         <div className="h-64 md:h-80 -mx-2 md:mx-0">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={monthlyData}>
-              <XAxis 
-                dataKey="name" 
-                stroke="#64748b" 
+              <XAxis
+                dataKey="name"
+                stroke="#64748b"
                 tick={{ fill: '#94a3b8', fontSize: 12 }}
                 interval={0}
               />
-              <YAxis 
-                stroke="#64748b" 
+              <YAxis
+                stroke="#64748b"
                 tick={{ fill: '#94a3b8', fontSize: 11 }}
                 tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
                 width={45}
@@ -142,27 +142,42 @@ export const YearOverview = () => {
         <Card padding="sm">
           <CardHeader title="Monthly Breakdown" subtitle="Click to view details" />
           <div className="grid grid-cols-2 md:grid-cols-3 gap-2 md:gap-3 max-h-64 md:max-h-80 overflow-y-auto">
-            {monthlyData.map((month, index) => (
-              <div 
-                key={month.name}
-                className="bg-midnight-900 rounded-lg p-2.5 md:p-3 hover:bg-midnight-700 active:bg-midnight-600 transition-colors cursor-pointer"
-              >
-                <p className="text-xs text-slate-400">{MONTHS[index]}</p>
-                <p className="text-base md:text-lg font-semibold text-slate-100 mt-0.5 md:mt-1">
-                  {formatCurrency(month.spent)}
-                </p>
-                {month.income > 0 && (
-                  <p className="text-xs text-emerald-400">
-                    +{formatCurrency(month.income)}
-                  </p>
-                )}
-                {month.invested > 0 && (
-                  <p className="text-xs text-violet-400">
-                    {formatCurrency(month.invested)} inv.
-                  </p>
-                )}
-              </div>
-            ))}
+            {monthlyData.map((month, index) => {
+              const net = month.income - month.spent;
+              const isPositive = net >= 0;
+
+              return (
+                <div
+                  key={month.name}
+                  className="bg-midnight-900 rounded-lg p-3 hover:bg-midnight-700 transition-colors flex flex-col h-full"
+                >
+                  <div className="mb-2">
+                    <p className="text-xs text-slate-400 mb-0.5">{MONTHS[index]}</p>
+                    <p className={`text-lg md:text-xl font-bold ${isPositive ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {isPositive ? '+' : ''}{formatCurrency(net)}
+                    </p>
+                    <p className="text-[10px] text-slate-500 font-medium">Net Income</p>
+                  </div>
+
+                  <div className="mt-auto space-y-1 pt-2 border-t border-midnight-800">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-slate-500">Inc:</span>
+                      <span className="text-emerald-400/90 font-medium">{formatCurrency(month.income)}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-slate-500">Exp:</span>
+                      <span className="text-rose-400/90 font-medium">{formatCurrency(month.spent)}</span>
+                    </div>
+                    {month.invested > 0 && (
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-slate-500">Inv:</span>
+                        <span className="text-violet-400/90 font-medium">{formatCurrency(month.invested)}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </Card>
       </div>

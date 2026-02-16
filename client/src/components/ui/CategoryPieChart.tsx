@@ -56,17 +56,17 @@ export const CategoryPieChart = ({
           </PieChart>
         </ResponsiveContainer>
       </div>
-      <div className="flex-1 space-y-2">
+      <div className="flex-1 space-y-2 min-w-0">
         {data.map((item) => (
-          <div key={item.category.id} className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
+          <div key={item.category.id} className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
               <div
                 className="w-3 h-3 rounded-full flex-shrink-0"
                 style={{ backgroundColor: item.category.color }}
               />
               <span className="text-sm text-slate-300 truncate">{item.category.name}</span>
             </div>
-            <span className="text-sm font-medium text-slate-100 ml-2">
+            <span className="text-sm font-medium text-slate-100 whitespace-nowrap">
               {formatCurrency(item.amount)}
             </span>
           </div>

@@ -29,6 +29,14 @@ export const Transactions = () => {
       const d = new Date(dateParam + 'T00:00:00');
       return { month: d.getMonth() + 1, year: d.getFullYear(), date: dateParam };
     }
+
+    // Check for explicit month/year params
+    const monthParam = searchParams.get('month');
+    const yearParam = searchParams.get('year');
+    if (monthParam && yearParam) {
+      return { month: parseInt(monthParam), year: parseInt(yearParam) };
+    }
+
     return { month, year };
   });
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
@@ -277,8 +285,8 @@ export const Transactions = () => {
             key={tab.id}
             onClick={() => setTypeFilter(tab.id)}
             className={`flex-shrink-0 px-3 md:px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${typeFilter === tab.id
-                ? 'bg-primary-600 text-white'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-midnight-700 active:bg-midnight-600'
+              ? 'bg-primary-600 text-white'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-midnight-700 active:bg-midnight-600'
               }`}
           >
             {tab.label}
