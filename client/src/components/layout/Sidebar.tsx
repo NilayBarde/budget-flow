@@ -1,9 +1,9 @@
 import { NavLink } from 'react-router-dom';
-import { 
-  LayoutDashboard, 
-  Receipt, 
-  PiggyBank, 
-  CreditCard, 
+import {
+  LayoutDashboard,
+  Receipt,
+  PiggyBank,
+  CreditCard,
   Calendar,
   BarChart3,
   Tags,
@@ -18,7 +18,8 @@ const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/transactions', icon: Receipt, label: 'Transactions' },
   { to: '/plan', icon: Target, label: 'Plan' },
-  { to: '/investments', icon: TrendingUp, label: 'Investments' },
+  { to: '/net-worth', icon: TrendingUp, label: 'Net Worth' },
+  { to: '/investments', icon: BarChart3, label: 'Investments' },
   { to: '/year', icon: Calendar, label: 'Year Overview' },
   { to: '/insights', icon: BarChart3, label: 'Insights' },
   { to: '/accounts', icon: CreditCard, label: 'Accounts' },
@@ -42,7 +43,7 @@ export const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
   return (
     <>
       {/* Mobile Backdrop */}
-      <div 
+      <div
         className={clsx(
           "fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden transition-opacity duration-300",
           isOpen ? "opacity-100" : "opacity-0 pointer-events-none"
@@ -52,7 +53,7 @@ export const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
       />
 
       {/* Sidebar Drawer */}
-      <aside 
+      <aside
         className={clsx(
           "fixed left-0 top-0 h-full w-72 bg-midnight-900 border-r border-midnight-700 flex flex-col z-50",
           "transition-transform duration-300 ease-out",
@@ -79,7 +80,7 @@ export const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
             <X className="h-5 w-5" />
           </button>
         </div>
-        
+
         {/* Navigation */}
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
           {navItems.map(({ to, icon: Icon, label }) => (
@@ -90,8 +91,8 @@ export const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
               className={({ isActive }) => clsx(
                 'flex items-center gap-3 px-4 py-3 md:py-2.5 rounded-lg font-medium transition-colors',
                 'active:bg-midnight-700', // Touch feedback
-                isActive 
-                  ? 'bg-accent-500/20 text-accent-400' 
+                isActive
+                  ? 'bg-accent-500/20 text-accent-400'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-midnight-800'
               )}
             >
@@ -100,7 +101,7 @@ export const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
             </NavLink>
           ))}
         </nav>
-        
+
         {/* Settings - bottom of sidebar */}
         <div className="p-4 border-t border-midnight-700">
           <NavLink
@@ -109,8 +110,8 @@ export const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
             className={({ isActive }) => clsx(
               'flex items-center gap-3 px-4 py-3 md:py-2.5 rounded-lg font-medium transition-colors',
               'active:bg-midnight-700',
-              isActive 
-                ? 'bg-accent-500/20 text-accent-400' 
+              isActive
+                ? 'bg-accent-500/20 text-accent-400'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-midnight-800'
             )}
           >
@@ -130,8 +131,8 @@ export const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
               className={({ isActive }) => clsx(
                 'flex flex-col items-center justify-center gap-1 px-3 py-2 rounded-lg min-w-[64px] transition-colors',
                 'active:bg-midnight-700',
-                isActive 
-                  ? 'text-accent-400' 
+                isActive
+                  ? 'text-accent-400'
                   : 'text-slate-500'
               )}
             >

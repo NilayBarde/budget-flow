@@ -1,5 +1,6 @@
 
 import { useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Card, Spinner } from '../ui';
 import { useTransactions } from '../../hooks';
@@ -18,6 +19,8 @@ interface DailySpendingProps {
 }
 
 export const DailySpending = ({ month, year }: DailySpendingProps) => {
+    const navigate = useNavigate();
+
     // Remove internal state
     const { data: transactions, isLoading } = useTransactions({
         month,
@@ -59,10 +62,10 @@ export const DailySpending = ({ month, year }: DailySpendingProps) => {
 
                 dailyMap.set(txDay, (dailyMap.get(txDay) || 0) + amount);
             } else if (txType === 'return') {
-                // Subtract returns
+                // Subtract returns (allow negative temporary storage to handle order independence)
                 const dateParts = t.date.split('-');
                 const txDay = parseInt(dateParts[2], 10);
-                dailyMap.set(txDay, Math.max(0, (dailyMap.get(txDay) || 0) - amount));
+                dailyMap.set(txDay, (dailyMap.get(txDay) || 0) - amount);
             }
         });
 
@@ -70,7 +73,7 @@ export const DailySpending = ({ month, year }: DailySpendingProps) => {
             .sort((a, b) => a[0] - b[0])
             .map(([day, amount]) => ({
                 day,
-                amount
+                amount: Math.max(0, amount) // Clamp to 0 at the end
             }));
     }, [transactions, month, year]);
 
@@ -91,10 +94,24 @@ export const DailySpending = ({ month, year }: DailySpendingProps) => {
                 </p>
             </div>
             <div className="flex-1 w-full min-h-0 p-4">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" className="cursor-pointer">
                     <BarChart
                         data={chartData}
                         margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+                        onClick={(state: any) => {
+                            // Try to get day from activeLabel first (most reliable for categorical axis)
+                            let day = state?.activeLabel;
+
+                            // Fallback to activePayload if needed
+                            if (!day && state?.activePayload?.[0]?.payload) {
+                                day = state.activePayload[0].payload.day;
+                            }
+
+                            if (day) {
+                                const dateStr = `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+                                navigate(`/transactions?date=${dateStr}`);
+                            }
+                        }}
                     >
                         <XAxis
                             dataKey="day"

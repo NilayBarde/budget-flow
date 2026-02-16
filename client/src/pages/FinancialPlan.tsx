@@ -1,37 +1,29 @@
 import { useCallback, useMemo } from 'react';
-import { Plus, Target } from 'lucide-react';
-import { Button, Card, CardHeader, Spinner, EmptyState, ProgressBar, MonthSelector } from '../components/ui';
-import { AllocationBar, SavingsGoalCard, SavingsGoalModal, NetWorthGoalCard } from '../components/plan';
-import type { RecurringContribution } from '../components/plan';
+import { Plus } from 'lucide-react';
+import { Button, Card, CardHeader, Spinner, ProgressBar, MonthSelector } from '../components/ui';
+import { AllocationBar } from '../components/plan';
 import { BudgetGoalModal } from '../components/budget';
 import {
   useBudgetGoals,
   useRecurringTransactions,
-  useSavingsGoals,
-  useCreateSavingsGoal,
-  useUpdateSavingsGoal,
-  useDeleteSavingsGoal,
   useUpdateAppSetting,
   useAppSettings,
   useExpectedIncome,
-  useInvestmentSummary,
   useMonthNavigation,
   useModalState,
   useFinancialHealth,
 } from '../hooks';
-import type { SavingsGoal, BudgetGoal } from '../types';
+import type { BudgetGoal } from '../types';
 import { formatCurrency } from '../utils/formatters';
 import { MONTHS } from '../utils/constants';
 
 export const FinancialPlan = () => {
   const { currentDate, handlePrevMonth, handleNextMonth } = useMonthNavigation();
-  const goalModal = useModalState<SavingsGoal>();
   const budgetModal = useModalState<BudgetGoal>();
 
   // Data hooks
   const { data: budgetGoals, isLoading: budgetLoading } = useBudgetGoals(currentDate.month, currentDate.year);
   const { data: recurring } = useRecurringTransactions();
-  const { data: savingsGoals = [], isLoading: savingsLoading } = useSavingsGoals();
   const { data: appSettings } = useAppSettings();
   const updateSetting = useUpdateAppSetting();
 
@@ -41,8 +33,6 @@ export const FinancialPlan = () => {
     actualIncome,
     totalSpent,
     totalInvested,
-    estimatedSavings,
-    netWorth,
     isLoading: healthLoading,
     // We also need these specific details from the hook related to income
   } = useFinancialHealth(currentDate.month, currentDate.year);
@@ -58,71 +48,16 @@ export const FinancialPlan = () => {
   const { calculatedIncome, isManualOverride, monthsSampled } = useExpectedIncome();
 
   // Mutations
-  const createGoal = useCreateSavingsGoal();
-  const updateGoal = useUpdateSavingsGoal();
-  const deleteGoal = useDeleteSavingsGoal();
-
-  // Derived values
-  const currentNetWorth = netWorth;
-  const netWorthGoalAmount = appSettings?.net_worth_goal_amount
-    ? parseFloat(appSettings.net_worth_goal_amount)
-    : 0;
-  const netWorthGoalYear = appSettings?.net_worth_goal_year
-    ? parseInt(appSettings.net_worth_goal_year, 10)
-    : 0;
-  const netWorthContributions: RecurringContribution[] = useMemo(() => {
-    try {
-      return appSettings?.net_worth_contributions
-        ? JSON.parse(appSettings.net_worth_contributions)
-        : [];
-    } catch {
-      return [];
-    }
-  }, [appSettings?.net_worth_contributions]);
-  const estimatedReturnRate = appSettings?.net_worth_estimated_return
-    ? parseFloat(appSettings.net_worth_estimated_return)
-    : 0;
-  const cashReturnRate = appSettings?.net_worth_cash_return_rate
-    ? parseFloat(appSettings.net_worth_cash_return_rate)
-    : 0;
-
-  // Use totalInvested from our centralized hook instead of investmentSummary.investments.totalValue for consistency?
-  // Wait, totalInvestmentValue usually refers to Portfolio Value (Net Worth - Cash).
-  // The original code used investmentSummary?.investments.totalValue.
-  // Our hook exposes netWorth.
-  // If we want totalInvestmentValue, we might still need useInvestmentSummary OR assume totalInvested is monthly flow.
-  // Correct: totalInvested is MONTHLY FLOW. totalInvestmentValue is PORTFOLIO VALUE.
-  // So we still need useInvestmentSummary for portfolio value unless we add it to the hook.
-  // Let's add it to the hook? The hook returns netWorth. 
-  // Let's re-add useInvestmentSummary for the portfolio usage to be safe, or just use what we have.
-  // The hook returns netWorth. 
-  // Let's keep useInvestmentSummary for the detailed breakdown if needed, or better, update the hook later to include portfolio value.
-  // For now, I'll re-import useInvestmentSummary just for the portfolio value to avoid breaking it,
-  // OR calculated it from NetWorth - Cash if possible.
-  // Let's look at the hook again. It returns netWorth.
-  // Originally: const totalInvestmentValue = investmentSummary?.investments.totalValue ?? 0;
-
-  // I will re-add useInvestmentSummary here just for totalInvestmentValue to be safe.
-  const { data: investmentSummary } = useInvestmentSummary();
-  const totalInvestmentValue = investmentSummary?.investments.totalValue ?? 0;
 
   // Calculated values from financial hook
-  const calculatedSavingsRate = Math.max(estimatedSavings, 0);
   const calculatedMonthlyInvested = totalInvested;
 
-  const calculatedCashRetained = Math.max(calculatedSavingsRate - calculatedMonthlyInvested, 0);
-
   // Manual overrides for projection inputs
-  const manualCashSavings = appSettings?.net_worth_monthly_cash_savings
-    ? parseFloat(appSettings.net_worth_monthly_cash_savings)
-    : null;
   const manualInvestments = appSettings?.net_worth_monthly_investments
     ? parseFloat(appSettings.net_worth_monthly_investments)
     : null;
-  const isManualSavings = manualCashSavings !== null || manualInvestments !== null;
 
   // Effective values for projection (manual if set, calculated otherwise)
-  const effectiveCashSavings = manualCashSavings ?? calculatedCashRetained;
   const effectiveInvestments = manualInvestments ?? calculatedMonthlyInvested;
 
   // Generic setting save helper – avoids repeating updateSetting.mutate boilerplate
@@ -131,39 +66,7 @@ export const FinancialPlan = () => {
     [updateSetting],
   );
 
-  const handleSaveNetWorthGoal = useCallback(
-    (amount: number, year: number) => {
-      saveSetting('net_worth_goal_amount', amount.toString());
-      saveSetting('net_worth_goal_year', year.toString());
-    },
-    [saveSetting],
-  );
-
-  const handleSaveContributions = useCallback(
-    (contributions: RecurringContribution[]) => {
-      saveSetting('net_worth_contributions', JSON.stringify(contributions));
-    },
-    [saveSetting],
-  );
-
-  const handleSaveReturnRate = useCallback(
-    (rate: number) => saveSetting('net_worth_estimated_return', rate.toString()),
-    [saveSetting],
-  );
-
-  const handleSaveCashReturnRate = useCallback(
-    (rate: number) => saveSetting('net_worth_cash_return_rate', rate.toString()),
-    [saveSetting],
-  );
-
-  const handleSaveMonthlyInputs = useCallback(
-    (cashSavings: number | null, investments: number | null) => {
-      saveSetting('net_worth_monthly_cash_savings', cashSavings !== null ? cashSavings.toString() : '');
-      saveSetting('net_worth_monthly_investments', investments !== null ? investments.toString() : '');
-    },
-    [saveSetting],
-  );
-
+  // Derived values
   const handleOverrideChange = useCallback(
     (value: number) => saveSetting('expected_monthly_income', value.toString()),
     [saveSetting],
@@ -191,7 +94,8 @@ export const FinancialPlan = () => {
     : 0;
 
   const totalGoalContributions = useMemo(() => {
-    const definedGoals = savingsGoals.reduce((sum, g) => sum + g.monthly_contribution, 0);
+    // Savings goals removed, so base contributions is 0
+    const definedGoals = 0;
     if (monthlyBudgetLimit > 0) {
       // If a budget limit is set, the "implied savings" is Income - LIMIT.
       // However, Investments also count towards this "not spending" bucket.
@@ -201,28 +105,9 @@ export const FinancialPlan = () => {
       return Math.max(definedGoals, remainingCashSavingsNeeded);
     }
     return definedGoals;
-  }, [savingsGoals, monthlyBudgetLimit, expectedIncome, effectiveInvestments]);
+  }, [monthlyBudgetLimit, expectedIncome, effectiveInvestments]);
 
-  // Savings goal handlers
-  const handleSaveGoal = useCallback(
-    async (data: Omit<SavingsGoal, 'id' | 'created_at' | 'updated_at'>) => {
-      if (goalModal.item) {
-        await updateGoal.mutateAsync({ id: goalModal.item.id, data });
-      } else {
-        await createGoal.mutateAsync(data);
-      }
-    },
-    [goalModal.item, updateGoal, createGoal],
-  );
-
-  const handleDeleteGoal = useCallback(
-    async (id: string) => {
-      await deleteGoal.mutateAsync(id);
-    },
-    [deleteGoal],
-  );
-
-  const isLoading = healthLoading || savingsLoading;
+  const isLoading = healthLoading;
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -230,12 +115,8 @@ export const FinancialPlan = () => {
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-slate-100">Financial Plan</h1>
-          <p className="text-slate-400 mt-1">Your income allocation & savings goals</p>
+          <p className="text-slate-400 mt-1">Your income allocation & budget limits</p>
         </div>
-        <Button onClick={goalModal.open} className="w-full md:w-auto">
-          <Plus className="h-4 w-4 mr-2" />
-          New Savings Goal
-        </Button>
       </div>
 
       {/* Month Selector */}
@@ -266,69 +147,7 @@ export const FinancialPlan = () => {
             budgetLimit={monthlyBudgetLimit}
           />
 
-          {/* Section 2: Net Worth Goal */}
-          <NetWorthGoalCard
-            currentNetWorth={currentNetWorth}
-            effectiveCashSavings={effectiveCashSavings}
-            effectiveInvestments={effectiveInvestments}
-            calculatedCashRetained={calculatedCashRetained}
-            calculatedMonthlyInvested={calculatedMonthlyInvested}
-            isManualSavings={isManualSavings}
-            manualCashSavings={manualCashSavings}
-            manualInvestments={manualInvestments}
-            totalInvestmentValue={totalInvestmentValue}
-            estimatedReturnRate={estimatedReturnRate}
-            cashReturnRate={cashReturnRate}
-            goalAmount={netWorthGoalAmount}
-            goalYear={netWorthGoalYear}
-            contributions={netWorthContributions}
-            onSaveGoal={handleSaveNetWorthGoal}
-            onSaveContributions={handleSaveContributions}
-            onSaveReturnRate={handleSaveReturnRate}
-            onSaveCashReturnRate={handleSaveCashReturnRate}
-            onSaveMonthlyInputs={handleSaveMonthlyInputs}
-          />
-
-          {/* Section 3: Savings Goals */}
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-lg md:text-xl font-semibold text-slate-100">Savings Goals</h2>
-              {savingsGoals.length > 0 && (
-                <Button variant="ghost" size="sm" onClick={goalModal.open}>
-                  <Plus className="h-4 w-4 mr-1" />
-                  Add
-                </Button>
-              )}
-            </div>
-
-            {savingsGoals.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
-                {savingsGoals.map((goal) => (
-                  <SavingsGoalCard
-                    key={goal.id}
-                    goal={goal}
-                    onEdit={goalModal.edit}
-                    onDelete={handleDeleteGoal}
-                  />
-                ))}
-              </div>
-            ) : (
-              <EmptyState
-                title="No savings goals yet"
-                description="Set long-term goals to track your progress toward big milestones."
-                icon={<Target className="h-8 w-8 text-slate-400" />}
-                action={
-                  <Button onClick={goalModal.open}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Create Your First Goal
-                  </Button>
-                }
-              />
-            )}
-          </div>
-
-
-          {/* Section 4: Budget Guardrails */}
+          {/* Section 2: Budget Guardrails */}
           <Card>
             <CardHeader
               title="Budget Guardrails"
@@ -411,14 +230,6 @@ export const FinancialPlan = () => {
       )}
 
       {/* Modals */}
-      <SavingsGoalModal
-        isOpen={goalModal.isOpen}
-        onClose={goalModal.close}
-        goal={goalModal.item}
-        onSave={handleSaveGoal}
-        onDelete={handleDeleteGoal}
-      />
-
       <BudgetGoalModal
         isOpen={budgetModal.isOpen}
         onClose={budgetModal.close}
