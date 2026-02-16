@@ -14,7 +14,6 @@ import { Card, CardHeader, Spinner, Badge, EmptyState } from '../components/ui';
 import { useInsights, useRecurringTransactions, useUpdateRecurringTransaction, useYearlyStats, useMonthNavigation } from '../hooks';
 import { SpendingTrend } from '../components/dashboard/SpendingTrend';
 import { formatCurrency } from '../utils/formatters';
-import { MONTHS } from '../utils/constants';
 
 export const Insights = () => {
   const { currentDate } = useMonthNavigation();
@@ -64,10 +63,24 @@ export const Insights = () => {
     return merchants.length > 0 ? merchants[0].totalSpent : 1;
   }, [insights?.topMerchants]);
 
+  // Use yearlyStats for categories to ensure it matches the selected year
+  const yearlyCategories = useMemo(() => {
+    if (!yearlyStats?.category_totals) return [];
+    return yearlyStats.category_totals
+      .map(c => ({
+        categoryId: c.category.id,
+        categoryName: c.category.name,
+        categoryColor: c.category.color,
+        totalSpent: c.amount,
+        transactionCount: 0 // Not available in yearly stats
+      }))
+      .sort((a, b) => b.totalSpent - a.totalSpent)
+      .slice(0, 5);
+  }, [yearlyStats]);
+
   const maxCategorySpend = useMemo(() => {
-    const categories = insights?.topCategories || [];
-    return categories.length > 0 ? categories[0].totalSpent : 1;
-  }, [insights?.topCategories]);
+    return yearlyCategories.length > 0 ? yearlyCategories[0].totalSpent : 1;
+  }, [yearlyCategories]);
 
   if (insightsLoading || yearlyLoading) {
     return (
@@ -87,7 +100,7 @@ export const Insights = () => {
     );
   }
 
-  const { topCategories, topMerchants } = insights;
+  const { topMerchants } = insights;
 
   const subscriptionMonthlyTotal = activeSubscriptions
     .filter(r => r.frequency === 'monthly')
@@ -176,9 +189,9 @@ export const Insights = () => {
         {/* Top Categories */}
         <Card padding="sm">
           <CardHeader title="Top Categories" subtitle={`Spending in ${currentDate.year}`} />
-          {topCategories.length > 0 ? (
+          {yearlyCategories.length > 0 ? (
             <div className="space-y-3">
-              {topCategories.map(cat => {
+              {yearlyCategories.map(cat => {
                 const barWidth = maxCategorySpend > 0
                   ? (cat.totalSpent / maxCategorySpend) * 100
                   : 0;
@@ -206,22 +219,20 @@ export const Insights = () => {
                           style={{ width: `${barWidth}%`, backgroundColor: cat.categoryColor }}
                         />
                       </div>
-                      <span className="text-[10px] text-slate-500 flex-shrink-0 w-14 text-right">
-                        {cat.transactionCount} txns
-                      </span>
+                      {/* Hide transaction count as it's not in yearly stats */}
                     </div>
                   </div>
                 );
               })}
             </div>
           ) : (
-            <p className="text-slate-400 text-center py-8">No category data yet</p>
+            <p className="text-slate-400 text-center py-8">No category data for {currentDate.year}</p>
           )}
         </Card>
 
         {/* Top Merchants */}
         <Card padding="sm">
-          <CardHeader title="Top Merchants" subtitle={`Spending in ${currentDate.year}`} />
+          <CardHeader title="Top Merchants" subtitle="Based on last 6 months" />
           {topMerchants.length > 0 ? (
             <div className="space-y-3">
               {topMerchants.map((merchant, index) => {
