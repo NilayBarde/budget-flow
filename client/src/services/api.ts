@@ -12,7 +12,6 @@ import type {
   TransactionFilters,
   PlaidLinkToken,
   TransactionSplit,
-  InvestmentHoldingsResponse,
   InvestmentSummary,
   InsightsData,
   SavingsGoal,
@@ -155,7 +154,9 @@ export const deleteAccount = (accountId: string) =>
   fetchApi<void>(`/accounts/${accountId}`, { method: 'DELETE' });
 
 export interface UpdateAccountData {
-  // Add other update fields as needed
+  account_name?: string;
+  account_type?: string;
+  current_balance?: number;
 }
 
 export const updateAccount = (accountId: string, data: UpdateAccountData) =>
@@ -512,78 +513,10 @@ export const deleteSavingsGoal = (id: string) =>
   fetchApi<void>(`/savings-goals/${id}`, { method: 'DELETE' });
 
 // Investments
-export const getInvestmentHoldings = () =>
-  fetchApi<InvestmentHoldingsResponse>('/investments/holdings');
+
 
 export const getInvestmentSummary = () =>
   fetchApi<InvestmentSummary>('/investments/summary');
-
-export const syncInvestmentHoldings = (accountId: string) =>
-  fetchApi<{ message: string; synced: number; securities: number }>(
-    `/investments/${accountId}/sync`,
-    { method: 'POST' }
-  );
-
-export const syncAllInvestmentHoldings = () =>
-  fetchApi<{ message: string; itemsProcessed: number; totalHoldings: number; totalSecurities: number }>(
-    '/investments/sync-all',
-    { method: 'POST' }
-  );
-
-export interface HoldingsPreviewItem {
-  symbol: string;
-  name: string;
-  quantity: number;
-  price: number;
-  value: number;
-  costBasis: number;
-}
-
-export interface HoldingsPreviewResponse {
-  holdings: HoldingsPreviewItem[];
-  count: number;
-  totalValue: number;
-  totalCostBasis: number;
-}
-
-export interface HoldingsImportResponse {
-  imported: number;
-  totalValue: number;
-}
-
-export const previewHoldingsImport = async (accountId: string, file: File): Promise<HoldingsPreviewResponse> => {
-  const formData = new FormData();
-  formData.append('file', file);
-
-  const response = await fetch(`${API_BASE_URL}/investments/${accountId}/preview-holdings`, {
-    method: 'POST',
-    body: formData,
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Preview failed' }));
-    throw new Error(error.message || 'Preview failed');
-  }
-
-  return response.json();
-};
-
-export const importHoldings = async (accountId: string, file: File): Promise<HoldingsImportResponse> => {
-  const formData = new FormData();
-  formData.append('file', file);
-
-  const response = await fetch(`${API_BASE_URL}/investments/${accountId}/import-holdings`, {
-    method: 'POST',
-    body: formData,
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Import failed' }));
-    throw new Error(error.message || 'Import failed');
-  }
-
-  return response.json();
-};
 
 export const toggleAccountInvestmentExclusion = (
   accountId: string,

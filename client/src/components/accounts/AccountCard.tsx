@@ -1,11 +1,11 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { usePlaidLink } from 'react-plaid-link';
-import { RefreshCw, Trash2, Upload, History, MoreVertical, KeyRound, Users, TrendingUp } from 'lucide-react';
+import { RefreshCw, Trash2, Upload, History, MoreVertical, KeyRound, Users, Eye, EyeOff, Pencil } from 'lucide-react';
 import { Card, Button } from '../ui';
 import type { Account } from '../../types';
 import { formatDate } from '../../utils/formatters';
-import { useSyncAccount, useDeleteAccount, useRefreshAccounts, useCreatePlaidUpdateLinkToken } from '../../hooks';
-import { syncAllInvestmentHoldings } from '../../services/api';
+import { useSyncAccount, useDeleteAccount, useRefreshAccounts, useCreatePlaidUpdateLinkToken, useToggleAccountInvestmentExclusion } from '../../hooks';
+
 
 // Wrapper component for Plaid Link update mode - only renders when we have a token
 interface PlaidLinkUpdateProps {
@@ -35,8 +35,8 @@ const PlaidLinkUpdate = ({ token, onSuccess, onExit, institutionName }: PlaidLin
 interface AccountCardProps {
   account: Account;
   onImportCsv?: (account: Account) => void;
-  onImportHoldings?: (account: Account) => void;
   onViewHistory?: (account: Account) => void;
+  onEdit?: (account: Account) => void;
 }
 
 // Check if account is a manual (non-Plaid) account
@@ -67,11 +67,12 @@ const getOAuthRedirectUri = () => {
   return;
 };
 
-export const AccountCard = ({ account, onImportCsv, onImportHoldings, onViewHistory }: AccountCardProps) => {
+export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: AccountCardProps) => {
   const syncAccount = useSyncAccount();
   const deleteAccount = useDeleteAccount();
   const refreshAccounts = useRefreshAccounts();
   const createUpdateLinkToken = useCreatePlaidUpdateLinkToken();
+  const toggleExclusion = useToggleAccountInvestmentExclusion();
   const [refreshResult, setRefreshResult] = useState<string | null>(null);
   const [updateLinkToken, setUpdateLinkToken] = useState<string | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
@@ -113,13 +114,14 @@ export const AccountCard = ({ account, onImportCsv, onImportHoldings, onViewHist
     onImportCsv?.(account);
   }, [onImportCsv, account]);
 
-  const handleImportHoldings = useCallback(() => {
-    onImportHoldings?.(account);
-  }, [onImportHoldings, account]);
 
   const handleViewHistory = useCallback(() => {
     onViewHistory?.(account);
   }, [onViewHistory, account]);
+
+  const handleEdit = useCallback(() => {
+    onEdit?.(account);
+  }, [onEdit, account]);
 
 
 
@@ -142,6 +144,14 @@ export const AccountCard = ({ account, onImportCsv, onImportHoldings, onViewHist
     }
   }, [refreshAccounts, account.id]);
 
+  const handleToggleExclusion = useCallback(() => {
+    toggleExclusion.mutate({
+      accountId: account.id,
+      excludeFromInvestments: !account.exclude_from_investments,
+      exclusionNote: !account.exclude_from_investments ? 'User hidden' : undefined,
+    });
+  }, [toggleExclusion, account.id, account.exclude_from_investments]);
+
   // Update connection flow - get link token and open Plaid Link
   const handleUpdateConnection = useCallback(async () => {
     try {
@@ -161,14 +171,7 @@ export const AccountCard = ({ account, onImportCsv, onImportHoldings, onViewHist
   const onUpdateSuccess = useCallback(async () => {
     console.log('Plaid Link update completed successfully for', account.institution_name);
     setUpdateLinkToken(null);
-    setRefreshResult('Connection updated! Syncing investment holdings...');
-    try {
-      // Sync investment holdings after successful update
-      await syncAllInvestmentHoldings();
-      setRefreshResult('Connection updated and holdings synced successfully!');
-    } catch {
-      setRefreshResult('Connection updated. Please sync investments manually.');
-    }
+    setRefreshResult('Connection updated successfully!');
     setTimeout(() => setRefreshResult(null), 5000);
   }, [account.institution_name]);
 
@@ -267,6 +270,11 @@ export const AccountCard = ({ account, onImportCsv, onImportHoldings, onViewHist
               </div>
               <p className="text-sm text-slate-400 truncate">
                 {account.account_name} • {account.account_type}
+                {account.exclude_from_investments && (
+                  <span className="ml-2 text-xs text-amber-500/80 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+                    Excluded
+                  </span>
+                )}
               </p>
               <p className="text-xs text-slate-500 mt-0.5">
                 Connected {formatDate(account.created_at)}
@@ -288,60 +296,60 @@ export const AccountCard = ({ account, onImportCsv, onImportHoldings, onViewHist
                   <Button
                     variant="secondary"
                     size="sm"
-                    onClick={handleImportHoldings}
+                    onClick={handleEdit}
                     className="flex-1"
                   >
-                    <TrendingUp className="h-4 w-4 mr-2" />
-                    Import Holdings
+                    <Pencil className="h-4 w-4 mr-2" />
+                    Update Balance
                   </Button>
                 ) : (
-                  <>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={handleImportCsv}
-                      className="flex-1"
-                    >
-                      <Upload className="h-4 w-4 mr-2" />
-                      Import CSV
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={handleViewHistory}
-                      className="text-slate-400 hover:text-slate-200"
-                      title="Import History"
-                    >
-                      <History className="h-4 w-4" />
-                    </Button>
-                  </>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleImportCsv}
+                    className="flex-1"
+                  >
+                    <Upload className="h-4 w-4 mr-2" />
+                    Import CSV
+                  </Button>
                 )}
               </>
             ) : (
-              <>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={handleSync}
-                  isLoading={syncAccount.isPending}
-                  className="flex-1"
-                >
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Sync
-                </Button>
-                {/* More actions dropdown */}
-                <div className="relative" ref={mobileMenuRef}>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={toggleMenu}
-                    className="text-slate-400 hover:text-slate-200"
-                    title="More options"
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleSync}
+                isLoading={syncAccount.isPending}
+                className="flex-1"
+              >
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Sync
+              </Button>
+            )}
+
+            {/* More actions dropdown (Unfied for both manual and Plaid) */}
+            <div className="relative" ref={mobileMenuRef}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={toggleMenu}
+                className="text-slate-400 hover:text-slate-200"
+                title="More options"
+              >
+                <MoreVertical className="h-4 w-4" />
+              </Button>
+              {showMenu && (
+                <div className="absolute right-0 top-full mt-1 w-52 bg-midnight-800 border border-midnight-600 rounded-lg shadow-xl z-50 py-1">
+                  <button
+                    onClick={() => handleMenuAction(handleEdit)}
+                    className="w-full px-3 py-2 text-left text-sm text-slate-300 hover:bg-midnight-700 flex items-center gap-2"
                   >
-                    <MoreVertical className="h-4 w-4" />
-                  </Button>
-                  {showMenu && (
-                    <div className="absolute right-0 top-full mt-1 w-52 bg-midnight-800 border border-midnight-600 rounded-lg shadow-xl z-50 py-1">
+                    <Pencil className="h-4 w-4 text-slate-400" />
+                    Edit Details
+                  </button>
+
+                  {!isManual && (
+                    <>
                       <button
                         onClick={() => handleMenuAction(handleOpenUpdateLink)}
                         disabled={createUpdateLinkToken.isPending}
@@ -359,32 +367,54 @@ export const AccountCard = ({ account, onImportCsv, onImportHoldings, onViewHist
                         <Users className="h-4 w-4 text-slate-400" />
                         Find Missing Accounts
                       </button>
+                    </>
+                  )}
 
+                  {isManual && !isInvestment && (
+                    <button
+                      onClick={() => handleMenuAction(handleViewHistory)}
+                      className="w-full px-3 py-2 text-left text-sm text-slate-300 hover:bg-midnight-700 flex items-center gap-2"
+                    >
+                      <History className="h-4 w-4 text-slate-400" />
+                      Import History
+                    </button>
+                  )}
+
+                  {isInvestment && (
+                    <>
                       <div className="border-t border-midnight-600 my-1" />
                       <button
-                        onClick={() => handleMenuAction(handleDelete)}
-                        disabled={deleteAccount.isPending}
-                        className="w-full px-3 py-2 text-left text-sm text-rose-400 hover:bg-midnight-700 flex items-center gap-2 disabled:opacity-50"
+                        onClick={() => handleMenuAction(handleToggleExclusion)}
+                        disabled={toggleExclusion.isPending}
+                        className="w-full px-3 py-2 text-left text-sm text-slate-300 hover:bg-midnight-700 flex items-center gap-2 disabled:opacity-50"
                       >
-                        <Trash2 className="h-4 w-4" />
-                        Disconnect Account
+                        {account.exclude_from_investments ? (
+                          <>
+                            <Eye className="h-4 w-4 text-emerald-400" />
+                            Include in Investments
+                          </>
+                        ) : (
+                          <>
+                            <EyeOff className="h-4 w-4 text-amber-400" />
+                            Exclude from Investments
+                          </>
+                        )}
                       </button>
-                    </div>
+                    </>
                   )}
+
+                  <div className="border-t border-midnight-600 my-1" />
+                  <button
+                    onClick={() => handleMenuAction(handleDelete)}
+                    disabled={deleteAccount.isPending}
+                    className="w-full px-3 py-2 text-left text-sm text-rose-400 hover:bg-midnight-700 flex items-center gap-2 disabled:opacity-50"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    {isManual ? 'Delete Account' : 'Disconnect Account'}
+                  </button>
                 </div>
-              </>
-            )}
-            {isManual && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleDelete}
-                isLoading={deleteAccount.isPending}
-                className="text-slate-400 hover:text-rose-400"
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            )}
+              )}
+            </div>
           </div>
         </div>
 
@@ -404,6 +434,11 @@ export const AccountCard = ({ account, onImportCsv, onImportHoldings, onViewHist
             </div>
             <p className="text-sm text-slate-400">
               {account.account_name} • {account.account_type}
+              {account.exclude_from_investments && (
+                <span className="ml-2 text-xs text-amber-500/80 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+                  Excluded from Investments
+                </span>
+              )}
             </p>
             <div className="flex items-center gap-3 mt-1">
               <p className="text-xs text-slate-500">
@@ -426,66 +461,57 @@ export const AccountCard = ({ account, onImportCsv, onImportHoldings, onViewHist
                   <Button
                     variant="secondary"
                     size="sm"
-                    onClick={handleImportHoldings}
+                    onClick={handleEdit}
                   >
-                    <TrendingUp className="h-4 w-4 mr-1" />
-                    Import Holdings
+                    <Pencil className="h-4 w-4 mr-1" />
+                    Update Balance
                   </Button>
                 ) : (
-                  <>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={handleImportCsv}
-                    >
-                      <Upload className="h-4 w-4 mr-1" />
-                      Import CSV
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={handleViewHistory}
-                      className="text-slate-400 hover:text-slate-200"
-                      title="Import History"
-                    >
-                      <History className="h-4 w-4" />
-                    </Button>
-                  </>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleImportCsv}
+                  >
+                    <Upload className="h-4 w-4 mr-1" />
+                    Import CSV
+                  </Button>
                 )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleDelete}
-                  isLoading={deleteAccount.isPending}
-                  className="text-slate-400 hover:text-rose-400"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
               </>
             ) : (
-              <>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={handleSync}
-                  isLoading={syncAccount.isPending}
-                  title="Sync transactions"
-                >
-                  <RefreshCw className="h-4 w-4" />
-                </Button>
-                {/* More actions dropdown */}
-                <div className="relative" ref={desktopMenuRef}>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={toggleMenu}
-                    className="text-slate-400 hover:text-slate-200"
-                    title="More options"
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleSync}
+                isLoading={syncAccount.isPending}
+                title="Sync transactions"
+              >
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+            )}
+
+            {/* More actions dropdown (Unified) */}
+            <div className="relative" ref={desktopMenuRef}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={toggleMenu}
+                className="text-slate-400 hover:text-slate-200"
+                title="More options"
+              >
+                <MoreVertical className="h-4 w-4" />
+              </Button>
+              {showMenu && (
+                <div className="absolute right-0 top-full mt-1 w-52 bg-midnight-800 border border-midnight-600 rounded-lg shadow-xl z-50 py-1">
+                  <button
+                    onClick={() => handleMenuAction(handleEdit)}
+                    className="w-full px-3 py-2 text-left text-sm text-slate-300 hover:bg-midnight-700 flex items-center gap-2"
                   >
-                    <MoreVertical className="h-4 w-4" />
-                  </Button>
-                  {showMenu && (
-                    <div className="absolute right-0 top-full mt-1 w-52 bg-midnight-800 border border-midnight-600 rounded-lg shadow-xl z-50 py-1">
+                    <Pencil className="h-4 w-4 text-slate-400" />
+                    Edit Details
+                  </button>
+
+                  {!isManual && (
+                    <>
                       <button
                         onClick={() => handleMenuAction(handleOpenUpdateLink)}
                         disabled={createUpdateLinkToken.isPending}
@@ -503,21 +529,54 @@ export const AccountCard = ({ account, onImportCsv, onImportHoldings, onViewHist
                         <Users className="h-4 w-4 text-slate-400" />
                         Find Missing Accounts
                       </button>
+                    </>
+                  )}
 
+                  {isManual && !isInvestment && (
+                    <button
+                      onClick={() => handleMenuAction(handleViewHistory)}
+                      className="w-full px-3 py-2 text-left text-sm text-slate-300 hover:bg-midnight-700 flex items-center gap-2"
+                    >
+                      <History className="h-4 w-4 text-slate-400" />
+                      Import History
+                    </button>
+                  )}
+
+                  {isInvestment && (
+                    <>
                       <div className="border-t border-midnight-600 my-1" />
                       <button
-                        onClick={() => handleMenuAction(handleDelete)}
-                        disabled={deleteAccount.isPending}
-                        className="w-full px-3 py-2 text-left text-sm text-rose-400 hover:bg-midnight-700 flex items-center gap-2 disabled:opacity-50"
+                        onClick={() => handleMenuAction(handleToggleExclusion)}
+                        disabled={toggleExclusion.isPending}
+                        className="w-full px-3 py-2 text-left text-sm text-slate-300 hover:bg-midnight-700 flex items-center gap-2 disabled:opacity-50"
                       >
-                        <Trash2 className="h-4 w-4" />
-                        Disconnect Account
+                        {account.exclude_from_investments ? (
+                          <>
+                            <Eye className="h-4 w-4 text-emerald-400" />
+                            Include in Investments
+                          </>
+                        ) : (
+                          <>
+                            <EyeOff className="h-4 w-4 text-amber-400" />
+                            Exclude from Investments
+                          </>
+                        )}
                       </button>
-                    </div>
+                    </>
                   )}
+
+                  <div className="border-t border-midnight-600 my-1" />
+                  <button
+                    onClick={() => handleMenuAction(handleDelete)}
+                    disabled={deleteAccount.isPending}
+                    className="w-full px-3 py-2 text-left text-sm text-rose-400 hover:bg-midnight-700 flex items-center gap-2 disabled:opacity-50"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    {isManual ? 'Delete Account' : 'Disconnect Account'}
+                  </button>
                 </div>
-              </>
-            )}
+              )}
+            </div>
           </div>
         </div>
 

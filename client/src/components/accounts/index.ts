@@ -3,6 +3,6 @@ export { PlaidLinkButton } from './PlaidLinkButton';
 export { CreateManualAccountModal } from './CreateManualAccountModal';
 export { CsvImportModal } from './CsvImportModal';
 export { ImportHistoryModal } from './ImportHistoryModal';
+export { EditAccountModal } from './EditAccountModal';
 
-export { HoldingsImportModal } from './HoldingsImportModal';
 

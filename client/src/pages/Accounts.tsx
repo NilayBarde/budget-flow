@@ -1,7 +1,7 @@
-import { useState, useCallback } from 'react';
-import { CreditCard, Plus } from 'lucide-react';
+import { useState, useCallback, useMemo } from 'react';
+import { CreditCard, Plus, Wallet, PiggyBank, Briefcase, Landmark } from 'lucide-react';
 import { Card, Spinner, EmptyState, Button } from '../components/ui';
-import { AccountCard, PlaidLinkButton, CreateManualAccountModal, CsvImportModal, ImportHistoryModal, HoldingsImportModal } from '../components/accounts';
+import { AccountCard, PlaidLinkButton, CreateManualAccountModal, CsvImportModal, ImportHistoryModal, EditAccountModal } from '../components/accounts';
 import { useAccounts } from '../hooks';
 import type { Account } from '../types';
 
@@ -10,8 +10,7 @@ export const Accounts = () => {
   const [showManualAccountModal, setShowManualAccountModal] = useState(false);
   const [csvImportAccount, setCsvImportAccount] = useState<Account | null>(null);
   const [historyAccount, setHistoryAccount] = useState<Account | null>(null);
-
-  const [holdingsImportAccount, setHoldingsImportAccount] = useState<Account | null>(null);
+  const [editAccount, setEditAccount] = useState<Account | null>(null);
 
   const handleOpenManualModal = useCallback(() => {
     setShowManualAccountModal(true);
@@ -37,15 +36,75 @@ export const Accounts = () => {
     setHistoryAccount(null);
   }, []);
 
-
-
-  const handleImportHoldings = useCallback((account: Account) => {
-    setHoldingsImportAccount(account);
+  const handleEditAccount = useCallback((account: Account) => {
+    setEditAccount(account);
   }, []);
 
-  const handleCloseHoldingsImport = useCallback(() => {
-    setHoldingsImportAccount(null);
+  const handleCloseEditAccount = useCallback(() => {
+    setEditAccount(null);
   }, []);
+
+  // Group accounts by type
+  const groupedAccounts = useMemo(() => {
+    if (!accounts) return {};
+
+    const groups: Record<string, Account[]> = {
+      cash: [],
+      credit: [],
+      investment: [],
+      loan: [],
+      other: [],
+    };
+
+    accounts.forEach(account => {
+      const type = account.account_type.toLowerCase();
+
+      if (['checking', 'savings', 'money market', 'paypal', 'prepaid'].some(t => type.includes(t))) {
+        groups.cash.push(account);
+      } else if (['credit card', 'credit'].some(t => type.includes(t))) {
+        groups.credit.push(account);
+      } else if (['investment', 'brokerage', '401k', 'ira', 'roth', 'hsa', 'pension'].some(t => type.includes(t))) {
+        groups.investment.push(account);
+      } else if (['loan', 'mortgage', 'student', 'auto'].some(t => type.includes(t))) {
+        groups.loan.push(account);
+      } else {
+        groups.other.push(account);
+      }
+    });
+
+    return groups;
+  }, [accounts]);
+
+  const hasAnyAccounts = accounts && accounts.length > 0;
+
+  const renderAccountGroup = (title: string, groupAccounts: Account[], icon: React.ReactNode) => {
+    if (!groupAccounts || groupAccounts.length === 0) return null;
+
+    return (
+      <div className="mb-8 last:mb-0">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="p-1.5 bg-midnight-800 rounded-lg text-slate-400">
+            {icon}
+          </div>
+          <h2 className="text-lg font-semibold text-slate-200">{title}</h2>
+          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-midnight-800 text-slate-500">
+            {groupAccounts.length}
+          </span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
+          {groupAccounts.map(account => (
+            <AccountCard
+              key={account.id}
+              account={account}
+              onImportCsv={handleImportCsv}
+              onViewHistory={handleViewHistory}
+              onEdit={handleEditAccount}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -77,12 +136,6 @@ export const Accounts = () => {
               like American Express that have Plaid connectivity issues. Manual accounts support
               CSV import from your bank statements.
             </p>
-            <div className="mt-3 pt-3 border-t border-midnight-700">
-              <p className="text-xs text-amber-400/80">
-                <strong>Tip:</strong> If Plaid connection fails for American Express, use
-                "Add Manual Account" and import transactions via CSV from your AMEX statement downloads.
-              </p>
-            </div>
           </div>
         </div>
       </Card>
@@ -90,18 +143,13 @@ export const Accounts = () => {
       {/* Accounts List */}
       {isLoading ? (
         <Spinner className="py-12" />
-      ) : accounts && accounts.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
-          {accounts.map(account => (
-            <AccountCard
-              key={account.id}
-              account={account}
-              onImportCsv={handleImportCsv}
-              onImportHoldings={handleImportHoldings}
-              onViewHistory={handleViewHistory}
-
-            />
-          ))}
+      ) : hasAnyAccounts ? (
+        <div className="space-y-2">
+          {renderAccountGroup('Cash & Banking', groupedAccounts.cash, <Wallet className="h-4 w-4" />)}
+          {renderAccountGroup('Credit Cards', groupedAccounts.credit, <CreditCard className="h-4 w-4" />)}
+          {renderAccountGroup('Investments', groupedAccounts.investment, <Briefcase className="h-4 w-4" />)}
+          {renderAccountGroup('Loans & Liability', groupedAccounts.loan, <Landmark className="h-4 w-4" />)}
+          {renderAccountGroup('Other Accounts', groupedAccounts.other, <PiggyBank className="h-4 w-4" />)}
         </div>
       ) : (
         <EmptyState
@@ -142,13 +190,11 @@ export const Accounts = () => {
         />
       )}
 
-
-
-      {holdingsImportAccount && (
-        <HoldingsImportModal
-          isOpen={!!holdingsImportAccount}
-          onClose={handleCloseHoldingsImport}
-          account={holdingsImportAccount}
+      {editAccount && (
+        <EditAccountModal
+          isOpen={!!editAccount}
+          onClose={handleCloseEditAccount}
+          account={editAccount}
         />
       )}
     </div>

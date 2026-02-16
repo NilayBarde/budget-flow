@@ -124,14 +124,53 @@ router.post('/:id/sync', async (req, res) => {
     // Record sync timestamp before making Plaid calls
     lastSyncByAccount.set(id, Date.now());
 
-    // Use new /transactions/sync method (recommended by Plaid)
-    console.log(`Syncing transactions for account ${id} using /transactions/sync...`);
-    console.log(`Current cursor: ${account.plaid_cursor ? 'exists' : 'none (initial sync)'}`);
+    // 1. Fetch Latest Balances (Concurrently if possible)
+    let latestBalance: number | null = account.current_balance;
 
-    const syncResult = await plaidService.syncTransactions(
-      account.plaid_access_token,
-      account.plaid_cursor
-    );
+    try {
+      if (['investment', 'brokerage', '401k', 'ira'].some(t => account.account_type.toLowerCase().includes(t))) {
+        console.log(`Fetching investment holdings/balance for ${id}...`);
+        const holdings = await plaidService.getInvestmentHoldings(account.plaid_access_token);
+        const plaidAccount = holdings.accounts.find(a => a.account_id === account.plaid_account_id);
+        if (plaidAccount) {
+          latestBalance = plaidAccount.balances.current;
+        }
+      } else {
+        console.log(`Fetching regular account balance for ${id}...`);
+        const plaidData = await plaidService.getAccounts(account.plaid_access_token);
+        const plaidAccount = plaidData.accounts.find(a => a.account_id === account.plaid_account_id);
+        if (plaidAccount) {
+          latestBalance = plaidAccount.balances.current;
+        }
+      }
+    } catch (balanceError) {
+      console.warn(`Failed to fetch latest balance for account ${id}:`, balanceError);
+      // Continue with transaction sync even if balance fetch fails
+    }
+
+    // 2. Sync Transactions
+    console.log(`Syncing transactions for account ${id} using /transactions/sync...`);
+    let syncResult;
+    try {
+      syncResult = await plaidService.syncTransactions(
+        account.plaid_access_token,
+        account.plaid_cursor
+      );
+    } catch (syncError) {
+      console.error(`Transaction sync failed for account ${id}:`, syncError);
+      // If balance was updated, we can still return success for the balance part
+      if (latestBalance !== account.current_balance) {
+        await supabase.from('accounts').update({ current_balance: latestBalance }).eq('id', id);
+        return res.json({
+          message: 'Balance updated, but transaction sync failed.',
+          balance_updated: true,
+          added: 0,
+          modified: 0,
+          removed: 0,
+        });
+      }
+      throw syncError;
+    }
 
     // Get categories for mapping
     const { data: categories } = await supabase
@@ -249,7 +288,8 @@ router.post('/:id/sync', async (req, res) => {
       .from('accounts')
       .update({
         plaid_cursor: syncResult.nextCursor,
-        historical_sync_complete: historicalComplete || account.historical_sync_complete
+        historical_sync_complete: historicalComplete || account.historical_sync_complete,
+        current_balance: latestBalance
       })
       .eq('id', id);
 
@@ -465,8 +505,14 @@ router.patch('/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
+    const { account_name, account_type, current_balance } = req.body;
+
     // Build update object with only allowed fields
     const updates: Record<string, unknown> = {};
+
+    if (account_name) updates.account_name = account_name;
+    if (account_type) updates.account_type = account_type;
+    if (current_balance !== undefined) updates.current_balance = current_balance;
 
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({ message: 'No valid fields to update' });
