@@ -38,9 +38,9 @@ const fetchApi = async <T>(
   // Handle empty responses (e.g., 201 Created with no body, 204 No Content)
   const contentType = response.headers.get('content-type');
   const contentLength = response.headers.get('content-length');
-  
+
   if (
-    response.status === 204 || 
+    response.status === 204 ||
     contentLength === '0' ||
     (contentType && !contentType.includes('application/json'))
   ) {
@@ -115,14 +115,14 @@ export const createManualAccount = (data: CreateManualAccountData) =>
     body: JSON.stringify(data),
   });
 
-export const createPlaidLinkToken = (redirectUri?: string) => 
-  fetchApi<PlaidLinkToken>('/plaid/create-link-token', { 
+export const createPlaidLinkToken = (redirectUri?: string) =>
+  fetchApi<PlaidLinkToken>('/plaid/create-link-token', {
     method: 'POST',
     body: JSON.stringify({ redirect_uri: redirectUri }),
   });
 
-export const createPlaidUpdateLinkToken = (accountId: string, redirectUri?: string) => 
-  fetchApi<PlaidLinkToken>('/plaid/create-update-link-token', { 
+export const createPlaidUpdateLinkToken = (accountId: string, redirectUri?: string) =>
+  fetchApi<PlaidLinkToken>('/plaid/create-update-link-token', {
     method: 'POST',
     body: JSON.stringify({ account_id: accountId, redirect_uri: redirectUri }),
   });
@@ -190,18 +190,18 @@ export const reclassifyTransactions = () =>
   );
 
 export const recategorizeAllTransactions = (options?: { skipManual?: boolean; force?: boolean }) =>
-  fetchApi<{ 
-    recategorized: number; 
-    skipped: number; 
+  fetchApi<{
+    recategorized: number;
+    skipped: number;
     markedForReview: number;
     categoryBreakdown: Record<string, number>;
   }>(
     '/accounts/recategorize-all',
-    { 
+    {
       method: 'POST',
-      body: JSON.stringify({ 
-        skip_manual: options?.skipManual ?? true, 
-        force: options?.force ?? false 
+      body: JSON.stringify({
+        skip_manual: options?.skipManual ?? true,
+        force: options?.force ?? false
       }),
     }
   );
@@ -228,6 +228,17 @@ export const getSimilarTransactionsCount = (merchantName: string, excludeId?: st
   const queryString = params.toString();
   return fetchApi<{ count: number }>(
     `/transactions/similar/${encodeURIComponent(merchantName)}/count${queryString ? `?${queryString}` : ''}`
+  );
+};
+
+export const getSimilarTransactions = (merchantName: string, excludeId?: string) => {
+  const params = new URLSearchParams();
+  if (excludeId) {
+    params.append('excludeId', excludeId);
+  }
+  const queryString = params.toString();
+  return fetchApi<Transaction[]>(
+    `/transactions/similar/${encodeURIComponent(merchantName)}${queryString ? `?${queryString}` : ''}`
   );
 };
 
@@ -420,8 +431,8 @@ export const previewCsvImport = async (accountId: string, file: File): Promise<C
 };
 
 export const importCsv = async (
-  accountId: string, 
-  file: File, 
+  accountId: string,
+  file: File,
   skipDuplicates = true
 ): Promise<CsvImportResponse> => {
   const formData = new FormData();
@@ -581,8 +592,8 @@ export const toggleAccountInvestmentExclusion = (
 ) =>
   fetchApi<Account>(`/investments/accounts/${accountId}/exclude`, {
     method: 'PATCH',
-    body: JSON.stringify({ 
-      exclude_from_investments: excludeFromInvestments, 
-      investment_exclusion_note: exclusionNote 
+    body: JSON.stringify({
+      exclude_from_investments: excludeFromInvestments,
+      investment_exclusion_note: exclusionNote
     }),
   });

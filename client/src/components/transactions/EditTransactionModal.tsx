@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Trash2, AlertCircle } from 'lucide-react';
+import { Trash2, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { Modal, Button, Input, Select } from '../ui';
 import type { Transaction, Category, Tag, TransactionType } from '../../types';
-import { useUpdateTransaction, useDeleteTransaction, useCategories, useTags, useAddTagToTransaction, useRemoveTagFromTransaction, useSimilarTransactionsCount } from '../../hooks';
+import { useUpdateTransaction, useDeleteTransaction, useCategories, useTags, useAddTagToTransaction, useRemoveTagFromTransaction, useSimilarTransactionsCount, useSimilarTransactions } from '../../hooks';
 import { Badge } from '../ui/Badge';
+import { formatCurrency, formatDate } from '../../utils/formatters';
 
 const TRANSACTION_TYPE_OPTIONS = [
   { value: 'expense', label: 'Expense' },
@@ -28,9 +29,10 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction }: EditTrans
   const [recurringAmount, setRecurringAmount] = useState('');
   const [selectedTags, setSelectedTags] = useState<Tag[]>([]);
   const [applyToAll, setApplyToAll] = useState(false);
-  
+  const [showSimilarTransactions, setShowSimilarTransactions] = useState(false);
+
   const [confirmDelete, setConfirmDelete] = useState(false);
-  
+
   const updateTransaction = useUpdateTransaction();
   const deleteTransactionMutation = useDeleteTransaction();
   const { data: categories = [] } = useCategories();
@@ -44,6 +46,13 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction }: EditTrans
     transaction?.id
   );
   const similarCount = similarCountData?.count || 0;
+
+  // Fetch actual list of similar transactions when expanded
+  const { data: similarTransactions, isLoading: isLoadingSimilar } = useSimilarTransactions(
+    transaction?.merchant_name,
+    transaction?.id,
+    showSimilarTransactions
+  );
 
   // Check if category or recurring status actually changed
   const categoryChanged = transaction && categoryId !== (transaction.category_id || '');
@@ -59,6 +68,7 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction }: EditTrans
       setRecurringAmount('');
       setSelectedTags(transaction.tags || []);
       setApplyToAll(false);
+      setShowSimilarTransactions(false);
       setConfirmDelete(false);
     }
   }, [isOpen, transaction]);
@@ -84,7 +94,7 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction }: EditTrans
     // Handle tag changes
     const currentTagIds = (transaction.tags || []).map(t => t.id);
     const newTagIds = selectedTags.map(t => t.id);
-    
+
     const tagsToAdd = newTagIds.filter(id => !currentTagIds.includes(id));
     const tagsToRemove = currentTagIds.filter(id => !newTagIds.includes(id));
 
@@ -183,7 +193,7 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction }: EditTrans
 
         {/* Show apply to all option when there are similar transactions and category or recurring changed */}
         {similarCount > 0 && (categoryChanged || recurringChanged) && (
-          <div className="rounded-lg border border-midnight-600 bg-midnight-800/50 p-3">
+          <div className="rounded-lg border border-midnight-600 bg-midnight-800/50 p-3 space-y-3">
             <label className="flex items-start gap-2 cursor-pointer">
               <input
                 type="checkbox"
@@ -199,6 +209,61 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction }: EditTrans
                 transaction{similarCount !== 1 ? 's' : ''}?
               </span>
             </label>
+
+            {/* Toggle list details */}
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowSimilarTransactions(!showSimilarTransactions)}
+                className="flex items-center gap-1 text-xs text-cyan-400 hover:text-cyan-300 ml-6"
+              >
+                {showSimilarTransactions ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                {showSimilarTransactions ? 'Hide details' : 'Show details'}
+              </button>
+
+              {showSimilarTransactions && (
+                <div className="mt-2 ml-6 bg-midnight-900/50 rounded-md border border-midnight-700 max-h-40 overflow-y-auto">
+                  {isLoadingSimilar ? (
+                    <div className="p-2 text-xs text-slate-500 text-center">Loading...</div>
+                  ) : (
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-midnight-800/50 sticky top-0">
+                        <tr>
+                          <th className="px-3 py-2 font-medium text-slate-400">Date</th>
+                          <th className="px-3 py-2 font-medium text-slate-400">Amount</th>
+                          <th className="px-3 py-2 font-medium text-slate-400">Category</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {similarTransactions?.map((tx) => (
+                          <tr key={tx.id} className="border-t border-midnight-800/50 hover:bg-midnight-800/30">
+                            <td className="px-3 py-1.5 text-slate-300">{formatDate(tx.date)}</td>
+                            <td className="px-3 py-1.5 text-slate-200 font-medium">
+                              {formatCurrency(Math.abs(tx.amount))}
+                            </td>
+                            <td className="px-3 py-1.5">
+                              {tx.category ? (
+                                <span
+                                  className="inline-block px-1.5 py-0.5 rounded text-[10px]"
+                                  style={{
+                                    backgroundColor: `${tx.category.color}20`,
+                                    color: tx.category.color
+                                  }}
+                                >
+                                  {tx.category.name}
+                                </span>
+                              ) : (
+                                <span className="text-slate-500 italic">Uncategorized</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -207,8 +272,8 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction }: EditTrans
           {selectedTags.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-2">
               {selectedTags.map(tag => (
-                <Badge 
-                  key={tag.id} 
+                <Badge
+                  key={tag.id}
                   color={tag.color}
                   onRemove={() => handleRemoveTag(tag.id)}
                 >

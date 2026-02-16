@@ -65,7 +65,7 @@ router.get('/', async (req, res) => {
     // Fetch tags for each transaction
     if (data && data.length > 0) {
       const transactionIds = data.map(t => t.id);
-      
+
       const { data: transactionTags } = await supabase
         .from('transaction_tags')
         .select('transaction_id, tag:tags(*)')
@@ -100,6 +100,32 @@ router.get('/', async (req, res) => {
   } catch (error) {
     console.error('Error fetching transactions:', error);
     res.status(500).json({ message: 'Failed to fetch transactions' });
+  }
+});
+
+// Get similar transactions list by merchant name
+router.get('/similar/:merchantName', async (req, res) => {
+  try {
+    const { merchantName } = req.params;
+    const { excludeId } = req.query;
+
+    let query = supabase
+      .from('transactions')
+      .select('id, date, amount, merchant_name, merchant_display_name, category:categories(name, color)')
+      .eq('merchant_name', merchantName)
+      .order('date', { ascending: false });
+
+    if (excludeId) {
+      query = query.neq('id', excludeId);
+    }
+
+    const { data, error } = await query;
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    console.error('Error fetching similar transactions:', error);
+    res.status(500).json({ message: 'Failed to fetch similar transactions' });
   }
 });
 
@@ -268,14 +294,14 @@ router.post('/', async (req, res) => {
     const { amount, date, merchant_name, category_id, notes, transaction_type } = req.body;
 
     const displayName = cleanMerchantName(merchant_name);
-    
+
     // Determine transaction type - default to expense for positive, income for negative
     const finalTransactionType = transaction_type || (amount < 0 ? 'income' : 'expense');
-    
+
     // Get category ID if not provided (for expenses, income, and investments)
     let finalCategoryId = category_id;
     let needsReview = false;
-    
+
     if (!finalCategoryId) {
       if (finalTransactionType === 'expense') {
         // Use pattern-based categorization for manual transactions (no Plaid data)
@@ -352,7 +378,7 @@ router.patch('/:id', async (req, res) => {
     if (transaction && (updates.category_id || updates.merchant_display_name)) {
       // Clear the needs_review flag since user is manually categorizing
       updates.needs_review = false;
-      
+
       // Check if a mapping already exists for this merchant
       const { data: existingMapping } = await supabase
         .from('merchant_mappings')
@@ -360,9 +386,9 @@ router.patch('/:id', async (req, res) => {
         .eq('original_name', transaction.merchant_name)
         .single();
 
-      const displayName = updates.merchant_display_name || 
-        existingMapping?.display_name || 
-        transaction.merchant_display_name || 
+      const displayName = updates.merchant_display_name ||
+        existingMapping?.display_name ||
+        transaction.merchant_display_name ||
         transaction.merchant_name;
 
       const categoryId = updates.category_id || existingMapping?.default_category_id || null;
@@ -519,7 +545,7 @@ router.delete('/:id', async (req, res) => {
 
     // Delete splits first
     await supabase.from('transaction_splits').delete().eq('parent_transaction_id', id);
-    
+
     // Delete tags
     await supabase.from('transaction_tags').delete().eq('transaction_id', id);
 

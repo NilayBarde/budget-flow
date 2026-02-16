@@ -25,9 +25,17 @@ export const useSimilarTransactionsCount = (merchantName: string | undefined, ex
   });
 };
 
+export const useSimilarTransactions = (merchantName: string | undefined, excludeId?: string, enabled = false) => {
+  return useQuery({
+    queryKey: ['similarTransactions', merchantName, excludeId],
+    queryFn: () => api.getSimilarTransactions(merchantName!, excludeId),
+    enabled: !!merchantName && enabled,
+  });
+};
+
 export const useUpdateTransaction = () => {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: ({ id, data, applyToAll = false }: { id: string; data: Partial<Transaction>; applyToAll?: boolean }) =>
       api.updateTransaction(id, data, applyToAll),
@@ -42,7 +50,7 @@ export const useUpdateTransaction = () => {
 
 export const useCreateManualTransaction = () => {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: (data: Partial<Transaction>) => api.createManualTransaction(data),
     onSuccess: () => {
@@ -54,7 +62,7 @@ export const useCreateManualTransaction = () => {
 
 export const useDeleteTransaction = () => {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: (id: string) => api.deleteTransaction(id),
     onSuccess: () => {
@@ -66,14 +74,14 @@ export const useDeleteTransaction = () => {
 
 export const useCreateSplit = () => {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
-    mutationFn: ({ 
-      transactionId, 
-      splits 
-    }: { 
-      transactionId: string; 
-      splits: Omit<TransactionSplit, 'id' | 'parent_transaction_id' | 'created_at'>[] 
+    mutationFn: ({
+      transactionId,
+      splits
+    }: {
+      transactionId: string;
+      splits: Omit<TransactionSplit, 'id' | 'parent_transaction_id' | 'created_at'>[]
     }) => api.createSplit(transactionId, splits),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
@@ -83,7 +91,7 @@ export const useCreateSplit = () => {
 
 export const useDeleteSplits = () => {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: (transactionId: string) => api.deleteSplits(transactionId),
     onSuccess: () => {
