@@ -149,10 +149,22 @@ export const FinancialPlan = () => {
       }, 0);
   }, [recurring]);
 
-  const totalGoalContributions = useMemo(
-    () => savingsGoals.reduce((sum, g) => sum + g.monthly_contribution, 0),
-    [savingsGoals],
-  );
+  const monthlyBudgetLimit = appSettings?.monthly_budget_limit
+    ? parseFloat(appSettings.monthly_budget_limit)
+    : 0;
+
+  const totalGoalContributions = useMemo(() => {
+    const definedGoals = savingsGoals.reduce((sum, g) => sum + g.monthly_contribution, 0);
+    if (monthlyBudgetLimit > 0) {
+      // If a budget limit is set, the "implied savings" is Income - LIMIT.
+      // However, Investments also count towards this "not spending" bucket.
+      // So we should only force extra Cash Savings if (Income - LIMIT) > Investments.
+      const totalImpliedSavings = Math.max(0, expectedIncome - monthlyBudgetLimit);
+      const remainingCashSavingsNeeded = Math.max(0, totalImpliedSavings - effectiveInvestments);
+      return Math.max(definedGoals, remainingCashSavingsNeeded);
+    }
+    return definedGoals;
+  }, [savingsGoals, monthlyBudgetLimit, expectedIncome, effectiveInvestments]);
 
   // Savings goal handlers
   const handleSaveGoal = useCallback(
@@ -206,6 +218,7 @@ export const FinancialPlan = () => {
             actualIncome={actualIncome}
             fixedCosts={fixedCosts}
             goalContributions={totalGoalContributions}
+            investments={effectiveInvestments}
             actualSpent={totalSpent}
             expectedIncome={expectedIncome}
             calculatedIncome={calculatedIncome}
@@ -213,6 +226,7 @@ export const FinancialPlan = () => {
             monthsSampled={monthsSampled}
             onOverrideChange={handleOverrideChange}
             onClearOverride={handleClearOverride}
+            budgetLimit={monthlyBudgetLimit}
           />
 
           {/* Section 2: Net Worth Goal */}
@@ -276,6 +290,7 @@ export const FinancialPlan = () => {
             )}
           </div>
 
+
           {/* Section 4: Budget Guardrails */}
           <Card>
             <CardHeader
@@ -313,7 +328,7 @@ export const FinancialPlan = () => {
             {budgetLoading ? (
               <Spinner className="py-6" />
             ) : budgetGoals && budgetGoals.length > 0 ? (
-              <div className="space-y-3">
+              <div className="space-y-3 px-6 pb-6">
                 {budgetGoals.map((goal) => {
                   const spent = goal.spent || 0;
                   const categoryName = goal.category?.name || 'Unknown';

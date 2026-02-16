@@ -15,7 +15,7 @@ export const Card = ({ children, className, padding = 'md', ...props }: CardProp
   };
 
   return (
-    <div 
+    <div
       className={clsx(
         'bg-midnight-800 border border-midnight-600 rounded-xl relative',
         paddingStyles[padding],
@@ -31,14 +31,18 @@ export const Card = ({ children, className, padding = 'md', ...props }: CardProp
 interface CardHeaderProps {
   title: string;
   subtitle?: string;
+  icon?: ReactNode;
   action?: ReactNode;
 }
 
-export const CardHeader = ({ title, subtitle, action }: CardHeaderProps) => (
+export const CardHeader = ({ title, subtitle, icon, action }: CardHeaderProps) => (
   <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between mb-4">
-    <div>
-      <h3 className="text-base md:text-lg font-semibold text-slate-100">{title}</h3>
-      {subtitle && <p className="text-xs md:text-sm text-slate-400">{subtitle}</p>}
+    <div className="flex items-center gap-3">
+      {icon && <div className="p-2 bg-midnight-700 rounded-lg">{icon}</div>}
+      <div>
+        <h3 className="text-base md:text-lg font-semibold text-slate-100">{title}</h3>
+        {subtitle && <p className="text-xs md:text-sm text-slate-400">{subtitle}</p>}
+      </div>
     </div>
     {action}
   </div>

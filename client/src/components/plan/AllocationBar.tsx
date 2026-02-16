@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { Pencil, Check, Calculator } from 'lucide-react';
+import { Pencil, Check, Calculator, AlertTriangle, TrendingUp, CheckCircle2 } from 'lucide-react';
 import { Card, CardHeader } from '../ui';
 import { formatCurrency } from '../../utils/formatters';
 
@@ -8,6 +8,7 @@ interface AllocationBarProps {
   actualIncome: number;
   fixedCosts: number;
   goalContributions: number;
+  investments: number;
   actualSpent: number;
   /** Final expected income (calculated or manual override) */
   expectedIncome: number;
@@ -19,18 +20,20 @@ interface AllocationBarProps {
   monthsSampled: number;
   onOverrideChange: (value: number) => void;
   onClearOverride: () => void;
+  budgetLimit?: number;
 }
 
 const FIXED_COSTS_COLOR = '#f97316'; // orange
 const GOALS_COLOR = '#6366f1'; // indigo
+const INVESTMENTS_COLOR = '#8b5cf6'; // violet
 const DISCRETIONARY_COLOR = '#22c55e'; // green
-const OVERSPENT_COLOR = '#ef4444'; // red
 const INCOME_COLOR = '#38bdf8'; // sky blue
 
 export const AllocationBar = ({
   actualIncome,
   fixedCosts,
   goalContributions,
+  investments,
   actualSpent,
   expectedIncome,
   calculatedIncome,
@@ -38,32 +41,46 @@ export const AllocationBar = ({
   monthsSampled,
   onOverrideChange,
   onClearOverride,
+  budgetLimit = 0,
 }: AllocationBarProps) => {
   const [isEditingIncome, setIsEditingIncome] = useState(false);
   const [incomeInput, setIncomeInput] = useState('');
 
   const planningIncome = expectedIncome;
 
-  const { discretionary, fixedPct, goalsPct, discretionaryPct, isOverAllocated } = useMemo(() => {
-    const remaining = planningIncome - fixedCosts - goalContributions;
+  const { discretionary, fixedPct, goalsPct, investmentsPct, discretionaryPct, isOverAllocated } = useMemo(() => {
+    const remaining = planningIncome - fixedCosts - goalContributions - investments;
     const disc = Math.max(remaining, 0);
     const isOver = remaining < 0;
 
     if (planningIncome <= 0) {
-      return { discretionary: 0, fixedPct: 0, goalsPct: 0, discretionaryPct: 0, isOverAllocated: false };
+      return { discretionary: 0, fixedPct: 0, goalsPct: 0, investmentsPct: 0, discretionaryPct: 0, isOverAllocated: false };
     }
+
+    const fixedPercent = Math.min((fixedCosts / planningIncome) * 100, 100);
+    const goalsPercent = Math.min(
+      (goalContributions / planningIncome) * 100,
+      100 - fixedPercent
+    );
+    const investmentsPercent = Math.min(
+      (investments / planningIncome) * 100,
+      100 - fixedPercent - goalsPercent
+    );
 
     return {
       discretionary: disc,
-      fixedPct: Math.min((fixedCosts / planningIncome) * 100, 100),
-      goalsPct: Math.min(
-        (goalContributions / planningIncome) * 100,
-        100 - Math.min((fixedCosts / planningIncome) * 100, 100),
-      ),
+      fixedPct: fixedPercent,
+      goalsPct: goalsPercent,
+      investmentsPct: investmentsPercent,
       discretionaryPct: Math.max((disc / planningIncome) * 100, 0),
       isOverAllocated: isOver,
     };
-  }, [planningIncome, fixedCosts, goalContributions]);
+  }, [planningIncome, fixedCosts, goalContributions, investments]);
+
+  // Warning threshold: use specific Budget Limit if set, otherwise use (Fixed + Discretionary) i.e. Total - Savings
+  const warningThreshold = budgetLimit > 0 ? budgetLimit : (fixedCosts + discretionary);
+  const isOverSpent = actualSpent > warningThreshold;
+  const remainingSafe = warningThreshold - actualSpent;
 
   const spentPct = planningIncome > 0 ? Math.min((actualSpent / planningIncome) * 100, 100) : 0;
 
@@ -91,6 +108,7 @@ export const AllocationBar = ({
   const segments = [
     { label: 'Fixed Costs', amount: fixedCosts, color: FIXED_COSTS_COLOR, pct: fixedPct },
     { label: 'Savings Goals', amount: goalContributions, color: GOALS_COLOR, pct: goalsPct },
+    { label: 'Investments', amount: investments, color: INVESTMENTS_COLOR, pct: investmentsPct },
     { label: 'Discretionary', amount: discretionary, color: DISCRETIONARY_COLOR, pct: discretionaryPct },
   ];
 
@@ -205,15 +223,60 @@ export const AllocationBar = ({
         </div>
       </div>
 
+      <div className="flex flex-col md:flex-row gap-6 mt-6">
+        {/* Key Metrics */}
+        <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="bg-midnight-800/50 p-4 rounded-xl border border-midnight-700">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-xs text-slate-400 mb-1">Safe to Spend</p>
+                <p className={`text-2xl font-bold ${isOverSpent ? 'text-rose-400' : 'text-emerald-400'}`}>
+                  {formatCurrency(remainingSafe)}
+                </p>
+              </div>
+              <div className={`p-2 rounded-lg bg-midnight-700 ${isOverSpent ? 'text-rose-400' : 'text-emerald-400'}`}>
+                {isOverSpent ? <AlertTriangle size={20} /> : <CheckCircle2 size={20} />}
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 mt-2">
+              {isOverSpent
+                ? `You've exceeded your limit by ${formatCurrency(Math.abs(remainingSafe))}`
+                : 'Remaining for food, fun, & shopping'}
+            </p>
+          </div>
+
+          <div className="bg-midnight-800/50 p-4 rounded-xl border border-midnight-700">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-xs text-slate-400 mb-1">Savings Rate</p>
+                <p className="text-2xl font-bold text-violet-400">
+                  {planningIncome > 0 ? ((investments + goalContributions) / planningIncome * 100).toFixed(1) : '0.0'}%
+                </p>
+              </div>
+              <div className="p-2 rounded-lg bg-midnight-700 text-violet-400">
+                <TrendingUp size={20} />
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 mt-2">
+              You're saving {formatCurrency(investments + goalContributions)} per month.
+            </p>
+          </div>
+        </div>
+      </div>
+
       {isOverAllocated && (
-        <p className="text-xs text-rose-400 mt-2">
-          Fixed costs + goal contributions exceed your income by{' '}
-          {formatCurrency(fixedCosts + goalContributions - planningIncome)}
-        </p>
+        <div className="mt-4 p-4 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center gap-3">
+          <AlertTriangle className="w-5 h-5 flex-shrink-0" />
+          <p className="text-sm font-medium">
+            Fixed costs + goal contributions + investments exceed your income by{' '}
+            {formatCurrency(fixedCosts + goalContributions + investments - planningIncome)}
+          </p>
+        </div>
       )}
 
-      {/* Stat row */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-5">
+      {/* Detailed Breakdown */}
+      <h4 className="text-sm font-medium text-slate-300 mt-6 mb-3">Detailed Breakdown</h4>
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <StatItem
           label="Expected Income"
           amount={planningIncome}
@@ -222,11 +285,7 @@ export const AllocationBar = ({
         />
         <StatItem label="Fixed Costs" amount={fixedCosts} color={FIXED_COSTS_COLOR} />
         <StatItem label="Goal Savings" amount={goalContributions} color={GOALS_COLOR} />
-        <StatItem
-          label="Discretionary"
-          amount={discretionary}
-          color={actualSpent > discretionary ? OVERSPENT_COLOR : DISCRETIONARY_COLOR}
-        />
+        <StatItem label="Investments" amount={investments} color={INVESTMENTS_COLOR} />
         <StatItem label="Spent So Far" amount={actualSpent} color="#94a3b8" />
       </div>
     </Card>
