@@ -30,10 +30,6 @@ export const Dashboard = () => {
       .slice(0, 6);
   }, [stats]);
 
-  if (statsLoading) {
-    return <Spinner className="py-12" />;
-  }
-
   return (
     <div className="space-y-6 md:space-y-8 pb-8">
       {/* Header with Month Selector - Stacked on mobile */}
@@ -82,10 +78,16 @@ export const Dashboard = () => {
         <div className="space-y-6">
           <Card padding="sm" className="min-h-[400px]">
             <CardHeader title="Spending by Category" subtitle={`${MONTHS[currentDate.month - 1]} ${currentDate.year}`} />
-            <CategoryPieChart
-              data={categoryData}
-              emptyMessage="No spending data for this month"
-            />
+            {statsLoading ? (
+              <div className="h-[300px] flex items-center justify-center">
+                <Spinner />
+              </div>
+            ) : (
+              <CategoryPieChart
+                data={categoryData}
+                emptyMessage="No spending data for this month"
+              />
+            )}
           </Card>
 
           <BudgetWatchlist />
