@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { CreditCard, Plus } from 'lucide-react';
 import { Card, Spinner, EmptyState, Button } from '../components/ui';
-import { AccountCard, PlaidLinkButton, CreateManualAccountModal, CsvImportModal, ImportHistoryModal, BalanceAlertModal, HoldingsImportModal } from '../components/accounts';
+import { AccountCard, PlaidLinkButton, CreateManualAccountModal, CsvImportModal, ImportHistoryModal, HoldingsImportModal } from '../components/accounts';
 import { useAccounts } from '../hooks';
 import type { Account } from '../types';
 
@@ -10,7 +10,7 @@ export const Accounts = () => {
   const [showManualAccountModal, setShowManualAccountModal] = useState(false);
   const [csvImportAccount, setCsvImportAccount] = useState<Account | null>(null);
   const [historyAccount, setHistoryAccount] = useState<Account | null>(null);
-  const [balanceAlertAccount, setBalanceAlertAccount] = useState<Account | null>(null);
+
   const [holdingsImportAccount, setHoldingsImportAccount] = useState<Account | null>(null);
 
   const handleOpenManualModal = useCallback(() => {
@@ -37,13 +37,7 @@ export const Accounts = () => {
     setHistoryAccount(null);
   }, []);
 
-  const handleSetBalanceAlert = useCallback((account: Account) => {
-    setBalanceAlertAccount(account);
-  }, []);
 
-  const handleCloseBalanceAlert = useCallback(() => {
-    setBalanceAlertAccount(null);
-  }, []);
 
   const handleImportHoldings = useCallback((account: Account) => {
     setHoldingsImportAccount(account);
@@ -79,13 +73,13 @@ export const Accounts = () => {
           <div className="flex-1">
             <h3 className="font-semibold text-slate-100">Connect Your Banks</h3>
             <p className="text-sm text-slate-400 mt-1">
-              Securely connect your accounts automatically, or add a manual account for banks 
-              like American Express that have Plaid connectivity issues. Manual accounts support 
+              Securely connect your accounts automatically, or add a manual account for banks
+              like American Express that have Plaid connectivity issues. Manual accounts support
               CSV import from your bank statements.
             </p>
             <div className="mt-3 pt-3 border-t border-midnight-700">
               <p className="text-xs text-amber-400/80">
-                <strong>Tip:</strong> If Plaid connection fails for American Express, use 
+                <strong>Tip:</strong> If Plaid connection fails for American Express, use
                 "Add Manual Account" and import transactions via CSV from your AMEX statement downloads.
               </p>
             </div>
@@ -99,13 +93,13 @@ export const Accounts = () => {
       ) : accounts && accounts.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
           {accounts.map(account => (
-            <AccountCard 
-              key={account.id} 
-              account={account} 
+            <AccountCard
+              key={account.id}
+              account={account}
               onImportCsv={handleImportCsv}
               onImportHoldings={handleImportHoldings}
               onViewHistory={handleViewHistory}
-              onSetBalanceAlert={handleSetBalanceAlert}
+
             />
           ))}
         </div>
@@ -127,11 +121,11 @@ export const Accounts = () => {
       )}
 
       {/* Modals */}
-      <CreateManualAccountModal 
-        isOpen={showManualAccountModal} 
-        onClose={handleCloseManualModal} 
+      <CreateManualAccountModal
+        isOpen={showManualAccountModal}
+        onClose={handleCloseManualModal}
       />
-      
+
       {csvImportAccount && (
         <CsvImportModal
           isOpen={!!csvImportAccount}
@@ -148,13 +142,7 @@ export const Accounts = () => {
         />
       )}
 
-      {balanceAlertAccount && (
-        <BalanceAlertModal
-          isOpen={!!balanceAlertAccount}
-          onClose={handleCloseBalanceAlert}
-          account={balanceAlertAccount}
-        />
-      )}
+
 
       {holdingsImportAccount && (
         <HoldingsImportModal

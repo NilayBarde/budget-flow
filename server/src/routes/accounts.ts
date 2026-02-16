@@ -2,7 +2,6 @@ import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
 import * as plaidService from '../services/plaid.js';
 import { categorizeWithPlaid, cleanMerchantName, PlaidPFC } from '../services/categorizer.js';
-import { checkAccountBalance, fetchAndUpdateBalance } from '../services/balance-alerts.js';
 import { detectTransactionType } from '../services/transaction-type.js';
 import { getCategoryIdForType } from '../services/category-lookup.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -58,8 +57,8 @@ router.post('/manual', async (req, res) => {
     const { institution_name, account_name, account_type, current_balance } = req.body;
 
     if (!institution_name || !account_name || !account_type) {
-      return res.status(400).json({ 
-        message: 'institution_name, account_name, and account_type are required' 
+      return res.status(400).json({
+        message: 'institution_name, account_name, and account_type are required'
       });
     }
 
@@ -107,8 +106,8 @@ router.post('/:id/sync', async (req, res) => {
     const lastSync = lastSyncByAccount.get(id);
     if (lastSync && (Date.now() - lastSync) < SYNC_COOLDOWN_MS) {
       const secondsLeft = Math.ceil((SYNC_COOLDOWN_MS - (Date.now() - lastSync)) / 1000);
-      return res.status(429).json({ 
-        message: `Sync was just performed. Please wait ${secondsLeft}s before syncing again.` 
+      return res.status(429).json({
+        message: `Sync was just performed. Please wait ${secondsLeft}s before syncing again.`
       });
     }
 
@@ -167,7 +166,7 @@ router.post('/:id/sync', async (req, res) => {
       const mapping = mappingMap.get(tx.merchant_name?.toLowerCase() || '');
       const displayName = mapping?.display_name || cleanMerchantName(tx.merchant_name || tx.name);
       const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
-      
+
       // Detect transaction type with Plaid PFC
       const transactionType = detectTransactionType(tx.amount, texts, plaidPFC);
 
@@ -175,7 +174,7 @@ router.post('/:id/sync', async (req, res) => {
       // Income, investment, and transfer types don't need categories - the type is sufficient
       let categoryId: string | null = null;
       let needsReview = false;
-      
+
       if (transactionType === 'expense' || transactionType === 'return') {
         // Returns use the same categorization as expenses (e.g., Amazon return → Shopping)
         if (mapping?.default_category_id) {
@@ -217,7 +216,7 @@ router.post('/:id/sync', async (req, res) => {
       const texts = [tx.merchant_name || '', tx.name || '', (tx as { original_description?: string }).original_description || ''];
       const displayName = cleanMerchantName(tx.merchant_name || tx.name);
       const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
-      
+
       const transactionType = detectTransactionType(tx.amount, texts, plaidPFC);
 
       await supabase
@@ -248,7 +247,7 @@ router.post('/:id/sync', async (req, res) => {
     const historicalComplete = syncResult.transactionsUpdateStatus === 'HISTORICAL_UPDATE_COMPLETE';
     await supabase
       .from('accounts')
-      .update({ 
+      .update({
         plaid_cursor: syncResult.nextCursor,
         historical_sync_complete: historicalComplete || account.historical_sync_complete
       })
@@ -257,25 +256,13 @@ router.post('/:id/sync', async (req, res) => {
     console.log(`Sync complete: +${addedCount} added, ~${modifiedCount} modified, -${removedCount} removed`);
     console.log(`Historical sync status: ${syncResult.transactionsUpdateStatus || 'unknown'}`);
 
-    // Check balance and send alert if threshold exceeded
-    console.log('Starting balance check...');
-    let balanceAlertSent = false;
-    try {
-      balanceAlertSent = await checkAccountBalance(id);
-      console.log(`Balance check complete, alert sent: ${balanceAlertSent}`);
-    } catch (balanceError) {
-      console.error('Error checking balance after sync:', balanceError);
-      // Don't fail the sync request if balance check fails
-    }
-
-    res.json({ 
-      added: addedCount, 
-      modified: modifiedCount, 
+    res.json({
+      added: addedCount,
+      modified: modifiedCount,
       removed: removedCount,
       cursor_updated: true,
       transactions_update_status: syncResult.transactionsUpdateStatus,
       historical_complete: historicalComplete || account.historical_sync_complete,
-      balance_alert_sent: balanceAlertSent
     });
   } catch (error) {
     console.error('Error syncing account:', error);
@@ -371,7 +358,7 @@ router.post('/:id/refresh-accounts', async (req, res) => {
 
     // Fetch all accounts from Plaid
     const plaidData = await plaidService.getAccounts(existingAccount.plaid_access_token);
-    
+
     if (!plaidData.accounts || plaidData.accounts.length === 0) {
       return res.status(400).json({ message: 'No accounts found in Plaid' });
     }
@@ -403,7 +390,7 @@ router.post('/:id/refresh-accounts', async (req, res) => {
 
     for (const plaidAccount of plaidData.accounts) {
       const alreadyExists = existingPlaidAccountIds.has(plaidAccount.account_id) ||
-                           existingNames.has(plaidAccount.name);
+        existingNames.has(plaidAccount.name);
 
       if (alreadyExists) {
         // Update existing account with plaid_account_id and balance if missing
@@ -417,7 +404,7 @@ router.post('/:id/refresh-accounts', async (req, res) => {
         if (existing && !existing.plaid_account_id) {
           await supabase
             .from('accounts')
-            .update({ 
+            .update({
               plaid_account_id: plaidAccount.account_id,
               current_balance: plaidAccount.balances?.current ?? null,
               account_type: plaidAccount.subtype || plaidAccount.type || existing.plaid_account_id,
@@ -453,9 +440,9 @@ router.post('/:id/refresh-accounts', async (req, res) => {
       }
 
       console.log(`Created new account: ${existingAccount.institution_name} - ${plaidAccount.name} (${plaidAccount.subtype || plaidAccount.type})`);
-      newAccounts.push({ 
-        id: accountId, 
-        name: plaidAccount.name, 
+      newAccounts.push({
+        id: accountId,
+        name: plaidAccount.name,
         type: plaidAccount.subtype || plaidAccount.type || 'unknown'
       });
     }
@@ -477,15 +464,9 @@ router.post('/:id/refresh-accounts', async (req, res) => {
 router.patch('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { balance_threshold } = req.body;
 
     // Build update object with only allowed fields
     const updates: Record<string, unknown> = {};
-    
-    // Allow setting balance_threshold to null (to disable) or a number
-    if (balance_threshold !== undefined) {
-      updates.balance_threshold = balance_threshold;
-    }
 
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({ message: 'No valid fields to update' });
@@ -503,7 +484,7 @@ router.patch('/:id', async (req, res) => {
       return res.status(404).json({ message: 'Account not found' });
     }
 
-    console.log(`Updated account ${id}: balance_threshold=${balance_threshold}`);
+    console.log(`Updated account ${id}`);
     res.json(data);
   } catch (error) {
     console.error('Error updating account:', error);
@@ -511,48 +492,14 @@ router.patch('/:id', async (req, res) => {
   }
 });
 
-// Refresh balance for an account from Plaid
-router.get('/:id/balance', async (req, res) => {
-  try {
-    const { id } = req.params;
 
-    const { data: account, error: accountError } = await supabase
-      .from('accounts')
-      .select('id, plaid_access_token, account_name')
-      .eq('id', id)
-      .single();
-
-    if (accountError || !account) {
-      return res.status(404).json({ message: 'Account not found' });
-    }
-
-    // Check if it's a manual account
-    if (account.plaid_access_token === 'manual') {
-      return res.status(400).json({ 
-        message: 'Balance refresh not available for manual accounts' 
-      });
-    }
-
-    // Fetch and update balance from Plaid
-    const balance = await fetchAndUpdateBalance(id);
-
-    if (balance === null) {
-      return res.status(500).json({ message: 'Failed to fetch balance from Plaid' });
-    }
-
-    res.json({ balance, account_name: account.account_name });
-  } catch (error) {
-    console.error('Error refreshing balance:', error);
-    res.status(500).json({ message: 'Failed to refresh balance' });
-  }
-});
 
 // Reclassify all existing transactions with transaction_type
 // This is a one-time migration endpoint
 router.post('/reclassify-transactions', async (req, res) => {
   try {
     console.log('Starting transaction reclassification...');
-    
+
     // Get all transactions
     const { data: transactions, error } = await supabase
       .from('transactions')
@@ -573,8 +520,8 @@ router.post('/reclassify-transactions', async (req, res) => {
         tx.amount,
         [tx.merchant_name || '', tx.original_description || ''],
       );
-      
-      
+
+
       // Update the transaction
       const { error: updateError } = await supabase
         .from('transactions')
@@ -593,8 +540,8 @@ router.post('/reclassify-transactions', async (req, res) => {
       else if (detectedType === 'investment') investmentCount++;
     }
 
-    res.json({ 
-      reclassified, 
+    res.json({
+      reclassified,
       breakdown: {
         income: incomeCount,
         expense: expenseCount,
@@ -613,7 +560,7 @@ router.post('/reclassify-transactions', async (req, res) => {
 router.post('/assign-type-categories', async (req, res) => {
   try {
     console.log('Assigning categories to income/investment transactions...');
-    
+
     const typesToAssign = ['income', 'investment'] as const;
     const results: Record<string, number> = {};
     const categoriesFound: Record<string, boolean> = {};
@@ -650,18 +597,18 @@ router.post('/assign-type-categories', async (req, res) => {
 router.post('/clear-transfer-categories', async (req, res) => {
   try {
     console.log('Clearing categories for transfer transactions...');
-    
+
     const { data: result, error } = await supabase
       .from('transactions')
       .update({ category_id: null })
       .eq('transaction_type', 'transfer')
       .not('category_id', 'is', null)
       .select('id');
-    
+
     if (error) throw error;
-    
+
     const clearedCount = result?.length || 0;
-    
+
     res.json({
       cleared: clearedCount,
       message: `Cleared categories for ${clearedCount} transfer transactions`
@@ -684,39 +631,39 @@ router.post('/clear-transfer-categories', async (req, res) => {
 router.post('/recategorize-all', async (req, res) => {
   try {
     const { skip_manual = true, force = false } = req.body;
-    
+
     console.log('Starting full recategorization...');
     console.log(`  skip_manual: ${skip_manual}, force: ${force}`);
-    
+
     // Get categories for mapping
     const { data: categories } = await supabase.from('categories').select('id, name');
     const categoryMap = new Map(categories?.map(c => [c.name, c.id]) || []);
     const categoryNameById = new Map(categories?.map(c => [c.id, c.name]) || []);
-    
+
     // Get merchant mappings (user's corrections)
     const { data: mappings } = await supabase.from('merchant_mappings').select('*');
     const mappingMap = new Map(mappings?.map(m => [m.original_name.toLowerCase(), m]) || []);
-    
+
     // Get all expense transactions
     let query = supabase
       .from('transactions')
       .select('id, merchant_name, original_description, plaid_category, category_id, transaction_type')
       .eq('transaction_type', 'expense');
-    
+
     // If not forcing, only get transactions that need review or have no category
     if (!force) {
       query = query.or('needs_review.eq.true,category_id.is.null');
     }
-    
+
     const { data: transactions, error } = await query;
-    
+
     if (error) throw error;
-    
+
     let recategorized = 0;
     let skipped = 0;
     let markedForReview = 0;
     const categoryBreakdown: Record<string, number> = {};
-    
+
     for (const tx of transactions || []) {
       // Skip if merchant has a mapping (user correction) and skip_manual is true
       const mapping = mappingMap.get((tx.merchant_name || '').toLowerCase());
@@ -724,11 +671,11 @@ router.post('/recategorize-all', async (req, res) => {
         skipped++;
         continue;
       }
-      
+
       // Use merchant mapping if available
       let categoryId: string | null = null;
       let needsReview = false;
-      
+
       if (mapping?.default_category_id) {
         categoryId = mapping.default_category_id;
       } else {
@@ -739,35 +686,35 @@ router.post('/recategorize-all', async (req, res) => {
           tx.original_description,
           plaidPFC
         );
-        
+
         categoryId = categoryMap.get(result.categoryName) || null;
         needsReview = result.needsReview;
       }
-      
+
       // Update the transaction
       const { error: updateError } = await supabase
         .from('transactions')
-        .update({ 
+        .update({
           category_id: categoryId,
           needs_review: needsReview
         })
         .eq('id', tx.id);
-      
+
       if (updateError) {
         console.error(`Error updating transaction ${tx.id}:`, updateError);
         continue;
       }
-      
+
       recategorized++;
       if (needsReview) markedForReview++;
-      
+
       // Track category breakdown
       const categoryName = categoryId ? (categoryNameById.get(categoryId) || 'Unknown') : 'Uncategorized';
       categoryBreakdown[categoryName] = (categoryBreakdown[categoryName] || 0) + 1;
     }
-    
+
     console.log(`Recategorization complete: ${recategorized} transactions updated, ${skipped} skipped, ${markedForReview} marked for review`);
-    
+
     res.json({
       recategorized,
       skipped,

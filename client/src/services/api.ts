@@ -155,7 +155,7 @@ export const deleteAccount = (accountId: string) =>
   fetchApi<void>(`/accounts/${accountId}`, { method: 'DELETE' });
 
 export interface UpdateAccountData {
-  balance_threshold?: number | null;
+  // Add other update fields as needed
 }
 
 export const updateAccount = (accountId: string, data: UpdateAccountData) =>

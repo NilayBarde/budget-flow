@@ -12,8 +12,6 @@ export interface Account {
   plaid_cursor?: string | null;
   historical_sync_complete?: boolean;
   current_balance?: number | null;
-  balance_threshold?: number | null;
-  last_balance_alert_at?: string | null;
   exclude_from_investments?: boolean;
   investment_exclusion_note?: string | null;
   last_csv_import_at?: string | null;

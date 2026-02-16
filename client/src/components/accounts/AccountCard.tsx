@@ -1,9 +1,9 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { usePlaidLink } from 'react-plaid-link';
-import { RefreshCw, Trash2, Upload, History, Bell, BellOff, MoreVertical, KeyRound, Users, TrendingUp } from 'lucide-react';
+import { RefreshCw, Trash2, Upload, History, MoreVertical, KeyRound, Users, TrendingUp } from 'lucide-react';
 import { Card, Button } from '../ui';
 import type { Account } from '../../types';
-import { formatDate, formatCurrency } from '../../utils/formatters';
+import { formatDate } from '../../utils/formatters';
 import { useSyncAccount, useDeleteAccount, useRefreshAccounts, useCreatePlaidUpdateLinkToken } from '../../hooks';
 import { syncAllInvestmentHoldings } from '../../services/api';
 
@@ -37,11 +37,10 @@ interface AccountCardProps {
   onImportCsv?: (account: Account) => void;
   onImportHoldings?: (account: Account) => void;
   onViewHistory?: (account: Account) => void;
-  onSetBalanceAlert?: (account: Account) => void;
 }
 
 // Check if account is a manual (non-Plaid) account
-const isManualAccount = (account: Account): boolean => 
+const isManualAccount = (account: Account): boolean =>
   account.plaid_access_token === 'manual' || account.plaid_item_id.startsWith('manual-');
 
 // Check if account is a credit card type
@@ -68,7 +67,7 @@ const getOAuthRedirectUri = () => {
   return;
 };
 
-export const AccountCard = ({ account, onImportCsv, onImportHoldings, onViewHistory, onSetBalanceAlert }: AccountCardProps) => {
+export const AccountCard = ({ account, onImportCsv, onImportHoldings, onViewHistory }: AccountCardProps) => {
   const syncAccount = useSyncAccount();
   const deleteAccount = useDeleteAccount();
   const refreshAccounts = useRefreshAccounts();
@@ -83,9 +82,7 @@ export const AccountCard = ({ account, onImportCsv, onImportHoldings, onViewHist
   const isManual = isManualAccount(account);
   const isCreditCard = isCreditCardAccount(account.account_type);
   const isInvestment = isInvestmentAccount(account.account_type);
-  const hasBalance = account.current_balance !== null && account.current_balance !== undefined;
-  const hasThreshold = account.balance_threshold !== null && account.balance_threshold !== undefined;
-  const isOverThreshold = hasBalance && hasThreshold && account.current_balance! > account.balance_threshold!;
+
   const oAuthRedirectUri = useMemo(() => getOAuthRedirectUri(), []);
 
   // Close menu when clicking outside
@@ -124,9 +121,7 @@ export const AccountCard = ({ account, onImportCsv, onImportHoldings, onViewHist
     onViewHistory?.(account);
   }, [onViewHistory, account]);
 
-  const handleSetBalanceAlert = useCallback(() => {
-    onSetBalanceAlert?.(account);
-  }, [onSetBalanceAlert, account]);
+
 
   const handleRefreshAccounts = useCallback(async () => {
     try {
@@ -203,7 +198,7 @@ export const AccountCard = ({ account, onImportCsv, onImportHoldings, onViewHist
       'bilt': '#000000',
       'venmo': '#3D95CE',
     };
-    
+
     const normalizedName = name.toLowerCase();
     for (const [key, color] of Object.entries(colors)) {
       if (normalizedName.includes(key)) return color;
@@ -216,26 +211,10 @@ export const AccountCard = ({ account, onImportCsv, onImportHoldings, onViewHist
   // Balance display component
   const BalanceDisplay = () => {
     if (isManual || !isCreditCard) return null;
-    
+
     return (
       <div className="flex items-center gap-2">
-        {hasBalance && (
-          <span className={`text-sm font-medium ${isOverThreshold ? 'text-amber-400' : 'text-slate-300'}`}>
-            {formatCurrency(account.current_balance!)}
-          </span>
-        )}
-        {hasThreshold && (
-          <span 
-            className={`flex items-center gap-1 text-xs px-1.5 py-0.5 rounded ${
-              isOverThreshold 
-                ? 'bg-amber-500/20 text-amber-400' 
-                : 'bg-midnight-700 text-slate-400'
-            }`}
-            title={`Alert threshold: ${formatCurrency(account.balance_threshold!)}`}
-          >
-            <Bell className="h-3 w-3" />
-          </span>
-        )}
+
       </div>
     );
   };
@@ -262,229 +241,140 @@ export const AccountCard = ({ account, onImportCsv, onImportHoldings, onViewHist
           institutionName={account.institution_name}
         />
       )}
-      
-    <Card className="hover:border-midnight-500 transition-colors" padding="sm">
-      {/* Refresh accounts result message */}
-      {refreshResult && (
-        <div className="mb-3 p-2 bg-accent-500/10 border border-accent-500/30 rounded-lg text-sm text-accent-400">
-          {refreshResult}
-        </div>
-      )}
-      
-      {/* Mobile Layout */}
-      <div className="md:hidden">
-        <div className="flex items-start gap-3">
-          <div 
-            className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold flex-shrink-0"
-            style={{ backgroundColor: institutionColor }}
-          >
-            {account.institution_name.charAt(0).toUpperCase()}
-          </div>
-          
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="font-semibold text-slate-100 truncate">{account.institution_name}</h3>
-              <BalanceDisplay />
-            </div>
-            <p className="text-sm text-slate-400 truncate">
-              {account.account_name} • {account.account_type}
-            </p>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Connected {formatDate(account.created_at)}
-            </p>
-            {isManual && (
-              <p className={`text-xs mt-0.5 ${account.last_csv_import_at ? 'text-slate-500' : 'text-amber-400'}`}>
-                {account.last_csv_import_at 
-                  ? `Last imported: ${formatDate(account.last_csv_import_at)}`
-                  : 'No imports yet'}
-              </p>
-            )}
-          </div>
-        </div>
-        
-        <div className="flex gap-2 mt-3 pt-3 border-t border-midnight-700">
-          {isManual ? (
-            <>
-              {isInvestment ? (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={handleImportHoldings}
-                  className="flex-1"
-                >
-                  <TrendingUp className="h-4 w-4 mr-2" />
-                  Import Holdings
-                </Button>
-              ) : (
-                <>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={handleImportCsv}
-                    className="flex-1"
-                  >
-                    <Upload className="h-4 w-4 mr-2" />
-                    Import CSV
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleViewHistory}
-                    className="text-slate-400 hover:text-slate-200"
-                    title="Import History"
-                  >
-                    <History className="h-4 w-4" />
-                  </Button>
-                </>
-              )}
-            </>
-          ) : (
-            <>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={handleSync}
-                isLoading={syncAccount.isPending}
-                className="flex-1"
-              >
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Sync
-              </Button>
-              {/* More actions dropdown */}
-              <div className="relative" ref={mobileMenuRef}>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={toggleMenu}
-                  className="text-slate-400 hover:text-slate-200"
-                  title="More options"
-                >
-                  <MoreVertical className="h-4 w-4" />
-                </Button>
-                {showMenu && (
-                  <div className="absolute right-0 top-full mt-1 w-52 bg-midnight-800 border border-midnight-600 rounded-lg shadow-xl z-50 py-1">
-                    <button
-                      onClick={() => handleMenuAction(handleOpenUpdateLink)}
-                      disabled={createUpdateLinkToken.isPending}
-                      className="w-full px-3 py-2 text-left text-sm text-slate-300 hover:bg-midnight-700 flex items-center gap-2 disabled:opacity-50"
-                    >
-                      <KeyRound className="h-4 w-4 text-accent-400" />
-                      Update Connection
-                      <span className="text-xs text-slate-500 ml-auto">Investments</span>
-                    </button>
-                    <button
-                      onClick={() => handleMenuAction(handleRefreshAccounts)}
-                      disabled={refreshAccounts.isPending}
-                      className="w-full px-3 py-2 text-left text-sm text-slate-300 hover:bg-midnight-700 flex items-center gap-2 disabled:opacity-50"
-                    >
-                      <Users className="h-4 w-4 text-slate-400" />
-                      Find Missing Accounts
-                    </button>
-                    {isCreditCard && (
-                      <button
-                        onClick={() => handleMenuAction(handleSetBalanceAlert)}
-                        className="w-full px-3 py-2 text-left text-sm text-slate-300 hover:bg-midnight-700 flex items-center gap-2"
-                      >
-                        {hasThreshold ? (
-                          <Bell className="h-4 w-4 text-amber-400" />
-                        ) : (
-                          <BellOff className="h-4 w-4 text-slate-400" />
-                        )}
-                        {hasThreshold ? 'Edit Balance Alert' : 'Set Balance Alert'}
-                      </button>
-                    )}
-                    <div className="border-t border-midnight-600 my-1" />
-                    <button
-                      onClick={() => handleMenuAction(handleDelete)}
-                      disabled={deleteAccount.isPending}
-                      className="w-full px-3 py-2 text-left text-sm text-rose-400 hover:bg-midnight-700 flex items-center gap-2 disabled:opacity-50"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      Disconnect Account
-                    </button>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-          {isManual && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleDelete}
-              isLoading={deleteAccount.isPending}
-              className="text-slate-400 hover:text-rose-400"
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          )}
-        </div>
-      </div>
 
-      {/* Desktop Layout */}
-      <div className="hidden md:flex items-center gap-4">
-        <div 
-          className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold"
-          style={{ backgroundColor: institutionColor }}
-        >
-          {account.institution_name.charAt(0).toUpperCase()}
-        </div>
-        
-        <div className="flex-1">
-          <div className="flex items-center gap-3">
-            <h3 className="font-semibold text-slate-100">{account.institution_name}</h3>
-            <BalanceDisplay />
+      <Card className="hover:border-midnight-500 transition-colors" padding="sm">
+        {/* Refresh accounts result message */}
+        {refreshResult && (
+          <div className="mb-3 p-2 bg-accent-500/10 border border-accent-500/30 rounded-lg text-sm text-accent-400">
+            {refreshResult}
           </div>
-          <p className="text-sm text-slate-400">
-            {account.account_name} • {account.account_type}
-          </p>
-          <div className="flex items-center gap-3 mt-1">
-            <p className="text-xs text-slate-500">
-              Connected {formatDate(account.created_at)}
-            </p>
-            {isManual && (
-              <span className={`text-xs ${account.last_csv_import_at ? 'text-slate-500' : 'text-amber-400'}`}>
-                • {account.last_csv_import_at 
+        )}
+
+        {/* Mobile Layout */}
+        <div className="md:hidden">
+          <div className="flex items-start gap-3">
+            <div
+              className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold flex-shrink-0"
+              style={{ backgroundColor: institutionColor }}
+            >
+              {account.institution_name.charAt(0).toUpperCase()}
+            </div>
+
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="font-semibold text-slate-100 truncate">{account.institution_name}</h3>
+                <BalanceDisplay />
+              </div>
+              <p className="text-sm text-slate-400 truncate">
+                {account.account_name} • {account.account_type}
+              </p>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Connected {formatDate(account.created_at)}
+              </p>
+              {isManual && (
+                <p className={`text-xs mt-0.5 ${account.last_csv_import_at ? 'text-slate-500' : 'text-amber-400'}`}>
+                  {account.last_csv_import_at
                     ? `Last imported: ${formatDate(account.last_csv_import_at)}`
                     : 'No imports yet'}
-              </span>
-            )}
+                </p>
+              )}
+            </div>
           </div>
-        </div>
-        
-        <div className="flex gap-2">
-          {isManual ? (
-            <>
-              {isInvestment ? (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={handleImportHoldings}
-                >
-                  <TrendingUp className="h-4 w-4 mr-1" />
-                  Import Holdings
-                </Button>
-              ) : (
-                <>
+
+          <div className="flex gap-2 mt-3 pt-3 border-t border-midnight-700">
+            {isManual ? (
+              <>
+                {isInvestment ? (
                   <Button
                     variant="secondary"
                     size="sm"
-                    onClick={handleImportCsv}
+                    onClick={handleImportHoldings}
+                    className="flex-1"
                   >
-                    <Upload className="h-4 w-4 mr-1" />
-                    Import CSV
+                    <TrendingUp className="h-4 w-4 mr-2" />
+                    Import Holdings
                   </Button>
+                ) : (
+                  <>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={handleImportCsv}
+                      className="flex-1"
+                    >
+                      <Upload className="h-4 w-4 mr-2" />
+                      Import CSV
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleViewHistory}
+                      className="text-slate-400 hover:text-slate-200"
+                      title="Import History"
+                    >
+                      <History className="h-4 w-4" />
+                    </Button>
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleSync}
+                  isLoading={syncAccount.isPending}
+                  className="flex-1"
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Sync
+                </Button>
+                {/* More actions dropdown */}
+                <div className="relative" ref={mobileMenuRef}>
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={handleViewHistory}
+                    onClick={toggleMenu}
                     className="text-slate-400 hover:text-slate-200"
-                    title="Import History"
+                    title="More options"
                   >
-                    <History className="h-4 w-4" />
+                    <MoreVertical className="h-4 w-4" />
                   </Button>
-                </>
-              )}
+                  {showMenu && (
+                    <div className="absolute right-0 top-full mt-1 w-52 bg-midnight-800 border border-midnight-600 rounded-lg shadow-xl z-50 py-1">
+                      <button
+                        onClick={() => handleMenuAction(handleOpenUpdateLink)}
+                        disabled={createUpdateLinkToken.isPending}
+                        className="w-full px-3 py-2 text-left text-sm text-slate-300 hover:bg-midnight-700 flex items-center gap-2 disabled:opacity-50"
+                      >
+                        <KeyRound className="h-4 w-4 text-accent-400" />
+                        Update Connection
+                        <span className="text-xs text-slate-500 ml-auto">Investments</span>
+                      </button>
+                      <button
+                        onClick={() => handleMenuAction(handleRefreshAccounts)}
+                        disabled={refreshAccounts.isPending}
+                        className="w-full px-3 py-2 text-left text-sm text-slate-300 hover:bg-midnight-700 flex items-center gap-2 disabled:opacity-50"
+                      >
+                        <Users className="h-4 w-4 text-slate-400" />
+                        Find Missing Accounts
+                      </button>
+
+                      <div className="border-t border-midnight-600 my-1" />
+                      <button
+                        onClick={() => handleMenuAction(handleDelete)}
+                        disabled={deleteAccount.isPending}
+                        className="w-full px-3 py-2 text-left text-sm text-rose-400 hover:bg-midnight-700 flex items-center gap-2 disabled:opacity-50"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Disconnect Account
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+            {isManual && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -494,85 +384,150 @@ export const AccountCard = ({ account, onImportCsv, onImportHoldings, onViewHist
               >
                 <Trash2 className="h-4 w-4" />
               </Button>
-            </>
-          ) : (
-            <>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={handleSync}
-                isLoading={syncAccount.isPending}
-                title="Sync transactions"
-              >
-                <RefreshCw className="h-4 w-4" />
-              </Button>
-              {/* More actions dropdown */}
-              <div className="relative" ref={desktopMenuRef}>
+            )}
+          </div>
+        </div>
+
+        {/* Desktop Layout */}
+        <div className="hidden md:flex items-center gap-4">
+          <div
+            className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold"
+            style={{ backgroundColor: institutionColor }}
+          >
+            {account.institution_name.charAt(0).toUpperCase()}
+          </div>
+
+          <div className="flex-1">
+            <div className="flex items-center gap-3">
+              <h3 className="font-semibold text-slate-100">{account.institution_name}</h3>
+              <BalanceDisplay />
+            </div>
+            <p className="text-sm text-slate-400">
+              {account.account_name} • {account.account_type}
+            </p>
+            <div className="flex items-center gap-3 mt-1">
+              <p className="text-xs text-slate-500">
+                Connected {formatDate(account.created_at)}
+              </p>
+              {isManual && (
+                <span className={`text-xs ${account.last_csv_import_at ? 'text-slate-500' : 'text-amber-400'}`}>
+                  • {account.last_csv_import_at
+                    ? `Last imported: ${formatDate(account.last_csv_import_at)}`
+                    : 'No imports yet'}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="flex gap-2">
+            {isManual ? (
+              <>
+                {isInvestment ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleImportHoldings}
+                  >
+                    <TrendingUp className="h-4 w-4 mr-1" />
+                    Import Holdings
+                  </Button>
+                ) : (
+                  <>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={handleImportCsv}
+                    >
+                      <Upload className="h-4 w-4 mr-1" />
+                      Import CSV
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleViewHistory}
+                      className="text-slate-400 hover:text-slate-200"
+                      title="Import History"
+                    >
+                      <History className="h-4 w-4" />
+                    </Button>
+                  </>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={toggleMenu}
-                  className="text-slate-400 hover:text-slate-200"
-                  title="More options"
+                  onClick={handleDelete}
+                  isLoading={deleteAccount.isPending}
+                  className="text-slate-400 hover:text-rose-400"
                 >
-                  <MoreVertical className="h-4 w-4" />
+                  <Trash2 className="h-4 w-4" />
                 </Button>
-                {showMenu && (
-                  <div className="absolute right-0 top-full mt-1 w-52 bg-midnight-800 border border-midnight-600 rounded-lg shadow-xl z-50 py-1">
-                    <button
-                      onClick={() => handleMenuAction(handleOpenUpdateLink)}
-                      disabled={createUpdateLinkToken.isPending}
-                      className="w-full px-3 py-2 text-left text-sm text-slate-300 hover:bg-midnight-700 flex items-center gap-2 disabled:opacity-50"
-                    >
-                      <KeyRound className="h-4 w-4 text-accent-400" />
-                      Update Connection
-                      <span className="text-xs text-slate-500 ml-auto">Investments</span>
-                    </button>
-                    <button
-                      onClick={() => handleMenuAction(handleRefreshAccounts)}
-                      disabled={refreshAccounts.isPending}
-                      className="w-full px-3 py-2 text-left text-sm text-slate-300 hover:bg-midnight-700 flex items-center gap-2 disabled:opacity-50"
-                    >
-                      <Users className="h-4 w-4 text-slate-400" />
-                      Find Missing Accounts
-                    </button>
-                    {isCreditCard && (
+              </>
+            ) : (
+              <>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleSync}
+                  isLoading={syncAccount.isPending}
+                  title="Sync transactions"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                </Button>
+                {/* More actions dropdown */}
+                <div className="relative" ref={desktopMenuRef}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={toggleMenu}
+                    className="text-slate-400 hover:text-slate-200"
+                    title="More options"
+                  >
+                    <MoreVertical className="h-4 w-4" />
+                  </Button>
+                  {showMenu && (
+                    <div className="absolute right-0 top-full mt-1 w-52 bg-midnight-800 border border-midnight-600 rounded-lg shadow-xl z-50 py-1">
                       <button
-                        onClick={() => handleMenuAction(handleSetBalanceAlert)}
-                        className="w-full px-3 py-2 text-left text-sm text-slate-300 hover:bg-midnight-700 flex items-center gap-2"
+                        onClick={() => handleMenuAction(handleOpenUpdateLink)}
+                        disabled={createUpdateLinkToken.isPending}
+                        className="w-full px-3 py-2 text-left text-sm text-slate-300 hover:bg-midnight-700 flex items-center gap-2 disabled:opacity-50"
                       >
-                        {hasThreshold ? (
-                          <Bell className="h-4 w-4 text-amber-400" />
-                        ) : (
-                          <BellOff className="h-4 w-4 text-slate-400" />
-                        )}
-                        {hasThreshold ? 'Edit Balance Alert' : 'Set Balance Alert'}
+                        <KeyRound className="h-4 w-4 text-accent-400" />
+                        Update Connection
+                        <span className="text-xs text-slate-500 ml-auto">Investments</span>
                       </button>
-                    )}
-                    <div className="border-t border-midnight-600 my-1" />
-                    <button
-                      onClick={() => handleMenuAction(handleDelete)}
-                      disabled={deleteAccount.isPending}
-                      className="w-full px-3 py-2 text-left text-sm text-rose-400 hover:bg-midnight-700 flex items-center gap-2 disabled:opacity-50"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      Disconnect Account
-                    </button>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-        </div>
-      </div>
+                      <button
+                        onClick={() => handleMenuAction(handleRefreshAccounts)}
+                        disabled={refreshAccounts.isPending}
+                        className="w-full px-3 py-2 text-left text-sm text-slate-300 hover:bg-midnight-700 flex items-center gap-2 disabled:opacity-50"
+                      >
+                        <Users className="h-4 w-4 text-slate-400" />
+                        Find Missing Accounts
+                      </button>
 
-      {/* Update error message */}
-      {updateError && (
-        <div className="mt-3 p-2 bg-rose-500/10 border border-rose-500/30 rounded-lg text-sm text-rose-400">
-          {updateError}
+                      <div className="border-t border-midnight-600 my-1" />
+                      <button
+                        onClick={() => handleMenuAction(handleDelete)}
+                        disabled={deleteAccount.isPending}
+                        className="w-full px-3 py-2 text-left text-sm text-rose-400 hover:bg-midnight-700 flex items-center gap-2 disabled:opacity-50"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Disconnect Account
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
         </div>
-      )}
-    </Card>
+
+        {/* Update error message */}
+        {updateError && (
+          <div className="mt-3 p-2 bg-rose-500/10 border border-rose-500/30 rounded-lg text-sm text-rose-400">
+            {updateError}
+          </div>
+        )}
+      </Card>
     </>
   );
 };

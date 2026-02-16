@@ -2,7 +2,6 @@ import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
 import * as plaidService from '../services/plaid.js';
 import { categorizeWithPlaid, cleanMerchantName, PlaidPFC } from '../services/categorizer.js';
-import { checkAccountBalance } from '../services/balance-alerts.js';
 import { v4 as uuidv4 } from 'uuid';
 
 import { detectTransactionType } from '../services/transaction-type.js';
@@ -54,7 +53,7 @@ const processSyncedTransactions = async (
     // Auto-assign category based on type with Plaid-first approach
     let categoryId: string | null = null;
     let needsReview = false;
-    
+
     if (transactionType === 'expense' || transactionType === 'return') {
       // Priority: merchant mapping > Plaid PFC > pattern matching
       // Returns use same categorization as expenses (e.g., Amazon return → Shopping)
@@ -132,7 +131,7 @@ const processSyncedTransactions = async (
 router.post('/plaid', async (req, res) => {
   try {
     const { webhook_type, webhook_code, item_id, initial_update_complete, historical_update_complete } = req.body;
-    
+
     console.log(`Plaid webhook received: ${webhook_type} - ${webhook_code}`);
     console.log('Webhook body:', JSON.stringify(req.body, null, 2));
 
@@ -209,15 +208,7 @@ router.post('/plaid', async (req, res) => {
 
           console.log(`Cursor updated for account ${account.id}`);
 
-          // Check balance and send alert if threshold exceeded
-          try {
-            const alertSent = await checkAccountBalance(account.id);
-            if (alertSent) {
-              console.log(`Balance alert sent for account ${account.id}`);
-            }
-          } catch (balanceError) {
-            console.error('Error checking balance after webhook sync:', balanceError);
-          }
+
         }
       } else if (webhook_code === 'INITIAL_UPDATE') {
         console.log(`Initial update received for account ${account.id}`);
@@ -234,15 +225,7 @@ router.post('/plaid', async (req, res) => {
           .update({ plaid_cursor: syncResult.nextCursor })
           .eq('id', account.id);
 
-        // Check balance on initial update as well
-        try {
-          const alertSent = await checkAccountBalance(account.id);
-          if (alertSent) {
-            console.log(`Balance alert sent for account ${account.id}`);
-          }
-        } catch (balanceError) {
-          console.error('Error checking balance after initial sync:', balanceError);
-        }
+
       } else if (webhook_code === 'HISTORICAL_UPDATE') {
         console.log(`Historical update complete for account ${account.id}`);
         // Mark historical sync as complete
