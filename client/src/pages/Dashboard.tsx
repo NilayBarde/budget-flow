@@ -80,7 +80,7 @@ export const Dashboard = () => {
 
         {/* Right Column (1/3 width on large screens) */}
         <div className="space-y-6">
-          <Card padding="sm" className="h-[400px]">
+          <Card padding="sm" className="min-h-[400px]">
             <CardHeader title="Spending by Category" subtitle={`${MONTHS[currentDate.month - 1]} ${currentDate.year}`} />
             <CategoryPieChart
               data={categoryData}
