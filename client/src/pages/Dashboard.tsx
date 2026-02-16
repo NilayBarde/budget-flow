@@ -1,9 +1,9 @@
 import { useMemo } from 'react';
 import { ArrowUpRight, ArrowDownRight, TrendingUp, Wallet, RefreshCw } from 'lucide-react';
 import { Card, CardHeader, Spinner, Button, MonthSelector, CategoryPieChart } from '../components/ui';
-import { useMonthlyStats, useBudgetGoals, useExpectedIncome, useMonthNavigation } from '../hooks';
+import { useMonthlyStats, useExpectedIncome, useMonthNavigation } from '../hooks';
 import { formatCurrency } from '../utils/formatters';
-import { ProgressBar } from '../components/ui/ProgressBar';
+
 import { MONTHS } from '../utils/constants';
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -12,14 +12,12 @@ export const Dashboard = () => {
   const queryClient = useQueryClient();
   
   const { data: stats, isLoading: statsLoading, refetch: refetchStats } = useMonthlyStats(currentDate.month, currentDate.year);
-  const { data: budgetGoals, isLoading: goalsLoading, refetch: refetchGoals } = useBudgetGoals(currentDate.month, currentDate.year);
+
   const { expectedIncome } = useExpectedIncome();
   
   const handleRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ['stats'] });
-    queryClient.invalidateQueries({ queryKey: ['budget-goals'] });
     refetchStats();
-    refetchGoals();
   };
 
   const totalSpent = stats?.total_spent || 0;
@@ -35,19 +33,9 @@ export const Dashboard = () => {
       .slice(0, 6);
   }, [stats]);
 
-  const topOverBudget = useMemo(() => {
-    if (!budgetGoals) return [];
-    return budgetGoals
-      .filter(g => (g.spent || 0) > g.limit_amount * 0.8)
-      .sort((a, b) => {
-        const aRatio = (a.spent || 0) / a.limit_amount;
-        const bRatio = (b.spent || 0) / b.limit_amount;
-        return bRatio - aRatio;
-      })
-      .slice(0, 3);
-  }, [budgetGoals]);
 
-  if (statsLoading || goalsLoading) {
+
+  if (statsLoading) {
     return <Spinner className="py-12" />;
   }
 
@@ -66,11 +54,11 @@ export const Dashboard = () => {
             variant="ghost"
             size="sm"
             onClick={handleRefresh}
-            disabled={statsLoading || goalsLoading}
+            disabled={statsLoading}
             className="text-slate-400 hover:text-slate-200"
             title="Refresh data"
           >
-            <RefreshCw className={`h-4 w-4 ${(statsLoading || goalsLoading) ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-4 w-4 ${(statsLoading) ? 'animate-spin' : ''}`} />
           </Button>
           
           {/* Month Selector */}
@@ -180,28 +168,7 @@ export const Dashboard = () => {
         </Card>
 
         {/* Budget Status */}
-        <Card padding="sm">
-          <CardHeader title="Budget Status" subtitle="Categories to watch" />
-          {topOverBudget.length > 0 ? (
-            <div className="space-y-4">
-              {topOverBudget.map((goal) => (
-                <div key={goal.id}>
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-sm font-medium text-slate-200 truncate">
-                      {goal.category?.name}
-                    </span>
-                    <span className="text-xs md:text-sm text-slate-400 ml-2 flex-shrink-0">
-                      {formatCurrency(goal.spent || 0)} / {formatCurrency(goal.limit_amount)}
-                    </span>
-                  </div>
-                  <ProgressBar value={goal.spent || 0} max={goal.limit_amount} />
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-slate-400 text-center py-8">All budgets on track!</p>
-          )}
-        </Card>
+
       </div>
     </div>
   );
