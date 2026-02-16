@@ -49,15 +49,15 @@ router.get('/monthly', async (req, res) => {
     // Pass 1: accumulate expenses, income, investments
     transactions?.forEach(t => {
       const transactionType = t.transaction_type || (t.amount > 0 ? 'expense' : 'income');
-      
+
       if (transactionType === 'transfer') return;
-      
+
       if (transactionType === 'investment') {
         totalInvested += Math.abs(t.amount);
       } else if (transactionType === 'expense') {
         const amountToCount = getExpenseAmount(t);
         grossExpenses += amountToCount;
-        
+
         const category = t.category as unknown as CategoryData | null;
         if (category && amountToCount > 0) {
           const existing = categoryTotals.get(category.id);
@@ -147,11 +147,13 @@ router.get('/yearly', async (req, res) => {
 
     // Pass 1: accumulate expenses, income, investments
     transactions?.forEach(t => {
-      const month = new Date(t.date).getMonth(); // 0-indexed
+      // Use string splitting to avoid timezone issues with new Date()
+      // t.date is YYYY-MM-DD
+      const month = parseInt(t.date.split('-')[1], 10) - 1; // 0-indexed
       const transactionType = t.transaction_type || (t.amount > 0 ? 'expense' : 'income');
-      
+
       if (transactionType === 'transfer') return;
-      
+
       if (transactionType === 'investment') {
         const amount = Math.abs(t.amount);
         totalInvested += amount;
@@ -160,7 +162,7 @@ router.get('/yearly', async (req, res) => {
         const amountToCount = getExpenseAmount(t);
         grossExpenses += amountToCount;
         monthlyTotals[month].spent += amountToCount;
-        
+
         const category = t.category as unknown as CategoryData | null;
         if (category && amountToCount > 0) {
           const existing = categoryTotals.get(category.id);
@@ -319,8 +321,10 @@ router.get('/insights', async (req, res) => {
       if (transactionType === 'transfer') return;
 
       const txDate = new Date(t.date);
-      const txMonth = txDate.getMonth() + 1;
-      const txYear = txDate.getFullYear();
+      // Use string parsing for month/year to avoid timezone shifts
+      const dateParts = t.date.split('-');
+      const txMonth = parseInt(dateParts[1], 10);
+      const txYear = parseInt(dateParts[0], 10);
       const monthKey = `${txYear}-${String(txMonth).padStart(2, '0')}`;
 
       if (transactionType === 'expense') {
