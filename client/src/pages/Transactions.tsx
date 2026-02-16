@@ -126,12 +126,12 @@ export const Transactions = () => {
 
   const handleBulkAddTag = useCallback(async (tagId: string) => {
     if (selectedIds.size === 0) return;
-    
+
     await bulkAddTag.mutateAsync({
       transactionIds: Array.from(selectedIds),
       tagId,
     });
-    
+
     // Track that this tag was added (don't exit selection mode yet)
     setAddedTagIds(prev => new Set([...prev, tagId]));
   }, [selectedIds, bulkAddTag]);
@@ -165,16 +165,16 @@ export const Transactions = () => {
   // For split transactions, only count the user's share (is_my_share === true)
   const totals = useMemo(() => {
     if (!allTransactions) return { expenses: 0, returns: 0, income: 0, investments: 0, transfers: 0 };
-    
+
     return allTransactions.reduce(
       (acc, t) => {
         const type = t.transaction_type || (t.amount > 0 ? 'expense' : 'income');
-        
+
         // For split transactions, sum only the user's share
         const amount = t.is_split && t.splits?.length
           ? t.splits.filter(s => s.is_my_share).reduce((sum, s) => sum + Math.abs(s.amount), 0)
           : Math.abs(t.amount);
-        
+
         if (type === 'expense') {
           acc.expenses += amount;
         } else if (type === 'return') {
@@ -220,12 +220,12 @@ export const Transactions = () => {
           {/* Mobile: structured compact rows */}
           <div className="sm:hidden mt-1.5 text-xs text-slate-400 space-y-0.5">
             <p>{transactions?.length || 0} transactions</p>
-            <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-2 overflow-x-auto no-scrollbar whitespace-nowrap">
               <span className="text-rose-400">-${(totals.expenses - totals.returns).toFixed(2)}</span>
               {totals.returns > 0 && (
                 <span className="text-slate-500">(${totals.returns.toFixed(2)} ret.)</span>
               )}
-              <span className="text-emerald-400">
+              <span className="text-emerald-400 ml-2">
                 +${totals.income.toFixed(2)}
                 {expectedIncome > 0 && (
                   <span className="text-slate-500"> / ${expectedIncome.toFixed(2)}</span>
@@ -234,7 +234,7 @@ export const Transactions = () => {
             </div>
           </div>
         </div>
-        
+
         <div className="flex items-center gap-2 flex-shrink-0">
           {/* Find Duplicates */}
           <Button
@@ -276,11 +276,10 @@ export const Transactions = () => {
           <button
             key={tab.id}
             onClick={() => setTypeFilter(tab.id)}
-            className={`flex-shrink-0 px-3 md:px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
-              typeFilter === tab.id
+            className={`flex-shrink-0 px-3 md:px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${typeFilter === tab.id
                 ? 'bg-primary-600 text-white'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-midnight-700 active:bg-midnight-600'
-            }`}
+              }`}
           >
             {tab.label}
           </button>
