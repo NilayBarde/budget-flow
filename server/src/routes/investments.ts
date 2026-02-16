@@ -89,11 +89,6 @@ router.get('/summary', async (req, res) => {
       investments: {
         totalValue: totalInvestmentValue,
         accountCount: includedInvestmentAccounts.length,
-        // Legacy fields for frontend compatibility (set to 0 or handled gracefully by frontend)
-        totalCostBasis: 0,
-        totalGainLoss: 0,
-        totalGainLossPercent: 0,
-        holdingCount: 0,
       },
       cash: {
         totalAssets: totalCashAssets,

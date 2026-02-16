@@ -40,9 +40,9 @@ export const Investments = () => {
   const accountChartData = useMemo(() => {
     if (!summary?.accounts) return [];
 
-    return summary.accounts
-      .filter((acc: any) => acc.isInvestment && !acc.excluded && (acc.balance || 0) > 0)
-      .map((acc: any, index: number) => ({
+    return (summary.accounts || [])
+      .filter(acc => acc.isInvestment && !acc.excluded && (acc.balance || 0) > 0)
+      .map((acc, index: number) => ({
         id: acc.id,
         name: acc.name,
         value: acc.balance || 0,

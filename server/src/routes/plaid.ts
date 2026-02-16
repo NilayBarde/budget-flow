@@ -16,21 +16,21 @@ router.post('/create-link-token', async (req, res) => {
     console.log('PLAID_CLIENT_ID:', process.env.PLAID_CLIENT_ID ? 'Set' : 'NOT SET');
     console.log('PLAID_SECRET:', process.env.PLAID_SECRET ? 'Set' : 'NOT SET');
     console.log('PLAID_ENV:', process.env.PLAID_ENV);
-    
+
     const { redirect_uri, webhook_url } = req.body;
-    
+
     console.log('Request details:', {
       redirect_uri: redirect_uri || 'none (OAuth banks will not work)',
       webhook_url: webhook_url ? 'provided' : 'not provided',
     });
-    
+
     // Use provided webhook URL or fall back to environment variable
     const webhookUrl = webhook_url || process.env.PLAID_WEBHOOK_URL;
-    
+
     const linkToken = await plaidService.createLinkToken(DEFAULT_USER_ID, redirect_uri, webhookUrl);
-    
+
     console.log('Link token created successfully');
-    
+
     res.json({
       link_token: linkToken.link_token,
       expiration: linkToken.expiration,
@@ -43,9 +43,9 @@ router.post('/create-link-token', async (req, res) => {
       // Return more detailed error in development
       const isDevelopment = process.env.NODE_ENV !== 'production';
       if (isDevelopment) {
-        return res.status(500).json({ 
+        return res.status(500).json({
           message: 'Failed to create link token',
-          error: plaidError.response.data 
+          error: plaidError.response.data
         });
       }
     }
@@ -78,7 +78,7 @@ router.post('/create-update-link-token', async (req, res) => {
     }
 
     console.log(`Creating update link token for ${account.institution_name}...`);
-    
+
     const linkToken = await plaidService.createUpdateLinkToken(
       DEFAULT_USER_ID,
       account.plaid_access_token,
@@ -148,15 +148,15 @@ router.post('/exchange-token', async (req, res) => {
 
     // Get account info
     const accountsResponse = await plaidService.getAccounts(accessToken);
-    
+
     if (!accountsResponse.accounts || accountsResponse.accounts.length === 0) {
       throw new Error('No accounts found. Please ensure your account is accessible and try again.');
     }
-    
+
     const institutionName = metadata?.institution?.name || 'Unknown';
     const plaidAccounts = accountsResponse.accounts;
     const createdAccounts: Array<{ id: string; plaid_account_id: string }> = [];
-    
+
     console.log(`Found ${plaidAccounts.length} accounts from ${institutionName}`);
 
     // Check for existing accounts with the same plaid_account_id to prevent duplicates
@@ -218,7 +218,7 @@ router.post('/exchange-token', async (req, res) => {
           console.error(`Failed to create account ${plaidAccount.name}:`, error);
           continue;
         }
-        
+
         console.log(`Created account: ${institutionName} - ${plaidAccount.name} (${plaidAccount.subtype || plaidAccount.type})`);
         createdAccounts.push({ id: accountId, plaid_account_id: plaidAccount.account_id });
       }
@@ -230,21 +230,21 @@ router.post('/exchange-token', async (req, res) => {
 
     // Auto-sync transactions after connecting using /transactions/sync
     console.log('Auto-syncing transactions for new accounts...');
-    
+
     // Create a map of Plaid account IDs to our account IDs
     const accountIdMap = new Map(createdAccounts.map(a => [a.plaid_account_id, a.id]));
-    
+
     try {
       const syncResult = await plaidService.syncTransactions(accessToken, null);
-      
+
       // Get categories for mapping
       const { data: categories } = await supabase.from('categories').select('id, name');
       const categoryMap = new Map(categories?.map(c => [c.name, c.id]) || []);
-      
+
       // Get merchant mappings for user-defined categorizations
       const { data: mappings } = await supabase.from('merchant_mappings').select('*');
       const mappingMap = new Map(mappings?.map(m => [m.original_name.toLowerCase(), m]) || []);
-      
+
       let syncedCount = 0;
       for (const tx of syncResult.added) {
         // Map the transaction to the correct account using Plaid's account_id
@@ -253,19 +253,19 @@ router.post('/exchange-token', async (req, res) => {
           console.warn(`No matching account for transaction with Plaid account_id: ${tx.account_id}`);
           continue;
         }
-        
+
         const texts = [tx.merchant_name || '', tx.name || '', tx.original_description || ''];
         const displayName = cleanMerchantName(tx.merchant_name || tx.name);
         const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
         const transactionType = detectTransactionType(tx.amount, texts, plaidPFC);
-        
+
         // Check for existing merchant mapping (user's previous corrections)
         const mapping = mappingMap.get((tx.merchant_name || '').toLowerCase());
-        
+
         // Auto-assign category based on type and Plaid's categorization
         let categoryId: string | null = null;
         let needsReview = false;
-        
+
         if (transactionType === 'expense') {
           // Priority: merchant mapping > Plaid PFC > pattern matching
           if (mapping?.default_category_id) {
@@ -284,7 +284,7 @@ router.post('/exchange-token', async (req, res) => {
         } else if (transactionType === 'investment') {
           categoryId = categoryMap.get('Investment') || null;
         }
-        
+
         await supabase.from('transactions').insert({
           id: uuidv4(),
           account_id: accountId,
@@ -304,92 +304,33 @@ router.post('/exchange-token', async (req, res) => {
         });
         syncedCount++;
       }
-      
+
       // Save the cursor for future syncs - store on the first account (they all share the same access token)
       const firstAccountId = createdAccounts[0].id;
       await supabase
         .from('accounts')
         .update({ plaid_cursor: syncResult.nextCursor })
         .eq('id', firstAccountId);
-      
+
       console.log(`Auto-synced ${syncedCount} transactions across ${createdAccounts.length} accounts`);
     } catch (syncError) {
       console.error('Auto-sync failed (accounts created, but transactions need manual sync):', syncError);
     }
 
-    // Auto-sync investment holdings only if this item has investment accounts
+    // Auto-sync investment holdings for initial balance display
     const INVESTMENT_TYPES = ['investment', 'brokerage', '401k', '401a', '403b', 'ira', 'roth', 'pension', 'retirement', 'stock plan', 'crypto exchange'];
     const hasInvestmentAccounts = plaidAccounts.some(a => {
       const accountType = (a.subtype || a.type || '').toLowerCase();
       return INVESTMENT_TYPES.some(t => accountType.includes(t));
     });
 
-    if (!hasInvestmentAccounts) {
-      console.log('No investment accounts in this item — skipping investment holdings sync');
-    }
-
-    if (hasInvestmentAccounts) try {
-      console.log('Attempting to sync investment holdings...');
-      const holdingsResult = await plaidService.getInvestmentHoldings(accessToken);
-      
-      if (holdingsResult.holdings.length > 0) {
-        // Upsert securities
-        for (const security of holdingsResult.securities) {
-          const securityData = {
-            plaid_security_id: security.security_id,
-            ticker_symbol: security.ticker_symbol,
-            name: security.name || 'Unknown Security',
-            type: security.type || 'unknown',
-            close_price: security.close_price,
-            close_price_as_of: security.close_price_as_of,
-            iso_currency_code: security.iso_currency_code || 'USD',
-            updated_at: new Date().toISOString(),
-          };
-
-          await supabase
-            .from('securities')
-            .upsert(securityData, { onConflict: 'plaid_security_id' });
-        }
-
-        // Get security ID mapping
-        const { data: securities } = await supabase
-          .from('securities')
-          .select('id, plaid_security_id');
-        
-        const securityIdMap = new Map(
-          securities?.map(s => [s.plaid_security_id, s.id]) || []
-        );
-
-        // Insert holdings
-        let holdingsSynced = 0;
-        for (const holding of holdingsResult.holdings) {
-          const dbAccountId = accountIdMap.get(holding.account_id);
-          const dbSecurityId = securityIdMap.get(holding.security_id);
-
-          if (!dbAccountId || !dbSecurityId) continue;
-
-          await supabase
-            .from('holdings')
-            .upsert({
-              id: uuidv4(),
-              account_id: dbAccountId,
-              security_id: dbSecurityId,
-              quantity: holding.quantity,
-              cost_basis: holding.cost_basis,
-              institution_value: holding.institution_value,
-              iso_currency_code: holding.iso_currency_code || 'USD',
-              updated_at: new Date().toISOString(),
-            }, { onConflict: 'account_id,security_id' });
-          
-          holdingsSynced++;
-        }
-        console.log(`Auto-synced ${holdingsSynced} investment holdings`);
-      } else {
-        console.log('No investment holdings found for this item');
+    if (hasInvestmentAccounts) {
+      console.log('Attempting to sync initial investment balances...');
+      try {
+        await plaidService.getInvestmentHoldings(accessToken);
+      } catch (holdingsError) {
+        console.log('Initial investment balance sync skipped or failed');
       }
-    } catch (holdingsError) {
-      // Not all accounts have investments, so this is expected to fail for non-investment accounts
-      console.log('Investment holdings sync skipped (account may not have investments)');
     }
 
     // Return the first created account for backwards compatibility
@@ -402,27 +343,27 @@ router.post('/exchange-token', async (req, res) => {
     res.json(firstAccount);
   } catch (error) {
     console.error('Error exchanging token:', error);
-    
+
     // Extract Plaid error details if available
     const plaidError = error as { response?: { data?: { error_code?: string; error_message?: string; display_message?: string } } };
     const errorDetails = plaidError.response?.data;
-    
+
     // Log detailed error for debugging
     if (errorDetails) {
       console.error('Plaid error details:', JSON.stringify(errorDetails, null, 2));
     }
-    
+
     // Return more helpful error message
     const isDevelopment = process.env.NODE_ENV !== 'production';
     if (isDevelopment && errorDetails) {
-      return res.status(500).json({ 
+      return res.status(500).json({
         message: 'Failed to connect account',
         error: errorDetails.error_message || errorDetails.display_message,
         error_code: errorDetails.error_code,
         details: errorDetails
       });
     }
-    
+
     // In production, return user-friendly message
     const userMessage = errorDetails?.display_message || errorDetails?.error_message || 'Failed to connect account. Please try again.';
     res.status(500).json({ message: userMessage });

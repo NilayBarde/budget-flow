@@ -211,57 +211,6 @@ export interface SavingsGoal {
 }
 
 // Investment types
-export interface Security {
-  id: string;
-  plaid_security_id: string;
-  ticker_symbol: string | null;
-  name: string;
-  type: string;
-  close_price: number | null;
-  close_price_as_of: string | null;
-  iso_currency_code: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface Holding {
-  id: string;
-  account_id: string;
-  security_id: string;
-  quantity: number;
-  cost_basis: number | null;
-  institution_value: number | null;
-  iso_currency_code: string;
-  created_at: string;
-  updated_at: string;
-  // Joined fields
-  security?: Security;
-  account?: {
-    id: string;
-    institution_name: string;
-    account_name: string;
-    account_type: string;
-    exclude_from_investments?: boolean;
-  };
-}
-
-export interface HoldingsByAccount {
-  account: {
-    id: string;
-    institution_name: string;
-    account_name: string;
-    account_type: string;
-  };
-  holdings: Holding[];
-  totalValue: number;
-  totalCostBasis: number;
-}
-
-export interface InvestmentHoldingsResponse {
-  holdings: Holding[];
-  byAccount: Record<string, HoldingsByAccount>;
-}
-
 export interface AccountSummary {
   id: string;
   name: string;
@@ -269,16 +218,13 @@ export interface AccountSummary {
   balance: number | null;
   isInvestment: boolean;
   isLiability: boolean;
+  excluded: boolean;
 }
 
 export interface InvestmentSummary {
   investments: {
     totalValue: number;
-    totalCostBasis: number;
-    totalGainLoss: number;
-    totalGainLossPercent: number;
     accountCount: number;
-    holdingCount: number;
   };
   cash: {
     totalAssets: number;
