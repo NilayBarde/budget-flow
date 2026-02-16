@@ -39,6 +39,17 @@ export const DailySpending = ({ month, year }: DailySpendingProps) => {
         transactions.forEach(t => {
             const txType = t.transaction_type || (t.amount > 0 ? 'expense' : 'income');
 
+            // Helper to calculating amount (handling splits)
+            let amount = Math.abs(t.amount);
+            if (t.is_split && t.splits && t.splits.length > 0) {
+                const myShare = t.splits
+                    .filter(s => s.is_my_share)
+                    .reduce((sum, s) => sum + Math.abs(s.amount), 0);
+                // If there are splits marked as my share, use that sum. 
+                // Otherwise fallback to total (though usually if split, there should be shares)
+                if (myShare > 0) amount = myShare;
+            }
+
             // Only count expenses
             if (txType === 'expense') {
                 // Ensure date parsing is correct (t.date is YYYY-MM-DD string usually)
@@ -46,12 +57,12 @@ export const DailySpending = ({ month, year }: DailySpendingProps) => {
                 const dateParts = t.date.split('-');
                 const txDay = parseInt(dateParts[2], 10);
 
-                dailyMap.set(txDay, (dailyMap.get(txDay) || 0) + Math.abs(t.amount));
+                dailyMap.set(txDay, (dailyMap.get(txDay) || 0) + amount);
             } else if (txType === 'return') {
                 // Subtract returns
                 const dateParts = t.date.split('-');
                 const txDay = parseInt(dateParts[2], 10);
-                dailyMap.set(txDay, Math.max(0, (dailyMap.get(txDay) || 0) - Math.abs(t.amount)));
+                dailyMap.set(txDay, Math.max(0, (dailyMap.get(txDay) || 0) - amount));
             }
         });
 
@@ -96,8 +107,13 @@ export const DailySpending = ({ month, year }: DailySpendingProps) => {
                         <YAxis
                             stroke="#64748b"
                             tick={{ fill: '#94a3b8', fontSize: 10 }}
-                            tickFormatter={(v) => `$${v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v.toFixed(0)}`}
-                            width={35}
+                            tickFormatter={(v) => {
+                                if (v >= 1000) {
+                                    return `$${(v / 1000).toFixed(1).replace(/\.0$/, '')}k`;
+                                }
+                                return `$${v}`;
+                            }}
+                            width={60}
                             tickLine={false}
                             axisLine={false}
                         />
