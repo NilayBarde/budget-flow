@@ -126,25 +126,47 @@ router.post('/:id/sync', async (req, res) => {
 
     // 1. Fetch Latest Balances (Concurrently if possible)
     let latestBalance: number | null = account.current_balance;
+    const investmentTypes = ['investment', 'brokerage', '401k', '401a', '403b', 'ira', 'roth', 'pension', 'retirement', 'stock plan', 'crypto exchange', 'hsa', '529'];
+    const isInvestment = investmentTypes.some(t => account.account_type.toLowerCase().includes(t));
 
     try {
-      if (['investment', 'brokerage', '401k', 'ira'].some(t => account.account_type.toLowerCase().includes(t))) {
-        console.log(`Fetching investment holdings/balance for ${id}...`);
-        const holdings = await plaidService.getInvestmentHoldings(account.plaid_access_token);
-        const plaidAccount = holdings.accounts.find(a => a.account_id === account.plaid_account_id);
-        if (plaidAccount) {
-          latestBalance = plaidAccount.balances.current;
+      if (isInvestment) {
+        console.log(`[Sync] Attempting investment holdings balance for ${account.institution_name} (${id})...`);
+        try {
+          const holdings = await plaidService.getInvestmentHoldings(account.plaid_access_token);
+          const plaidAccount = holdings.accounts.find(a => a.account_id === account.plaid_account_id);
+          if (plaidAccount && plaidAccount.balances.current !== null) {
+            latestBalance = plaidAccount.balances.current;
+            console.log(`[Sync] Success via getInvestmentHoldings: ${latestBalance}`);
+          } else {
+            console.log(`[Sync] No balance found in holdings for ${id}, falling back to getAccounts...`);
+            const plaidData = await plaidService.getAccounts(account.plaid_access_token);
+            const fallbackAccount = plaidData.accounts.find(a => a.account_id === account.plaid_account_id);
+            if (fallbackAccount) {
+              latestBalance = fallbackAccount.balances.current;
+              console.log(`[Sync] Success via getAccounts (fallback): ${latestBalance}`);
+            }
+          }
+        } catch (holdingsError) {
+          console.warn(`[Sync] getInvestmentHoldings failed for ${id}, attempting fallback to getAccounts...`, holdingsError);
+          const plaidData = await plaidService.getAccounts(account.plaid_access_token);
+          const fallbackAccount = plaidData.accounts.find(a => a.account_id === account.plaid_account_id);
+          if (fallbackAccount) {
+            latestBalance = fallbackAccount.balances.current;
+            console.log(`[Sync] Success via getAccounts (after holdings error): ${latestBalance}`);
+          }
         }
       } else {
-        console.log(`Fetching regular account balance for ${id}...`);
+        console.log(`[Sync] Fetching regular account balance for ${account.institution_name} (${id})...`);
         const plaidData = await plaidService.getAccounts(account.plaid_access_token);
         const plaidAccount = plaidData.accounts.find(a => a.account_id === account.plaid_account_id);
         if (plaidAccount) {
           latestBalance = plaidAccount.balances.current;
+          console.log(`[Sync] Success via getAccounts: ${latestBalance}`);
         }
       }
     } catch (balanceError) {
-      console.warn(`Failed to fetch latest balance for account ${id}:`, balanceError);
+      console.warn(`[Sync] Final balance fetch failure for account ${id}:`, balanceError);
       // Continue with transaction sync even if balance fetch fails
     }
 
