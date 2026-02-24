@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"\nimport sys, json\ntry:\n    d = json.load(sys.stdin)\nexcept Exception:\n    sys.exit(0)\nfp = d.get('file_path', '')\nprotected = ['.env', '.env.local', '.env.production', '.env.development']\nif any(fp.endswith(p) or fp.split('/')[-1] == p for p in protected):\n    print(f'Blocked: {fp} is a protected env file. Edit it manually.')\n    sys.exit(2)\n\"",
+            "blocking": true
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"\nimport sys, json, subprocess, os\ntry:\n    d = json.load(sys.stdin)\nexcept Exception:\n    sys.exit(0)\nfp = d.get('file_path', '')\nroot = '/Users/nilaybarde/Documents/side-projects/budget-flow'\nif not fp.startswith(root):\n    sys.exit(0)\nif '/client/' in fp and fp.endswith(('.ts', '.tsx')):\n    result = subprocess.run(['npx', 'tsc', '--noEmit'], capture_output=True, text=True, cwd=os.path.join(root, 'client'))\n    if result.returncode != 0:\n        print('TypeScript error in client:')\n        print(result.stdout[-2000:] if result.stdout else result.stderr[-2000:])\nelif '/server/' in fp and fp.endswith('.ts'):\n    result = subprocess.run(['npx', 'tsc', '--noEmit'], capture_output=True, text=True, cwd=os.path.join(root, 'server'))\n    if result.returncode != 0:\n        print('TypeScript error in server:')\n        print(result.stdout[-2000:] if result.stdout else result.stderr[-2000:])\n\""
+          }
+        ]
+      }
+    ]
+  }
+}
