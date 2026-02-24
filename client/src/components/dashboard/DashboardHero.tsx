@@ -1,5 +1,5 @@
-
-import { Wallet, PiggyBank, Target } from 'lucide-react';
+import { useState } from 'react';
+import { Wallet, PiggyBank, Target, Eye, EyeOff } from 'lucide-react';
 import { Card, Spinner } from '../ui';
 import { formatCurrency } from '../../utils/formatters';
 import { useBudgetGoals, useAppSettings, useFinancialHealth } from '../../hooks';
@@ -12,6 +12,7 @@ interface StatCardProps {
     className?: string;
     iconClassName?: string;
     formatter?: (val: number) => string;
+    isHidable?: boolean;
 }
 
 const StatCard = ({
@@ -21,23 +22,39 @@ const StatCard = ({
     subtext,
     className = "",
     iconClassName = "",
-    formatter = formatCurrency
-}: StatCardProps) => (
-    <div className={`p-4 rounded-xl border border-midnight-700 bg-midnight-800/50 ${className}`}>
-        <div className="flex items-start justify-between">
-            <div>
-                <p className="text-sm font-medium text-slate-400">{label}</p>
-                <h3 className="text-2xl font-bold text-slate-100 mt-1">
-                    {formatter(value)}
-                </h3>
-                {subtext && <p className="text-xs text-slate-500 mt-1">{subtext}</p>}
-            </div>
-            <div className={`p-2 rounded-lg bg-midnight-700/50 ${iconClassName}`}>
-                <Icon className="h-5 w-5" />
+    formatter = formatCurrency,
+    isHidable = false
+}: StatCardProps) => {
+    const [isVisible, setIsVisible] = useState(!isHidable);
+
+    return (
+        <div className={`p-4 rounded-xl border border-midnight-700 bg-midnight-800/50 transition-all duration-300 ${className}`}>
+            <div className="flex items-start justify-between">
+                <div>
+                    <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium text-slate-400">{label}</p>
+                        {isHidable && (
+                            <button
+                                onClick={() => setIsVisible(!isVisible)}
+                                className="text-slate-500 hover:text-slate-300 transition-colors"
+                                title={isVisible ? "Hide value" : "Show value"}
+                            >
+                                {isVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                            </button>
+                        )}
+                    </div>
+                    <h3 className="text-2xl font-bold text-slate-100 mt-1 transition-all duration-300">
+                        {isVisible ? formatter(value) : '••••••'}
+                    </h3>
+                    {subtext && <p className="text-xs text-slate-500 mt-1">{subtext}</p>}
+                </div>
+                <div className={`p-2 rounded-lg bg-midnight-700/50 ${iconClassName}`}>
+                    <Icon className="h-5 w-5" />
+                </div>
             </div>
         </div>
-    </div>
-);
+    );
+};
 
 
 export const DashboardHero = ({ month, year }: { month: number; year: number }) => {
@@ -125,6 +142,7 @@ export const DashboardHero = ({ month, year }: { month: number; year: number }) 
                     icon={Wallet}
                     className="bg-indigo-950/20 border-indigo-900/50"
                     iconClassName="text-indigo-400"
+                    isHidable={true}
                 />
 
                 <div className="grid grid-cols-2 gap-4">
