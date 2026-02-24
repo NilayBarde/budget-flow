@@ -18,6 +18,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Claude Code
+.claude/
+
 # Editor directories
 .vscode/
 .idea/
