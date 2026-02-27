@@ -1,4 +1,3 @@
-export { AllocationBar } from './AllocationBar';
 export { SavingsGoalCard } from './SavingsGoalCard';
 export { SavingsGoalModal } from './SavingsGoalModal';
 export { NetWorthGoalCard } from './NetWorthGoalCard';

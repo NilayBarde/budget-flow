@@ -1,12 +1,16 @@
 
 import { Card, CardHeader, Spinner } from '../ui';
 import { ProgressBar } from '../ui/ProgressBar';
-import { useInsights } from '../../hooks';
+import { useInsights, useAppSettings, useBudgetGoals } from '../../hooks';
 import { formatCurrency } from '../../utils/formatters';
 import { MONTHS } from '../../utils/constants';
 
 export const SpendingPace = () => {
     const { data: insights, isLoading } = useInsights();
+    const { data: appSettings } = useAppSettings();
+
+    const currentMonth = insights?.monthOverMonth.currentMonth;
+    const { data: budgetGoals } = useBudgetGoals(currentMonth?.month ?? 0, currentMonth?.year ?? 0);
 
     if (isLoading) {
         return (
@@ -18,34 +22,42 @@ export const SpendingPace = () => {
 
     if (!insights) return null;
 
-    const { spendingVelocity, monthOverMonth: { currentMonth } } = insights;
+    const { spendingVelocity, monthOverMonth: { currentMonth: cm } } = insights;
+
+    // Resolve monthly budget target (same logic as DashboardHero)
+    const manualBudgetLimit = appSettings?.monthly_budget_limit ? parseFloat(appSettings.monthly_budget_limit) : 0;
+    const budgetTarget = manualBudgetLimit > 0
+        ? manualBudgetLimit
+        : (budgetGoals?.reduce((sum, goal) => sum + goal.limit_amount, 0) || 0);
+    const hasBudget = budgetTarget > 0;
 
     // Calculate pace percentage
     const pacePercent = spendingVelocity.daysInMonth > 0
         ? (spendingVelocity.daysElapsed / spendingVelocity.daysInMonth) * 100
         : 0;
 
-    // Determine if on pace (with 5% grace period)
-    const isOnPace = spendingVelocity.lastMonthTotal > 0
-        ? spendingVelocity.projectedTotal <= spendingVelocity.lastMonthTotal * 1.05
+    // Determine if on pace against the budget (with 5% grace period)
+    const benchmark = hasBudget ? budgetTarget : spendingVelocity.lastMonthTotal;
+    const isOnPace = benchmark > 0
+        ? spendingVelocity.projectedTotal <= benchmark * 1.05
         : true;
 
     return (
         <Card padding="sm">
             <CardHeader
                 title="Spending Pace"
-                subtitle={`${MONTHS[currentMonth.month - 1]} ${currentMonth.year} — Day ${spendingVelocity.daysElapsed} of ${spendingVelocity.daysInMonth}`}
+                subtitle={`${MONTHS[cm.month - 1]} ${cm.year} — Day ${spendingVelocity.daysElapsed} of ${spendingVelocity.daysInMonth}`}
             />
             <div className="space-y-3">
-                {/* Progress bar: current spend vs last month total */}
+                {/* Progress bar: current spend vs monthly budget */}
                 <div>
                     <div className="flex justify-between text-xs text-slate-400 mb-1.5">
                         <span>Spent so far: {formatCurrency(spendingVelocity.spentSoFar)}</span>
-                        <span>Last month: {formatCurrency(spendingVelocity.lastMonthTotal)}</span>
+                        <span>{hasBudget ? 'Budget' : 'Last month'}: {formatCurrency(hasBudget ? budgetTarget : spendingVelocity.lastMonthTotal)}</span>
                     </div>
                     <ProgressBar
                         value={spendingVelocity.spentSoFar}
-                        max={spendingVelocity.lastMonthTotal || 1}
+                        max={benchmark || 1}
                         color={isOnPace ? 'success' : 'warning'}
                         showLabel={false}
                         size="md"
@@ -86,7 +98,7 @@ export const SpendingPace = () => {
                     </div>
                     <div>
                         <p className="text-xs text-slate-500">Projected Total</p>
-                        <p className={`text-sm font-medium ${spendingVelocity.projectedTotal > spendingVelocity.lastMonthTotal ? 'text-rose-400' : 'text-emerald-400'}`}>
+                        <p className={`text-sm font-medium ${spendingVelocity.projectedTotal > benchmark ? 'text-rose-400' : 'text-emerald-400'}`}>
                             {formatCurrency(spendingVelocity.projectedTotal)}
                         </p>
                     </div>

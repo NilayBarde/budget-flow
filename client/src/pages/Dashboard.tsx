@@ -43,12 +43,13 @@ export const Dashboard = () => {
             Overview of your finances
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 w-full md:w-auto">
           <MonthSelector
             month={currentDate.month}
             year={currentDate.year}
             onPrevMonth={handlePrevMonth}
             onNextMonth={handleNextMonth}
+            className="flex-1 md:flex-none"
           />
           <Button
             variant="ghost"

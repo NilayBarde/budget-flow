@@ -1,56 +1,51 @@
 import { useState } from 'react';
-import { Wallet, PiggyBank, Target, Eye, EyeOff } from 'lucide-react';
+import { Wallet, PiggyBank, Target, TrendingUp, Eye, EyeOff } from 'lucide-react';
 import { Card, Spinner } from '../ui';
 import { formatCurrency } from '../../utils/formatters';
 import { useBudgetGoals, useAppSettings, useFinancialHealth } from '../../hooks';
 
-interface StatCardProps {
+interface StatRowProps {
     label: string;
     value: number;
     icon: React.ElementType;
-    subtext?: string;
     className?: string;
     iconClassName?: string;
+    valueClassName?: string;
     formatter?: (val: number) => string;
     isHidable?: boolean;
 }
 
-const StatCard = ({
+const StatRow = ({
     label,
     value,
     icon: Icon,
-    subtext,
     className = "",
     iconClassName = "",
+    valueClassName = "",
     formatter = formatCurrency,
-    isHidable = false
-}: StatCardProps) => {
+    isHidable = false,
+}: StatRowProps) => {
     const [isVisible, setIsVisible] = useState(!isHidable);
 
     return (
-        <div className={`p-4 rounded-xl border border-midnight-700 bg-midnight-800/50 transition-all duration-300 ${className}`}>
-            <div className="flex items-start justify-between">
-                <div>
-                    <div className="flex items-center gap-2">
-                        <p className="text-sm font-medium text-slate-400">{label}</p>
-                        {isHidable && (
-                            <button
-                                onClick={() => setIsVisible(!isVisible)}
-                                className="text-slate-500 hover:text-slate-300 transition-colors"
-                                title={isVisible ? "Hide value" : "Show value"}
-                            >
-                                {isVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                            </button>
-                        )}
-                    </div>
-                    <h3 className="text-2xl font-bold text-slate-100 mt-1 transition-all duration-300">
-                        {isVisible ? formatter(value) : '••••••'}
-                    </h3>
-                    {subtext && <p className="text-xs text-slate-500 mt-1">{subtext}</p>}
-                </div>
-                <div className={`p-2 rounded-lg bg-midnight-700/50 ${iconClassName}`}>
-                    <Icon className="h-5 w-5" />
-                </div>
+        <div className={`flex items-center gap-3 px-4 py-2.5 rounded-xl border border-midnight-700 bg-midnight-800/50 transition-all duration-300 ${className}`}>
+            <div className={`p-1.5 rounded-lg bg-midnight-700/50 flex-shrink-0 ${iconClassName}`}>
+                <Icon className="h-4 w-4" />
+            </div>
+            <p className="text-sm font-medium text-slate-400 flex-1">{label}</p>
+            <div className="flex items-center gap-1.5">
+                <span className={`text-sm font-semibold text-slate-100 transition-all duration-300 ${valueClassName}`}>
+                    {isVisible ? formatter(value) : '••••••'}
+                </span>
+                {isHidable && (
+                    <button
+                        onClick={() => setIsVisible(!isVisible)}
+                        className="text-slate-500 hover:text-slate-300 transition-colors"
+                        title={isVisible ? "Hide value" : "Show value"}
+                    >
+                        {isVisible ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                    </button>
+                )}
             </div>
         </div>
     );
@@ -61,6 +56,7 @@ export const DashboardHero = ({ month, year }: { month: number; year: number }) 
     // Use centralized hook for financial data
     const {
         netPosition,
+        actualIncome,
         totalInvested,
         netWorth,
         totalSpent,
@@ -93,9 +89,9 @@ export const DashboardHero = ({ month, year }: { month: number; year: number }) 
 
     return (
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Primary: Budget Health (Takes up 2 cols on LG) */}
-            <div className="lg:col-span-2 relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-900 to-emerald-950 p-6 md:p-8 text-white shadow-xl shadow-emerald-900/10 border border-emerald-800/50">
-                <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+            {/* Primary: Budget Health (2/3 width) */}
+            <div className="lg:col-span-2 rounded-2xl bg-gradient-to-br from-emerald-900 to-emerald-950 p-5 text-white shadow-xl shadow-emerald-900/10 border border-emerald-800/50 flex flex-col justify-center">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                     <div>
                         <p className="text-emerald-100 font-medium mb-1 flex items-center gap-2">
                             <Target className="h-4 w-4" />
@@ -129,14 +125,11 @@ export const DashboardHero = ({ month, year }: { month: number; year: number }) 
                     </div>
                 </div>
 
-                {/* Background Decoration */}
-                <div className="absolute right-0 top-0 h-full w-1/3 bg-gradient-to-l from-white/5 to-transparent pointer-events-none" />
-                <div className="absolute -right-10 -top-10 h-64 w-64 rounded-full bg-emerald-500/10 blur-3xl pointer-events-none" />
             </div>
 
-            {/* Secondary: Net Worth & Savings (Stacked in 1 col) */}
-            <div className="space-y-4">
-                <StatCard
+            {/* Secondary: Stats stacked vertically */}
+            <div className="flex flex-col gap-3">
+                <StatRow
                     label="Net Worth"
                     value={netWorth}
                     icon={Wallet}
@@ -144,23 +137,25 @@ export const DashboardHero = ({ month, year }: { month: number; year: number }) 
                     iconClassName="text-indigo-400"
                     isHidable={true}
                 />
-
-                <div className="grid grid-cols-2 gap-4">
-                    <StatCard
-                        label="Est. Cash Flow"
-                        value={netPosition}
-                        icon={PiggyBank}
-                        className="bg-midnight-800/50"
-                        iconClassName={netPosition >= 0 ? "text-emerald-400" : "text-rose-400"}
-                    />
-                    <StatCard
-                        label="Investments"
-                        value={totalInvested}
-                        icon={Target} // Using Target icon for investments
-                        className="bg-midnight-800/50"
-                        iconClassName="text-blue-400"
-                    />
-                </div>
+                <StatRow
+                    label="Income"
+                    value={actualIncome}
+                    icon={TrendingUp}
+                    iconClassName="text-emerald-400"
+                />
+                <StatRow
+                    label="Est. Cash Flow"
+                    value={netPosition}
+                    icon={PiggyBank}
+                    iconClassName={netPosition >= 0 ? "text-emerald-400" : "text-rose-400"}
+                    valueClassName={netPosition >= 0 ? "text-emerald-400" : "text-rose-400"}
+                />
+                <StatRow
+                    label="Investments"
+                    value={totalInvested}
+                    icon={Target}
+                    iconClassName="text-blue-400"
+                />
             </div>
         </section>
     );
