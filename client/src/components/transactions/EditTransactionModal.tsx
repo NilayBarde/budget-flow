@@ -25,6 +25,7 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction }: EditTrans
   const [categoryId, setCategoryId] = useState('');
   const [transactionType, setTransactionType] = useState<TransactionType>('expense');
   const [notes, setNotes] = useState('');
+  const [date, setDate] = useState('');
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurringAmount, setRecurringAmount] = useState('');
   const [selectedTags, setSelectedTags] = useState<Tag[]>([]);
@@ -64,6 +65,7 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction }: EditTrans
       setCategoryId(transaction.category_id || '');
       setTransactionType(transaction.transaction_type || 'expense');
       setNotes(transaction.notes || '');
+      setDate(transaction.date ? transaction.date.split('T')[0] : '');
       setIsRecurring(transaction.is_recurring || false);
       setRecurringAmount('');
       setSelectedTags(transaction.tags || []);
@@ -84,6 +86,7 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction }: EditTrans
         merchant_display_name: merchantName,
         category_id: categoryId || null,
         transaction_type: transactionType,
+        date: date,
         is_recurring: isRecurring,
         notes: notes || null,
         ...(isRecurring && parsedRecurringAmount ? { recurring_amount: parsedRecurringAmount } : {}),
@@ -161,6 +164,13 @@ export const EditTransactionModal = ({ isOpen, onClose, transaction }: EditTrans
           value={transactionType}
           onChange={e => setTransactionType(e.target.value as TransactionType)}
           options={TRANSACTION_TYPE_OPTIONS}
+        />
+
+        <Input
+          label="Date"
+          type="date"
+          value={date}
+          onChange={e => setDate(e.target.value)}
         />
 
         {/* Recurring toggle */}
