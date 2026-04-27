@@ -77,9 +77,9 @@ export const SpendingPace = () => {
                     <div>
                         <p className="text-xs text-slate-500">Fixed Costs</p>
                         <p className="text-sm font-medium text-slate-200">
-                            {formatCurrency(spendingVelocity.fixedCosts)}
+                            {formatCurrency(spendingVelocity.expectedFixedCosts)}
                         </p>
-                        {spendingVelocity.fixedCosts > 0 && (
+                        {spendingVelocity.expectedFixedCosts > 0 && (
                             <p className="text-[10px] text-slate-500 mt-0.5">
                                 {formatCurrency(spendingVelocity.recurringSpent)} paid
                             </p>
@@ -101,6 +101,14 @@ export const SpendingPace = () => {
                         <p className={`text-sm font-medium ${spendingVelocity.projectedTotal > benchmark ? 'text-rose-400' : 'text-emerald-400'}`}>
                             {formatCurrency(spendingVelocity.projectedTotal)}
                         </p>
+                        {spendingVelocity.excludedOutlierAmount > 0 && (
+                            <p
+                                className="text-[10px] text-slate-500 mt-0.5"
+                                title={`A ${formatCurrency(spendingVelocity.excludedOutlierAmount)} outlier day was excluded from the daily-rate extrapolation.`}
+                            >
+                                outlier excluded
+                            </p>
+                        )}
                     </div>
                     <div>
                         <p className="text-xs text-slate-500">Status</p>

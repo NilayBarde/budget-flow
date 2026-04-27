@@ -149,9 +149,10 @@ export interface InsightsSpendingVelocity {
   projectedTotal: number;
   lastMonthTotal: number;
   dailyAverage: number;
-  fixedCosts: number;
+  expectedFixedCosts: number;
   recurringSpent: number;
   variableSpent: number;
+  excludedOutlierAmount: number;
 }
 
 export interface InsightsMonthOverMonth {

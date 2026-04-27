@@ -1,14 +1,20 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
+import { computeSpendingVelocity } from '../services/spending-velocity.js';
+import {
+  rankTopCategories,
+  buildCategoryTrends,
+  buildTopCategories,
+  type CategoryMonthEntry,
+} from '../services/category-trends.js';
+import {
+  buildTopMerchants,
+  type MerchantAggregate,
+} from '../services/merchant-stats.js';
+import { percentChange } from '../services/mom-totals.js';
+import type { CategoryData } from '../types/stats.js';
 
 const router = Router();
-
-interface CategoryData {
-  id: string;
-  name: string;
-  color: string;
-  icon: string;
-}
 
 // Get monthly stats
 router.get('/monthly', async (req, res) => {
@@ -281,24 +287,22 @@ router.get('/insights', async (req, res) => {
     if (error) throw error;
 
     // ── Category Trends (per-category, per-month) ──────────────────────
-    // Map<categoryId, { category, months: Map<"YYYY-MM", amount> }>
-    const categoryMonthMap = new Map<string, {
-      category: CategoryData;
-      months: Map<string, number>;
-    }>();
+    const categoryMonthMap = new Map<string, CategoryMonthEntry>();
 
     // ── Top Merchants ──────────────────────────────────────────────────
-    const merchantMap = new Map<string, {
-      merchantName: string;
-      totalSpent: number;
-      transactionCount: number;
-      lastDate: string;
-    }>();
+    const merchantMap = new Map<string, MerchantAggregate>();
 
     // ── Daily Spending (current month only) ────────────────────────────
+    // dailySpending covers the full month (for the chart). dailyVariable
+    // only covers days elapsed so far (for velocity projection); trailing
+    // zeros would dilute the rate.
     const dailySpending = new Map<number, number>(); // day -> amount
+    const dailyVariable = new Map<number, number>(); // day -> non-recurring amount
     for (let d = 1; d <= daysInMonth; d++) {
       dailySpending.set(d, 0);
+    }
+    for (let d = 1; d <= today; d++) {
+      dailyVariable.set(d, 0);
     }
 
     // ── Month-over-Month totals ────────────────────────────────────────
@@ -367,8 +371,11 @@ router.get('/insights', async (req, res) => {
 
           // Track recurring vs variable for velocity
           const merchantName = t.merchant_display_name || t.merchant_name;
-          if (merchantName && recurringMerchants.has(merchantName)) {
+          const isRecurring = !!merchantName && recurringMerchants.has(merchantName);
+          if (isRecurring) {
             currentMonthRecurringSpent += amountToCount;
+          } else {
+            dailyVariable.set(day, (dailyVariable.get(day) || 0) + amountToCount);
           }
         }
 
@@ -406,6 +413,7 @@ router.get('/insights', async (req, res) => {
         if (txMonth === currentMonth && txYear === currentYear) {
           const day = txDate.getDate();
           dailySpending.set(day, Math.max(0, (dailySpending.get(day) || 0) - returnAmount));
+          dailyVariable.set(day, Math.max(0, (dailyVariable.get(day) || 0) - returnAmount));
           currentMonthSpent = Math.max(0, currentMonthSpent - returnAmount);
         }
 
@@ -426,39 +434,12 @@ router.get('/insights', async (req, res) => {
       }
     });
 
-    // ── Build category trends response ─────────────────────────────────
-    const monthKeys = months.map(m => `${m.year}-${String(m.month).padStart(2, '0')}`);
+    // ── Build category responses (trends + top categories) ────────────
+    const rankedCategories = rankTopCategories(categoryMonthMap);
+    const categoryTrends = buildCategoryTrends(rankedCategories, months);
 
-    // Rank categories by total 6-month spend, take top 8
-    const categoryEntries = Array.from(categoryMonthMap.entries())
-      .map(([id, entry]) => {
-        const totalSpend = Array.from(entry.months.values()).reduce((a, b) => a + b, 0);
-        return { id, ...entry, totalSpend };
-      })
-      .sort((a, b) => b.totalSpend - a.totalSpend)
-      .slice(0, 8);
-
-    const categoryTrends = categoryEntries.map(entry => ({
-      categoryId: entry.id,
-      categoryName: entry.category.name,
-      categoryColor: entry.category.color,
-      months: monthKeys.map((key, idx) => ({
-        month: months[idx].month,
-        year: months[idx].year,
-        amount: entry.months.get(key) || 0,
-      })),
-    }));
-
-    // ── Build top categories response ────────────────────────────────
-    const topCategories = categoryEntries.map(entry => ({
-      categoryId: entry.id,
-      categoryName: entry.category.name,
-      categoryColor: entry.category.color,
-      totalSpent: entry.totalSpend,
-      transactionCount: 0, // will be filled below
-    }));
-
-    // Count transactions per category (expenses only, using my-share amounts)
+    // Per-category transaction counts (expenses only — splits already
+    // accounted for in totals, but counts are at the transaction level).
     const categoryCounts = new Map<string, number>();
     transactions?.forEach(t => {
       const txType = t.transaction_type || (t.amount > 0 ? 'expense' : 'income');
@@ -468,19 +449,10 @@ router.get('/insights', async (req, res) => {
         categoryCounts.set(category.id, (categoryCounts.get(category.id) || 0) + 1);
       }
     });
-    for (const cat of topCategories) {
-      cat.transactionCount = categoryCounts.get(cat.categoryId) || 0;
-    }
+    const topCategories = buildTopCategories(rankedCategories, categoryCounts);
 
     // ── Build top merchants response ───────────────────────────────────
-    const topMerchants = Array.from(merchantMap.values())
-      .filter(m => m.totalSpent > 0) // Exclude fully-returned merchants
-      .sort((a, b) => b.totalSpent - a.totalSpent)
-      .slice(0, 10)
-      .map(m => ({
-        ...m,
-        avgTransaction: m.transactionCount > 0 ? m.totalSpent / m.transactionCount : 0,
-      }));
+    const topMerchants = buildTopMerchants(merchantMap);
 
     // ── Build daily spending response ──────────────────────────────────
     const dailySpendingArr = Array.from(dailySpending.entries())
@@ -488,33 +460,24 @@ router.get('/insights', async (req, res) => {
       .map(([day, amount]) => ({ day, amount }));
 
     // ── Build spending velocity ────────────────────────────────────────
-    const variableSpent = Math.max(0, currentMonthSpent - currentMonthRecurringSpent);
-    const projectedVariable = today > 0 ? (variableSpent / today) * daysInMonth : 0;
-    const projectedTotal = expectedFixedCosts + projectedVariable;
-    const dailyAverage = today > 0 ? variableSpent / today : 0;
+    const dailyVariableSpending: number[] = [];
+    for (let d = 1; d <= today; d++) {
+      dailyVariableSpending.push(dailyVariable.get(d) || 0);
+    }
 
-    const spendingVelocity = {
+    const spendingVelocity = computeSpendingVelocity({
       daysElapsed: today,
       daysInMonth,
       spentSoFar: currentMonthSpent,
-      projectedTotal,
-      lastMonthTotal: prevMonthTotalSpent,
-      dailyAverage,
-      fixedCosts: expectedFixedCosts,
       recurringSpent: currentMonthRecurringSpent,
-      variableSpent,
-    };
+      expectedFixedCosts,
+      lastMonthTotal: prevMonthTotalSpent,
+      dailyVariableSpending,
+    });
 
     // ── Build month-over-month ─────────────────────────────────────────
     const currentMom = momTotals[currentMonthKey];
     const prevMom = momTotals[prevMonthKey];
-    const spentChangePercent = prevMom.spent > 0
-      ? ((currentMom.spent - prevMom.spent) / prevMom.spent) * 100
-      : 0;
-    const incomeChangePercent = prevMom.income > 0
-      ? ((currentMom.income - prevMom.income) / prevMom.income) * 100
-      : 0;
-
     const monthOverMonth = {
       currentMonth: {
         month: currentMonth,
@@ -530,8 +493,8 @@ router.get('/insights', async (req, res) => {
         income: prevMom.income,
         net: prevMom.income - prevMom.spent,
       },
-      spentChangePercent,
-      incomeChangePercent,
+      spentChangePercent: percentChange(currentMom.spent, prevMom.spent),
+      incomeChangePercent: percentChange(currentMom.income, prevMom.income),
     };
 
     res.json({

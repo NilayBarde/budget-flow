@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Wallet, PiggyBank, Target, TrendingUp, Eye, EyeOff } from 'lucide-react';
+import clsx from 'clsx';
+import { AlertTriangle, Wallet, PiggyBank, Target, TrendingUp, Eye, EyeOff } from 'lucide-react';
 import { Card, Spinner } from '../ui';
 import { formatCurrency } from '../../utils/formatters';
 import { useBudgetGoals, useAppSettings, useFinancialHealth } from '../../hooks';
@@ -82,43 +83,78 @@ export const DashboardHero = ({ month, year }: { month: number; year: number }) 
         ? manualBudgetLimit
         : (budgetGoals?.reduce((sum, goal) => sum + goal.limit_amount, 0) || 0);
 
-    const remainingBudget = Math.max(0, totalBudgeted - totalSpent);
+    const remainingBudget = totalBudgeted - totalSpent;
+    const isOverBudget = remainingBudget < 0;
     const budgetHealth = totalBudgeted > 0 ? (totalSpent / totalBudgeted) * 100 : 0;
 
-
+    const accent = isOverBudget
+        ? {
+            card: 'bg-gradient-to-br from-rose-900 to-rose-950 shadow-rose-900/10 border-rose-800/50',
+            heading: 'text-rose-100',
+            sub: 'text-rose-200/80',
+            subtle: 'text-rose-200/60',
+            innerBorder: 'border-rose-500/20',
+        }
+        : {
+            card: 'bg-gradient-to-br from-emerald-900 to-emerald-950 shadow-emerald-900/10 border-emerald-800/50',
+            heading: 'text-emerald-100',
+            sub: 'text-emerald-200/80',
+            subtle: 'text-emerald-200/60',
+            innerBorder: 'border-emerald-500/20',
+        };
+    const HeadingIcon = isOverBudget ? AlertTriangle : Target;
 
     return (
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Primary: Budget Health (2/3 width) */}
-            <div className="lg:col-span-2 rounded-2xl bg-gradient-to-br from-emerald-900 to-emerald-950 p-5 text-white shadow-xl shadow-emerald-900/10 border border-emerald-800/50 flex flex-col justify-center">
+            <div
+                aria-label={isOverBudget ? `Over budget by ${formatCurrency(Math.abs(remainingBudget))}` : undefined}
+                className={clsx(
+                    'lg:col-span-2 rounded-2xl p-5 text-white shadow-xl border flex flex-col justify-center',
+                    accent.card,
+                )}
+            >
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                     <div>
-                        <p className="text-emerald-100 font-medium mb-1 flex items-center gap-2">
-                            <Target className="h-4 w-4" />
+                        <p className={clsx('font-medium mb-1 flex items-center gap-2', accent.heading)}>
+                            <HeadingIcon className="h-4 w-4" />
                             Monthly Budget
+                            {isOverBudget && (
+                                <span
+                                    role="status"
+                                    aria-live="polite"
+                                    className="ml-1 inline-flex items-center rounded-full bg-rose-500/20 px-2 py-0.5 text-xs font-semibold text-white ring-1 ring-inset ring-rose-400/30"
+                                >
+                                    Over budget
+                                </span>
+                            )}
                         </p>
                         <h1 className="text-4xl md:text-5xl font-bold tracking-tight">
                             {formatCurrency(remainingBudget)}
                         </h1>
-                        <p className="text-emerald-200/80 mt-2 text-sm">
-                            remaining of {formatCurrency(totalBudgeted)} limit
+                        <p className={clsx('mt-2 text-sm', accent.sub)}>
+                            {isOverBudget ? 'over' : 'remaining of'} {formatCurrency(totalBudgeted)} limit
                         </p>
                     </div>
 
-                    <div className="flex-1 max-w-sm w-full bg-black/20 rounded-xl p-4 backdrop-blur-sm border border-emerald-500/20">
+                    <div className={clsx(
+                        'flex-1 max-w-sm w-full bg-black/20 rounded-xl p-4 backdrop-blur-sm border',
+                        accent.innerBorder,
+                    )}>
                         <div className="flex justify-between text-sm mb-2">
-                            <span className="text-emerald-100">Spent so far</span>
+                            <span className={accent.heading}>Spent so far</span>
                             <span className="font-bold">{Math.round(budgetHealth)}%</span>
                         </div>
                         <div className="h-3 w-full bg-black/20 rounded-full overflow-hidden">
                             <div
-                                className={`h-full rounded-full transition-all duration-500 ${budgetHealth > 100 ? 'bg-rose-500' :
-                                    budgetHealth > 85 ? 'bg-amber-400' : 'bg-emerald-400'
-                                    }`}
+                                className={clsx(
+                                    'h-full rounded-full transition-all duration-500',
+                                    budgetHealth > 100 ? 'bg-rose-500' : budgetHealth > 85 ? 'bg-amber-400' : 'bg-emerald-400',
+                                )}
                                 style={{ width: `${Math.min(budgetHealth, 100)}%` }}
                             />
                         </div>
-                        <div className="flex justify-between text-xs text-emerald-200/60 mt-2">
+                        <div className={clsx('flex justify-between text-xs mt-2', accent.subtle)}>
                             <span>{formatCurrency(totalSpent)} spent</span>
                             <span>{formatCurrency(totalBudgeted)} total</span>
                         </div>
