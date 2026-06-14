@@ -4,6 +4,7 @@ import * as plaidService from '../services/plaid.js';
 import { categorizeWithPlaid, cleanMerchantName, PlaidPFC } from '../services/categorizer.js';
 import { detectTransactionType } from '../services/transaction-type.js';
 import { getCategoryIdForType } from '../services/category-lookup.js';
+import { buildAccountResolver } from '../services/sync-attribution.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -208,20 +209,45 @@ router.post('/:id/sync', async (req, res) => {
 
     const mappingMap = new Map(mappings?.map(m => [m.original_name.toLowerCase(), m]) || []);
 
+    // A Plaid item can hold multiple accounts (e.g. an Amex login with both a
+    // Gold and a Platinum card). /transactions/sync returns all of them tagged
+    // with their own account_id, so attribute each transaction to the correct
+    // local row rather than dumping them all onto the row that triggered sync.
+    const { data: itemAccounts } = await supabase
+      .from('accounts')
+      .select('id, plaid_account_id')
+      .eq('plaid_item_id', account.plaid_item_id);
+
+    const resolveAccountId = buildAccountResolver(itemAccounts || [], id);
+
     let addedCount = 0;
     let modifiedCount = 0;
     let removedCount = 0;
+    let reattributedCount = 0;
 
     // Handle added transactions
     for (const tx of syncResult.added) {
+      const targetAccountId = resolveAccountId(tx.account_id);
+
       // Check if already exists
       const { data: existing } = await supabase
         .from('transactions')
-        .select('id')
+        .select('id, account_id')
         .eq('plaid_transaction_id', tx.transaction_id)
         .single();
 
-      if (existing) continue;
+      if (existing) {
+        // Re-attribute if a prior sync filed this transaction under the wrong
+        // card. Preserves all user edits (splits, category, notes, display name).
+        if (existing.account_id !== targetAccountId) {
+          await supabase
+            .from('transactions')
+            .update({ account_id: targetAccountId })
+            .eq('id', existing.id);
+          reattributedCount++;
+        }
+        continue;
+      }
 
       const texts = [tx.merchant_name || '', tx.name || '', (tx as { original_description?: string }).original_description || ''];
       const mapping = mappingMap.get(tx.merchant_name?.toLowerCase() || '');
@@ -253,7 +279,7 @@ router.post('/:id/sync', async (req, res) => {
 
       await supabase.from('transactions').insert({
         id: uuidv4(),
-        account_id: id,
+        account_id: targetAccountId,
         plaid_transaction_id: tx.transaction_id,
         amount: tx.amount,
         date: tx.date,
@@ -275,22 +301,40 @@ router.post('/:id/sync', async (req, res) => {
     // Handle modified transactions
     for (const tx of syncResult.modified) {
       const texts = [tx.merchant_name || '', tx.name || '', (tx as { original_description?: string }).original_description || ''];
-      const displayName = cleanMerchantName(tx.merchant_name || tx.name);
+      const newMerchantName = tx.merchant_name || tx.name;
       const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
 
       const transactionType = detectTransactionType(tx.amount, texts, plaidPFC);
 
+      // Preserve a user-customized display name. merchant_display_name is
+      // user-editable and wins in the UI, so only refresh it when it still
+      // equals the auto-cleaned form of the prior merchant_name (i.e. untouched).
+      const { data: existing } = await supabase
+        .from('transactions')
+        .select('merchant_name, merchant_display_name')
+        .eq('plaid_transaction_id', tx.transaction_id)
+        .single();
+
+      const update: Record<string, unknown> = {
+        account_id: resolveAccountId(tx.account_id),
+        amount: tx.amount,
+        date: tx.date,
+        merchant_name: newMerchantName,
+        original_description: (tx as { original_description?: string }).original_description || tx.name,
+        transaction_type: transactionType,
+        pending: tx.pending,
+      };
+
+      const userCustomizedDisplayName =
+        !!existing?.merchant_display_name &&
+        existing.merchant_display_name !== cleanMerchantName(existing.merchant_name);
+      if (!userCustomizedDisplayName) {
+        update.merchant_display_name = cleanMerchantName(newMerchantName);
+      }
+
       await supabase
         .from('transactions')
-        .update({
-          amount: tx.amount,
-          date: tx.date,
-          merchant_name: tx.merchant_name || tx.name,
-          original_description: (tx as { original_description?: string }).original_description || tx.name,
-          merchant_display_name: displayName,
-          transaction_type: transactionType,
-          pending: tx.pending,
-        })
+        .update(update)
         .eq('plaid_transaction_id', tx.transaction_id);
       modifiedCount++;
     }
@@ -304,24 +348,36 @@ router.post('/:id/sync', async (req, res) => {
       removedCount++;
     }
 
-    // Update the cursor and historical sync status
+    // Update the cursor and historical sync status. The Plaid cursor is
+    // item-level, so advance it for every account under the item to keep them
+    // in lockstep (the webhook path does the same). Balance is per-account.
     const historicalComplete = syncResult.transactionsUpdateStatus === 'HISTORICAL_UPDATE_COMPLETE';
     await supabase
       .from('accounts')
-      .update({
-        plaid_cursor: syncResult.nextCursor,
-        historical_sync_complete: historicalComplete || account.historical_sync_complete,
-        current_balance: latestBalance
-      })
+      .update({ plaid_cursor: syncResult.nextCursor })
+      .eq('plaid_item_id', account.plaid_item_id);
+
+    // historical_sync_complete only ever flips to true (never back to false).
+    if (historicalComplete) {
+      await supabase
+        .from('accounts')
+        .update({ historical_sync_complete: true })
+        .eq('plaid_item_id', account.plaid_item_id);
+    }
+
+    await supabase
+      .from('accounts')
+      .update({ current_balance: latestBalance })
       .eq('id', id);
 
-    console.log(`Sync complete: +${addedCount} added, ~${modifiedCount} modified, -${removedCount} removed`);
+    console.log(`Sync complete: +${addedCount} added, ~${modifiedCount} modified, -${removedCount} removed, ⇄${reattributedCount} re-attributed`);
     console.log(`Historical sync status: ${syncResult.transactionsUpdateStatus || 'unknown'}`);
 
     res.json({
       added: addedCount,
       modified: modifiedCount,
       removed: removedCount,
+      reattributed: reattributedCount,
       cursor_updated: true,
       transactions_update_status: syncResult.transactionsUpdateStatus,
       historical_complete: historicalComplete || account.historical_sync_complete,
@@ -557,6 +613,43 @@ router.patch('/:id', async (req, res) => {
   } catch (error) {
     console.error('Error updating account:', error);
     res.status(500).json({ message: 'Failed to update account' });
+  }
+});
+
+// Reset an account's Plaid sync cursor. The next sync then re-delivers the full
+// transaction history from Plaid, which re-runs attribution and corrects rows
+// that a prior sync filed under the wrong card on a multi-account item.
+router.post('/:id/reset-cursor', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Look up the account's item so we can reset the cursor for every account
+    // under it. The Plaid cursor is item-level; nulling only one row's cursor
+    // would leave siblings able to resume from a stale cursor, so the full
+    // re-delivery (and re-attribution) might not happen.
+    const { data: account, error: accountError } = await supabase
+      .from('accounts')
+      .select('id, plaid_item_id, institution_name')
+      .eq('id', id)
+      .single();
+
+    if (accountError || !account) {
+      return res.status(404).json({ message: 'Account not found' });
+    }
+
+    const { data, error } = await supabase
+      .from('accounts')
+      .update({ plaid_cursor: null })
+      .eq('plaid_item_id', account.plaid_item_id)
+      .select('id, account_name');
+
+    if (error) throw error;
+
+    console.log(`Reset Plaid cursor for ${data?.length ?? 0} account(s) under item ${account.plaid_item_id} (${account.institution_name})`);
+    res.json({ success: true, reset_count: data?.length ?? 0, accounts: data });
+  } catch (error) {
+    console.error('Error resetting cursor:', error);
+    res.status(500).json({ message: 'Failed to reset cursor' });
   }
 });
 

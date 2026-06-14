@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
 import * as plaidService from '../services/plaid.js';
 import { categorizeWithPlaid, cleanMerchantName, PlaidPFC } from '../services/categorizer.js';
+import { buildAccountResolver } from '../services/sync-attribution.js';
 import { v4 as uuidv4 } from 'uuid';
 
 import { detectTransactionType } from '../services/transaction-type.js';
@@ -16,11 +17,18 @@ const router = Router();
 const WEBHOOK_SYNC_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
 const lastWebhookSyncByItem = new Map<string, number>();
 
-// Process synced transactions and save to database
+// Process synced transactions and save to database.
+// `itemAccounts` are all local account rows under the Plaid item, used to
+// attribute each transaction to the correct card via its Plaid account_id.
+// `triggeringAccountId` is the fallback when a transaction's account_id is
+// unknown (single-account items, or an account not yet stored locally).
 const processSyncedTransactions = async (
-  accountId: string,
+  itemAccounts: { id: string; plaid_account_id: string | null }[],
+  triggeringAccountId: string,
   syncResult: Awaited<ReturnType<typeof plaidService.syncTransactions>>
 ) => {
+  const resolveAccountId = buildAccountResolver(itemAccounts, triggeringAccountId);
+
   // Get categories for mapping
   const { data: categories } = await supabase.from('categories').select('id, name');
   const categoryMap = new Map(categories?.map(c => [c.name, c.id]) || []);
@@ -32,17 +40,30 @@ const processSyncedTransactions = async (
   let addedCount = 0;
   let modifiedCount = 0;
   let removedCount = 0;
+  let reattributedCount = 0;
 
   // Handle added transactions
   for (const tx of syncResult.added) {
+    const targetAccountId = resolveAccountId(tx.account_id);
+
     // Check if already exists (shouldn't happen with sync, but safety check)
     const { data: existing } = await supabase
       .from('transactions')
-      .select('id')
+      .select('id, account_id')
       .eq('plaid_transaction_id', tx.transaction_id)
       .single();
 
-    if (existing) continue;
+    if (existing) {
+      // Re-attribute if a prior sync filed this under the wrong card.
+      if (existing.account_id !== targetAccountId) {
+        await supabase
+          .from('transactions')
+          .update({ account_id: targetAccountId })
+          .eq('id', existing.id);
+        reattributedCount++;
+      }
+      continue;
+    }
 
     const texts = [tx.merchant_name || '', tx.name || '', (tx as { original_description?: string }).original_description || ''];
     const mapping = mappingMap.get(tx.merchant_name?.toLowerCase() || '');
@@ -76,7 +97,7 @@ const processSyncedTransactions = async (
 
     await supabase.from('transactions').insert({
       id: uuidv4(),
-      account_id: accountId,
+      account_id: targetAccountId,
       plaid_transaction_id: tx.transaction_id,
       amount: tx.amount,
       date: tx.date,
@@ -97,20 +118,37 @@ const processSyncedTransactions = async (
   // Handle modified transactions
   for (const tx of syncResult.modified) {
     const texts = [tx.merchant_name || '', tx.name || '', (tx as { original_description?: string }).original_description || ''];
-    const displayName = cleanMerchantName(tx.merchant_name || tx.name);
+    const newMerchantName = tx.merchant_name || tx.name;
     const transactionType = detectTransactionType(tx.amount, texts);
+
+    // Preserve a user-customized display name (it wins in the UI); only refresh
+    // it when it still equals the auto-cleaned form of the prior merchant_name.
+    const { data: existing } = await supabase
+      .from('transactions')
+      .select('merchant_name, merchant_display_name')
+      .eq('plaid_transaction_id', tx.transaction_id)
+      .single();
+
+    const update: Record<string, unknown> = {
+      account_id: resolveAccountId(tx.account_id),
+      amount: tx.amount,
+      date: tx.date,
+      merchant_name: newMerchantName,
+      original_description: (tx as { original_description?: string }).original_description || tx.name,
+      transaction_type: transactionType,
+      pending: tx.pending,
+    };
+
+    const userCustomizedDisplayName =
+      !!existing?.merchant_display_name &&
+      existing.merchant_display_name !== cleanMerchantName(existing.merchant_name);
+    if (!userCustomizedDisplayName) {
+      update.merchant_display_name = cleanMerchantName(newMerchantName);
+    }
 
     await supabase
       .from('transactions')
-      .update({
-        amount: tx.amount,
-        date: tx.date,
-        merchant_name: tx.merchant_name || tx.name,
-        original_description: (tx as { original_description?: string }).original_description || tx.name,
-        merchant_display_name: displayName,
-        transaction_type: transactionType,
-        pending: tx.pending,
-      })
+      .update(update)
       .eq('plaid_transaction_id', tx.transaction_id);
     modifiedCount++;
   }
@@ -124,7 +162,7 @@ const processSyncedTransactions = async (
     removedCount++;
   }
 
-  return { addedCount, modifiedCount, removedCount };
+  return { addedCount, modifiedCount, removedCount, reattributedCount };
 };
 
 // Plaid webhook endpoint
@@ -157,17 +195,20 @@ router.post('/plaid', async (req, res) => {
 
     // Handle TRANSACTIONS webhooks
     if (webhook_type === 'TRANSACTIONS') {
-      // Find the account by item_id
-      const { data: account, error: accountError } = await supabase
+      // An item can have multiple accounts (e.g. an Amex login with two cards).
+      // Fetch all of them: one is the representative used for the access token
+      // and cursor, while the full list drives per-card attribution.
+      const { data: itemAccounts, error: accountError } = await supabase
         .from('accounts')
         .select('*')
-        .eq('plaid_item_id', item_id)
-        .single();
+        .eq('plaid_item_id', item_id);
 
-      if (accountError || !account) {
+      if (accountError || !itemAccounts || itemAccounts.length === 0) {
         console.error('Account not found for item_id:', item_id);
         return res.status(200).json({ received: true, error: 'Account not found' });
       }
+
+      const account = itemAccounts[0];
 
       if (webhook_code === 'SYNC_UPDATES_AVAILABLE') {
         console.log(`Sync updates available for account ${account.id}`);
@@ -193,20 +234,21 @@ router.post('/plaid', async (req, res) => {
             account.plaid_cursor
           );
 
-          // Process the synced transactions
-          const counts = await processSyncedTransactions(account.id, syncResult);
-          console.log(`Processed: +${counts.addedCount} added, ~${counts.modifiedCount} modified, -${counts.removedCount} removed`);
+          // Process the synced transactions, attributing each to the right card
+          const counts = await processSyncedTransactions(itemAccounts, account.id, syncResult);
+          console.log(`Processed: +${counts.addedCount} added, ~${counts.modifiedCount} modified, -${counts.removedCount} removed, ⇄${counts.reattributedCount} re-attributed`);
 
-          // Update the cursor and historical_sync_complete flag
+          // Update the cursor and historical_sync_complete flag for every
+          // account under the item — the cursor is item-level.
           await supabase
             .from('accounts')
             .update({
               plaid_cursor: syncResult.nextCursor,
               historical_sync_complete: historical_update_complete || false,
             })
-            .eq('id', account.id);
+            .eq('plaid_item_id', item_id);
 
-          console.log(`Cursor updated for account ${account.id}`);
+          console.log(`Cursor updated for item ${item_id} (${itemAccounts.length} account(s))`);
 
 
         }
@@ -217,22 +259,22 @@ router.post('/plaid', async (req, res) => {
           account.plaid_access_token,
           account.plaid_cursor
         );
-        const counts = await processSyncedTransactions(account.id, syncResult);
+        const counts = await processSyncedTransactions(itemAccounts, account.id, syncResult);
         console.log(`Initial sync: +${counts.addedCount} transactions`);
 
         await supabase
           .from('accounts')
           .update({ plaid_cursor: syncResult.nextCursor })
-          .eq('id', account.id);
+          .eq('plaid_item_id', item_id);
 
 
       } else if (webhook_code === 'HISTORICAL_UPDATE') {
-        console.log(`Historical update complete for account ${account.id}`);
-        // Mark historical sync as complete
+        console.log(`Historical update complete for item ${item_id}`);
+        // Mark historical sync as complete for every account under the item
         await supabase
           .from('accounts')
           .update({ historical_sync_complete: true })
-          .eq('id', account.id);
+          .eq('plaid_item_id', item_id);
       }
     }
 
