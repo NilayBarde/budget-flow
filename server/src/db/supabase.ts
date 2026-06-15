@@ -23,6 +23,9 @@ export type Database = {
     account_name: string;
     account_type: string;
     created_at: string;
+    needs_reauth: boolean;
+    reauth_detected_at: string | null;
+    last_synced_at: string | null;
   };
   transactions: {
     id: string;

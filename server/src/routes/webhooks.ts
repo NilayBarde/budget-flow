@@ -3,6 +3,7 @@ import { supabase } from '../db/supabase.js';
 import * as plaidService from '../services/plaid.js';
 import { categorizeWithPlaid, cleanMerchantName, PlaidPFC } from '../services/categorizer.js';
 import { buildAccountResolver } from '../services/sync-attribution.js';
+import { reconcilePendingTransaction } from '../services/pending-reconciliation.js';
 import { v4 as uuidv4 } from 'uuid';
 
 import { detectTransactionType } from '../services/transaction-type.js';
@@ -41,6 +42,7 @@ const processSyncedTransactions = async (
   let modifiedCount = 0;
   let removedCount = 0;
   let reattributedCount = 0;
+  let reconciledCount = 0;
 
   // Handle added transactions
   for (const tx of syncResult.added) {
@@ -95,8 +97,9 @@ const processSyncedTransactions = async (
       categoryId = categoryMap.get('Investment') || null;
     }
 
+    const newTxId = uuidv4();
     await supabase.from('transactions').insert({
-      id: uuidv4(),
+      id: newTxId,
       account_id: targetAccountId,
       plaid_transaction_id: tx.transaction_id,
       amount: tx.amount,
@@ -113,6 +116,11 @@ const processSyncedTransactions = async (
       plaid_category: plaidPFC || null,
     });
     addedCount++;
+
+    // Reconcile against a superseded pending auth (carry edits/splits, drop pending).
+    if (await reconcilePendingTransaction(newTxId, tx.amount, tx.pending_transaction_id)) {
+      reconciledCount++;
+    }
   }
 
   // Handle modified transactions
@@ -162,7 +170,7 @@ const processSyncedTransactions = async (
     removedCount++;
   }
 
-  return { addedCount, modifiedCount, removedCount, reattributedCount };
+  return { addedCount, modifiedCount, removedCount, reattributedCount, reconciledCount };
 };
 
 // Plaid webhook endpoint
@@ -175,21 +183,16 @@ router.post('/plaid', async (req, res) => {
 
     // Handle ITEM webhooks (authentication issues)
     if (webhook_type === 'ITEM') {
-      // Find the account by item_id
-      const { data: account } = await supabase
-        .from('accounts')
-        .select('*')
-        .eq('plaid_item_id', item_id)
-        .single();
-
-      if (account) {
-        if (webhook_code === 'ITEM_LOGIN_REQUIRED' || webhook_code === 'ERROR') {
-          console.log(`⚠️ Account ${account.id} (${account.institution_name}) requires re-authentication`);
-          console.log(`   Webhook code: ${webhook_code}`);
-          console.log(`   This is common for American Express accounts due to frequent MFA requirements`);
-          // Note: We don't delete the account, but user will need to reconnect
-          // Future: Could add a flag to mark account as needing re-auth
-        }
+      // These codes mean the user must reconnect the item before it will sync
+      // again (common for OAuth banks like American Express, which re-auth often).
+      const reauthCodes = ['ITEM_LOGIN_REQUIRED', 'ERROR', 'PENDING_EXPIRATION', 'PENDING_DISCONNECT'];
+      if (reauthCodes.includes(webhook_code)) {
+        const { data: flagged } = await supabase
+          .from('accounts')
+          .update({ needs_reauth: true, reauth_detected_at: new Date().toISOString() })
+          .eq('plaid_item_id', item_id)
+          .select('id, institution_name');
+        console.log(`⚠️ Item ${item_id} flagged for re-auth (${webhook_code}) — ${flagged?.length ?? 0} account(s): ${flagged?.map(a => a.institution_name).join(', ') || 'none'}`);
       }
     }
 
@@ -236,15 +239,20 @@ router.post('/plaid', async (req, res) => {
 
           // Process the synced transactions, attributing each to the right card
           const counts = await processSyncedTransactions(itemAccounts, account.id, syncResult);
-          console.log(`Processed: +${counts.addedCount} added, ~${counts.modifiedCount} modified, -${counts.removedCount} removed, ⇄${counts.reattributedCount} re-attributed`);
+          console.log(`Processed: +${counts.addedCount} added, ~${counts.modifiedCount} modified, -${counts.removedCount} removed, ⇄${counts.reattributedCount} re-attributed, ⤳${counts.reconciledCount} pending-reconciled`);
 
           // Update the cursor and historical_sync_complete flag for every
-          // account under the item — the cursor is item-level.
+          // account under the item — the cursor is item-level. A successful sync
+          // also proves the item is healthy, so stamp last_synced_at and clear
+          // any re-auth flag.
           await supabase
             .from('accounts')
             .update({
               plaid_cursor: syncResult.nextCursor,
               historical_sync_complete: historical_update_complete || false,
+              last_synced_at: new Date().toISOString(),
+              needs_reauth: false,
+              reauth_detected_at: null,
             })
             .eq('plaid_item_id', item_id);
 
@@ -264,7 +272,12 @@ router.post('/plaid', async (req, res) => {
 
         await supabase
           .from('accounts')
-          .update({ plaid_cursor: syncResult.nextCursor })
+          .update({
+            plaid_cursor: syncResult.nextCursor,
+            last_synced_at: new Date().toISOString(),
+            needs_reauth: false,
+            reauth_detected_at: null,
+          })
           .eq('plaid_item_id', item_id);
 
 

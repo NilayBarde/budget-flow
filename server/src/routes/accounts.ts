@@ -5,6 +5,7 @@ import { categorizeWithPlaid, cleanMerchantName, PlaidPFC } from '../services/ca
 import { detectTransactionType } from '../services/transaction-type.js';
 import { getCategoryIdForType } from '../services/category-lookup.js';
 import { buildAccountResolver } from '../services/sync-attribution.js';
+import { reconcilePendingTransaction } from '../services/pending-reconciliation.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -49,6 +50,40 @@ router.get('/', async (req, res) => {
   } catch (error) {
     console.error('Error fetching accounts:', error);
     res.status(500).json({ message: 'Failed to fetch accounts' });
+  }
+});
+
+// Sync health: which Plaid-linked accounts need attention (re-auth required, or
+// haven't synced successfully in a while). Manual accounts are excluded since
+// they never sync via Plaid.
+router.get('/sync-health', async (req, res) => {
+  try {
+    const staleDays = Number(req.query.staleDays) || 5;
+    const staleBefore = new Date(Date.now() - staleDays * 24 * 60 * 60 * 1000).toISOString();
+
+    const { data: accounts, error } = await supabase
+      .from('accounts')
+      .select('id, institution_name, account_name, account_type, needs_reauth, reauth_detected_at, last_synced_at')
+      .neq('plaid_access_token', 'manual');
+
+    if (error) throw error;
+
+    const needsReauth = (accounts || []).filter(a => a.needs_reauth);
+    // Stale = never synced, or last successful sync older than the threshold.
+    // Exclude accounts already flagged for re-auth to avoid double-listing.
+    const stale = (accounts || []).filter(a =>
+      !a.needs_reauth && (!a.last_synced_at || a.last_synced_at < staleBefore)
+    );
+
+    res.json({
+      healthy: needsReauth.length === 0 && stale.length === 0,
+      staleDays,
+      needs_reauth: needsReauth,
+      stale,
+    });
+  } catch (error) {
+    console.error('Error fetching sync health:', error);
+    res.status(500).json({ message: 'Failed to fetch sync health' });
   }
 });
 
@@ -224,6 +259,7 @@ router.post('/:id/sync', async (req, res) => {
     let modifiedCount = 0;
     let removedCount = 0;
     let reattributedCount = 0;
+    let reconciledCount = 0;
 
     // Handle added transactions
     for (const tx of syncResult.added) {
@@ -277,8 +313,9 @@ router.post('/:id/sync', async (req, res) => {
         }
       }
 
+      const newTxId = uuidv4();
       await supabase.from('transactions').insert({
-        id: uuidv4(),
+        id: newTxId,
         account_id: targetAccountId,
         plaid_transaction_id: tx.transaction_id,
         amount: tx.amount,
@@ -296,6 +333,13 @@ router.post('/:id/sync', async (req, res) => {
       });
 
       addedCount++;
+
+      // If this posted transaction supersedes a pending auth, carry the pending
+      // row's edits/splits onto it and remove the pending row (prevents the
+      // tip-adjustment double-count).
+      if (await reconcilePendingTransaction(newTxId, tx.amount, tx.pending_transaction_id)) {
+        reconciledCount++;
+      }
     }
 
     // Handle modified transactions
@@ -352,9 +396,16 @@ router.post('/:id/sync', async (req, res) => {
     // item-level, so advance it for every account under the item to keep them
     // in lockstep (the webhook path does the same). Balance is per-account.
     const historicalComplete = syncResult.transactionsUpdateStatus === 'HISTORICAL_UPDATE_COMPLETE';
+    // A successful sync proves the item is authenticated and healthy: advance the
+    // item-level cursor, stamp last_synced_at, and clear any re-auth flag.
     await supabase
       .from('accounts')
-      .update({ plaid_cursor: syncResult.nextCursor })
+      .update({
+        plaid_cursor: syncResult.nextCursor,
+        last_synced_at: new Date().toISOString(),
+        needs_reauth: false,
+        reauth_detected_at: null,
+      })
       .eq('plaid_item_id', account.plaid_item_id);
 
     // historical_sync_complete only ever flips to true (never back to false).
@@ -370,7 +421,7 @@ router.post('/:id/sync', async (req, res) => {
       .update({ current_balance: latestBalance })
       .eq('id', id);
 
-    console.log(`Sync complete: +${addedCount} added, ~${modifiedCount} modified, -${removedCount} removed, ⇄${reattributedCount} re-attributed`);
+    console.log(`Sync complete: +${addedCount} added, ~${modifiedCount} modified, -${removedCount} removed, ⇄${reattributedCount} re-attributed, ⤳${reconciledCount} pending-reconciled`);
     console.log(`Historical sync status: ${syncResult.transactionsUpdateStatus || 'unknown'}`);
 
     res.json({
@@ -378,6 +429,7 @@ router.post('/:id/sync', async (req, res) => {
       modified: modifiedCount,
       removed: removedCount,
       reattributed: reattributedCount,
+      reconciled: reconciledCount,
       cursor_updated: true,
       transactions_update_status: syncResult.transactionsUpdateStatus,
       historical_complete: historicalComplete || account.historical_sync_complete,

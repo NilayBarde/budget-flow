@@ -9,6 +9,13 @@ export const useAccounts = () => {
   });
 };
 
+export const useSyncHealth = () => {
+  return useQuery({
+    queryKey: ['sync-health'],
+    queryFn: api.getSyncHealth,
+  });
+};
+
 export const useCreateManualAccount = () => {
   const queryClient = useQueryClient();
 
