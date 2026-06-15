@@ -15,7 +15,27 @@ export interface Account {
   exclude_from_investments?: boolean;
   investment_exclusion_note?: string | null;
   last_csv_import_at?: string | null;
+  needs_reauth?: boolean;
+  reauth_detected_at?: string | null;
+  last_synced_at?: string | null;
   created_at: string;
+}
+
+export interface SyncHealthAccount {
+  id: string;
+  institution_name: string;
+  account_name: string;
+  account_type: string;
+  needs_reauth: boolean;
+  reauth_detected_at: string | null;
+  last_synced_at: string | null;
+}
+
+export interface SyncHealth {
+  healthy: boolean;
+  staleDays: number;
+  needs_reauth: SyncHealthAccount[];
+  stale: SyncHealthAccount[];
 }
 
 export interface PlaidPFC {

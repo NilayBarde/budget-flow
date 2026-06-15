@@ -15,6 +15,7 @@ import type {
   InvestmentSummary,
   InsightsData,
   SavingsGoal,
+  SyncHealth,
 } from '../types';
 
 const fetchApi = async <T>(
@@ -107,6 +108,8 @@ export interface CreateManualAccountData {
 
 // Accounts
 export const getAccounts = () => fetchApi<Account[]>('/accounts');
+
+export const getSyncHealth = () => fetchApi<SyncHealth>('/accounts/sync-health');
 
 export const createManualAccount = (data: CreateManualAccountData) =>
   fetchApi<Account>('/accounts/manual', {

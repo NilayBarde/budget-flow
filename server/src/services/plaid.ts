@@ -129,6 +129,7 @@ interface PlaidSyncTransaction {
   merchant_name?: string | null;
   category?: string[];
   pending: boolean;
+  pending_transaction_id?: string | null;
   original_description?: string;
   personal_finance_category?: {
     primary?: string;

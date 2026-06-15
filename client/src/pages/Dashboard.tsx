@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { Card, CardHeader, Spinner, Button, MonthSelector, CategoryPieChart } from '../components/ui';
 import { DashboardHero } from '../components/dashboard/DashboardHero';
+import { SyncHealthBanner } from '../components/dashboard/SyncHealthBanner';
 import { DailySpending } from '../components/dashboard/DailySpending';
 import { SpendingPace } from '../components/dashboard/SpendingPace';
 import { RecentActivity } from '../components/dashboard/RecentActivity';
@@ -61,6 +62,8 @@ export const Dashboard = () => {
           </Button>
         </div>
       </div>
+
+      <SyncHealthBanner />
 
       <DashboardHero
         month={currentDate.month}
