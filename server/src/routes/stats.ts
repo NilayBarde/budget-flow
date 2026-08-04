@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
 import { computeSpendingVelocity } from '../services/spending-velocity.js';
 import {
   rankTopCategories,
@@ -19,8 +20,7 @@ import type { CategoryData } from '../types/stats.js';
 const router = Router();
 
 // Get monthly stats
-router.get('/monthly', async (req, res) => {
-  try {
+router.get('/monthly', asyncHandler(async (req, res) => {
     const { month, year } = req.query;
 
     if (!month || !year) {
@@ -102,15 +102,10 @@ router.get('/monthly', async (req, res) => {
       pending_spent: pendingSpent,
       by_category: byCategory,
     });
-  } catch (error) {
-    console.error('Error fetching monthly stats:', error);
-    res.status(500).json({ message: 'Failed to fetch monthly stats' });
-  }
-});
+}));
 
 // Get yearly stats
-router.get('/yearly', async (req, res) => {
-  try {
+router.get('/yearly', asyncHandler(async (req, res) => {
     const { year } = req.query;
 
     if (!year) {
@@ -211,15 +206,10 @@ router.get('/yearly', async (req, res) => {
       total_income: totalIncome,
       total_invested: totalInvested,
     });
-  } catch (error) {
-    console.error('Error fetching yearly stats:', error);
-    res.status(500).json({ message: 'Failed to fetch yearly stats' });
-  }
-});
+}));
 
 // Get spending insights (trends, merchants, velocity, daily breakdown)
-router.get('/insights', async (req, res) => {
-  try {
+router.get('/insights', asyncHandler(async (req, res) => {
     const now = new Date();
     const currentMonth = now.getMonth() + 1; // 1-indexed
     const currentYear = now.getFullYear();
@@ -493,15 +483,10 @@ router.get('/insights', async (req, res) => {
       dailySpending: dailySpendingArr,
       monthOverMonth,
     });
-  } catch (error) {
-    console.error('Error fetching insights:', error);
-    res.status(500).json({ message: 'Failed to fetch insights' });
-  }
-});
+}));
 
-// Estimated monthly income — average of the last 3 complete months of income
-router.get('/estimated-income', async (req, res) => {
-  try {
+// Estimated monthly income, the average of the last 3 complete months of income
+router.get('/estimated-income', asyncHandler(async (req, res) => {
     const now = new Date();
     // Go back 3 full months from the 1st of the current month
     const endDate = new Date(now.getFullYear(), now.getMonth(), 1); // 1st of current month
@@ -535,10 +520,6 @@ router.get('/estimated-income', async (req, res) => {
       months_sampled: monthsWithData,
       monthly_breakdown: Object.fromEntries(monthlyIncome),
     });
-  } catch (error) {
-    console.error('Error estimating income:', error);
-    res.status(500).json({ message: 'Failed to estimate income' });
-  }
-});
+}));
 
 export default router;
