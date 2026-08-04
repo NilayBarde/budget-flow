@@ -12,6 +12,7 @@ import {
   type MerchantAggregate,
 } from '../services/merchant-stats.js';
 import { percentChange } from '../services/mom-totals.js';
+import { getMyShareAmount, computeCategorySpend, type SpendRow } from '../services/category-spend.js';
 import type { CategoryData } from '../types/stats.js';
 
 const router = Router();
@@ -46,13 +47,7 @@ router.get('/monthly', async (req, res) => {
     let totalReturns = 0;
     let totalIncome = 0;
     let totalInvested = 0;
-    const categoryTotals = new Map<string, { category: CategoryData; amount: number }>();
 
-    // Two-pass approach: accumulate expenses first, then subtract returns
-    // This avoids order-dependent bugs where returns processed before expenses get swallowed
-    const returns: Array<{ amount: number; category: CategoryData | null }> = [];
-
-    // Pass 1: accumulate expenses, income, investments
     transactions?.forEach(t => {
       const transactionType = t.transaction_type || (t.amount > 0 ? 'expense' : 'income');
 
@@ -61,36 +56,34 @@ router.get('/monthly', async (req, res) => {
       if (transactionType === 'investment') {
         totalInvested += Math.abs(t.amount);
       } else if (transactionType === 'expense') {
-        const amountToCount = getExpenseAmount(t);
-        grossExpenses += amountToCount;
-
-        const category = t.category as unknown as CategoryData | null;
-        if (category && amountToCount > 0) {
-          const existing = categoryTotals.get(category.id);
-          if (existing) {
-            existing.amount += amountToCount;
-          } else {
-            categoryTotals.set(category.id, { category, amount: amountToCount });
-          }
-        }
+        grossExpenses += getMyShareAmount(t);
       } else if (transactionType === 'return') {
-        const returnAmount = Math.abs(t.amount);
-        totalReturns += returnAmount;
-        returns.push({ amount: returnAmount, category: t.category as unknown as CategoryData | null });
+        totalReturns += getMyShareAmount(t);
       } else if (transactionType === 'income') {
         totalIncome += Math.abs(t.amount);
       }
     });
 
-    // Pass 2: subtract returns from their respective categories (now fully accumulated)
-    for (const ret of returns) {
-      if (ret.category) {
-        const existing = categoryTotals.get(ret.category.id);
-        if (existing) {
-          existing.amount = Math.max(0, existing.amount - ret.amount);
-        }
-      }
-    }
+    // Per-category spend via the shared service so the Dashboard hero,
+    // budget goals, and this endpoint can never disagree.
+    const categoryById = new Map<string, CategoryData>();
+    const spendRows: SpendRow[] = (transactions || []).map(t => {
+      const category = t.category as unknown as CategoryData | null;
+      if (category) categoryById.set(category.id, category);
+      return {
+        category_id: category?.id ?? null,
+        amount: t.amount,
+        transaction_type: t.transaction_type,
+        is_split: t.is_split,
+        splits: t.splits as SpendRow['splits'],
+      };
+    });
+    const spentByCategory = computeCategorySpend(spendRows);
+
+    const byCategory = Array.from(spentByCategory.entries())
+      .filter(([, amount]) => amount > 0)
+      .map(([id, amount]) => ({ category: categoryById.get(id)!, amount }))
+      .sort((a, b) => b.amount - a.amount);
 
     // Total spent = gross expenses - returns (same formula as transactions page)
     const totalSpent = Math.max(0, grossExpenses - totalReturns);
@@ -101,7 +94,7 @@ router.get('/monthly', async (req, res) => {
       total_spent: totalSpent,
       total_income: totalIncome,
       total_invested: totalInvested,
-      by_category: Array.from(categoryTotals.values()).sort((a, b) => b.amount - a.amount),
+      by_category: byCategory,
     });
   } catch (error) {
     console.error('Error fetching monthly stats:', error);
@@ -165,7 +158,7 @@ router.get('/yearly', async (req, res) => {
         totalInvested += amount;
         monthlyTotals[month].invested += amount;
       } else if (transactionType === 'expense') {
-        const amountToCount = getExpenseAmount(t);
+        const amountToCount = getMyShareAmount(t);
         grossExpenses += amountToCount;
         monthlyTotals[month].spent += amountToCount;
 
@@ -179,7 +172,8 @@ router.get('/yearly', async (req, res) => {
           }
         }
       } else if (transactionType === 'return') {
-        const returnAmount = Math.abs(t.amount);
+        // Returns respect splits like everywhere else (only my share nets out)
+        const returnAmount = getMyShareAmount(t);
         totalReturns += returnAmount;
         returns.push({ amount: returnAmount, month, category: t.category as unknown as CategoryData | null });
       } else if (transactionType === 'income') {
@@ -216,21 +210,6 @@ router.get('/yearly', async (req, res) => {
     res.status(500).json({ message: 'Failed to fetch yearly stats' });
   }
 });
-
-// Helper: compute the expense amount for a transaction, respecting splits
-const getExpenseAmount = (t: {
-  amount: number;
-  is_split: boolean;
-  splits: unknown;
-}): number => {
-  const splits = t.splits as { amount: number; is_my_share: boolean }[] | null;
-  if (t.is_split && splits && splits.length > 0) {
-    return splits
-      .filter(s => s.is_my_share)
-      .reduce((sum, s) => sum + Math.abs(s.amount), 0);
-  }
-  return Math.abs(t.amount);
-};
 
 // Get spending insights (trends, merchants, velocity, daily breakdown)
 router.get('/insights', async (req, res) => {
@@ -332,7 +311,7 @@ router.get('/insights', async (req, res) => {
       const monthKey = `${txYear}-${String(txMonth).padStart(2, '0')}`;
 
       if (transactionType === 'expense') {
-        const amountToCount = getExpenseAmount(t);
+        const amountToCount = getMyShareAmount(t);
 
         // Category trends
         const category = t.category as unknown as CategoryData | null;
@@ -388,7 +367,7 @@ router.get('/insights', async (req, res) => {
         }
       } else if (transactionType === 'return') {
         // Returns also respect splits (only subtract my share)
-        const returnAmount = getExpenseAmount(t);
+        const returnAmount = getMyShareAmount(t);
 
         // Category trends: reduce
         const category = t.category as unknown as CategoryData | null;
