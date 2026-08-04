@@ -6,6 +6,8 @@ import { Button } from '../components/ui';
 import { useTransactions, useAccounts, useCategories, useTags, useBulkAddTagToTransactions, useDeleteTransaction, useBulkDeleteTransactions, useExpectedIncome } from '../hooks';
 import type { Transaction, TransactionFilters as Filters, TransactionType } from '../types';
 import { getMonthYear } from '../utils/formatters';
+import { getMyShareAmount } from '../utils/my-share';
+import { sortTransactions, filterByAmountRange, type TransactionSortOption } from '../utils/transactionSort';
 
 type TypeFilter = TransactionType | 'all';
 
@@ -40,6 +42,10 @@ export const Transactions = () => {
     return { month, year };
   });
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
+  const [sort, setSort] = useState<TransactionSortOption>('date_desc');
+  // Amount range filter, kept as raw input strings so partial typing works
+  const [minAmount, setMinAmount] = useState('');
+  const [maxAmount, setMaxAmount] = useState('');
 
   // Sync URL search params when date filter changes
   useEffect(() => {
@@ -68,6 +74,20 @@ export const Transactions = () => {
   }, [filters, typeFilter]);
 
   const { data: transactions, isLoading } = useTransactions(queryFilters);
+
+  // Apply client-side amount range filter and sorting to the loaded month
+  const displayedTransactions = useMemo(() => {
+    if (!transactions) return transactions;
+    const min = minAmount !== '' ? Math.abs(parseFloat(minAmount)) : undefined;
+    const max = maxAmount !== '' ? Math.abs(parseFloat(maxAmount)) : undefined;
+    const filtered = filterByAmountRange(
+      transactions,
+      Number.isNaN(min) ? undefined : min,
+      Number.isNaN(max) ? undefined : max
+    );
+    return sortTransactions(filtered, sort);
+  }, [transactions, sort, minAmount, maxAmount]);
+
   // Separate unfiltered query for header totals — ensures totals always reflect the full month
   // regardless of which type tab is active
   const { data: allTransactions } = useTransactions(filters);
@@ -179,9 +199,7 @@ export const Transactions = () => {
         const type = t.transaction_type || (t.amount > 0 ? 'expense' : 'income');
 
         // For split transactions, sum only the user's share
-        const amount = t.is_split && t.splits?.length
-          ? t.splits.filter(s => s.is_my_share).reduce((sum, s) => sum + Math.abs(s.amount), 0)
-          : Math.abs(t.amount);
+        const amount = getMyShareAmount(t);
 
         if (type === 'expense') {
           acc.expenses += amount;
@@ -208,7 +226,7 @@ export const Transactions = () => {
           <h1 className="text-2xl md:text-3xl font-bold text-slate-100">Transactions</h1>
           {/* Desktop: single-line summary */}
           <p className="hidden sm:block text-slate-400 mt-1 text-base">
-            <span>{transactions?.length || 0} transactions</span>
+            <span>{displayedTransactions?.length || 0} transactions</span>
             <span> • </span>
             <span className="text-rose-400">-${(totals.expenses - totals.returns).toFixed(2)}</span>
             {totals.returns > 0 && (
@@ -227,7 +245,7 @@ export const Transactions = () => {
           </p>
           {/* Mobile: structured compact rows */}
           <div className="sm:hidden mt-1.5 text-xs text-slate-400 space-y-0.5">
-            <p>{transactions?.length || 0} transactions</p>
+            <p>{displayedTransactions?.length || 0} transactions</p>
             <div className="flex items-center gap-2 overflow-x-auto no-scrollbar whitespace-nowrap">
               <span className="text-rose-400">-${(totals.expenses - totals.returns).toFixed(2)}</span>
               {totals.returns > 0 && (
@@ -300,10 +318,18 @@ export const Transactions = () => {
         categories={categories}
         accounts={accounts}
         tags={tags}
+        sort={sort}
+        onSortChange={setSort}
+        minAmount={minAmount}
+        maxAmount={maxAmount}
+        onAmountRangeChange={(min, max) => {
+          setMinAmount(min);
+          setMaxAmount(max);
+        }}
       />
 
       <TransactionList
-        transactions={transactions}
+        transactions={displayedTransactions}
         isLoading={isLoading}
         onEdit={handleEdit}
         onSplit={handleSplit}

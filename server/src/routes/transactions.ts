@@ -3,6 +3,7 @@ import { supabase } from '../db/supabase.js';
 import { v4 as uuidv4 } from 'uuid';
 import { categorizeWithPlaid, cleanMerchantName } from '../services/categorizer.js';
 import { getCategoryIdForType } from '../services/category-lookup.js';
+import { getMyShareAmount, type SplitShare } from '../services/category-spend.js';
 import type { TransactionType } from '../services/transaction-type.js';
 
 const router = Router();
@@ -447,15 +448,7 @@ router.patch('/:id', async (req, res) => {
         const monthlyTotals = new Map<string, number>();
         const allTxns = recurringTxns || [];
         for (const t of allTxns) {
-          const splits = t.splits as { amount: number; is_my_share: boolean }[] | null;
-          let txAmount: number;
-          if (t.is_split && splits && splits.length > 0) {
-            txAmount = splits
-              .filter(s => s.is_my_share)
-              .reduce((sum, s) => sum + Math.abs(s.amount), 0);
-          } else {
-            txAmount = Math.abs(t.amount);
-          }
+          const txAmount = getMyShareAmount({ ...t, splits: t.splits as SplitShare[] | null });
           const monthKey = (t.date as string).slice(0, 7); // "YYYY-MM"
           monthlyTotals.set(monthKey, (monthlyTotals.get(monthKey) || 0) + txAmount);
         }
@@ -468,15 +461,7 @@ router.patch('/:id', async (req, res) => {
             .eq('id', id)
             .single();
           if (thisTx) {
-            const splits = thisTx.splits as { amount: number; is_my_share: boolean }[] | null;
-            let txAmount: number;
-            if (thisTx.is_split && splits && splits.length > 0) {
-              txAmount = splits
-                .filter(s => s.is_my_share)
-                .reduce((sum, s) => sum + Math.abs(s.amount), 0);
-            } else {
-              txAmount = Math.abs(thisTx.amount);
-            }
+            const txAmount = getMyShareAmount({ ...thisTx, splits: thisTx.splits as SplitShare[] | null });
             const monthKey = (thisTx.date as string).slice(0, 7);
             monthlyTotals.set(monthKey, txAmount);
           }

@@ -1,3 +1,5 @@
+import { monthlyEquivalentAmount, type RecurringFrequency } from './recurring-normalize.js';
+
 export interface FixedCostSeries {
   /** Average monthly amount this series is expected to charge. */
   expectedAmount: number;
@@ -126,9 +128,20 @@ const computeProjectedVariable = (
  */
 export const LIVE_SERIES_MAX_AGE_DAYS = 45;
 
+// Yearly series are exempt from the liveness check: their last charge can
+// legitimately be up to a year old, while the insights endpoint only
+// fetches 6 months of transactions, so a missing recent charge is not
+// evidence the series is dead.
+const livenessWindowDays: Record<RecurringFrequency, number | null> = {
+  weekly: LIVE_SERIES_MAX_AGE_DAYS,
+  monthly: LIVE_SERIES_MAX_AGE_DAYS,
+  yearly: null,
+};
+
 export interface RecurringChargeRow {
   merchantDisplayName: string;
   averageAmount: number;
+  frequency: RecurringFrequency;
 }
 
 export const buildFixedCostSeries = (
@@ -143,11 +156,16 @@ export const buildFixedCostSeries = (
 
   return charges
     .filter(c => {
+      if (livenessWindowDays[c.frequency] === null) return true;
       const lastSeen = lastExpenseDateByMerchant.get(c.merchantDisplayName);
       return !!lastSeen && lastSeen >= cutoff;
     })
     .map(c => ({
-      expectedAmount: c.averageAmount,
+      // Weekly and yearly charges are normalized to a monthly equivalent.
+      // A yearly charge contributes 1/12 here but its full amount to paid
+      // in its billing month; the per-series max(0, expected - paid) clamp
+      // below absorbs that without double counting.
+      expectedAmount: monthlyEquivalentAmount(c.frequency, c.averageAmount),
       paidThisMonth: paidThisMonthByMerchant.get(c.merchantDisplayName) || 0,
     }));
 };

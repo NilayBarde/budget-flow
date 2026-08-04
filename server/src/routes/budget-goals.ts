@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
 import { v4 as uuidv4 } from 'uuid';
 import { asyncHandler } from '../utils/asyncHandler.js';
+import { computeCategorySpend, type SpendRow } from '../services/category-spend.js';
 
 const router = Router();
 
@@ -46,31 +47,8 @@ router.get(
       .lte('date', endDate)
       .in('transaction_type', ['expense', 'return']);
 
-    // Sum by category, accounting for splits and netting out returns
-    const spentByCategory = new Map<string, number>();
-    transactions?.forEach((t) => {
-      if (t.category_id) {
-        // If transaction has splits, only count the "my share" portions
-        let amountToCount: number;
-        const splits = t.splits as { amount: number; is_my_share: boolean }[] | null;
-        if (t.is_split && splits && splits.length > 0) {
-          amountToCount = splits
-            .filter((s) => s.is_my_share)
-            .reduce((sum, s) => sum + Math.abs(s.amount), 0);
-        } else {
-          amountToCount = Math.abs(t.amount);
-        }
-
-        const current = spentByCategory.get(t.category_id) || 0;
-        if (t.transaction_type === 'expense') {
-          // Add expenses
-          spentByCategory.set(t.category_id, current + amountToCount);
-        } else if (t.transaction_type === 'return') {
-          // Subtract returns to net out against expenses in the same category
-          spentByCategory.set(t.category_id, Math.max(0, current - amountToCount));
-        }
-      }
-    });
+    // Sum by category via the shared service (split-aware, two-pass returns netting)
+    const spentByCategory = computeCategorySpend((transactions || []) as SpendRow[]);
 
     // Attach spent to goals
     const goalsWithSpent = goals?.map((g) => ({

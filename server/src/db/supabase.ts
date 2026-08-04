@@ -36,10 +36,15 @@ export type Database = {
     date: string;
     merchant_name: string;
     merchant_display_name: string | null;
+    original_description: string | null;
     category_id: string | null;
+    transaction_type: 'income' | 'expense' | 'transfer' | 'investment' | 'return';
     is_split: boolean;
     parent_transaction_id: string | null;
     is_recurring: boolean;
+    needs_review: boolean;
+    pending: boolean;
+    plaid_category: { primary?: string; detailed?: string } | null;
     notes: string | null;
     created_at: string;
   };
@@ -63,6 +68,7 @@ export type Database = {
     parent_transaction_id: string;
     amount: number;
     description: string;
+    is_my_share: boolean;
     created_at: string;
   };
   merchant_mappings: {

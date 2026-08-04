@@ -273,9 +273,14 @@ describe('computeSpendingVelocity', () => {
 });
 
 describe('buildFixedCostSeries', () => {
-  const charge = (merchantDisplayName: string, averageAmount: number) => ({
+  const charge = (
+    merchantDisplayName: string,
+    averageAmount: number,
+    frequency: 'weekly' | 'monthly' | 'yearly' = 'monthly',
+  ) => ({
     merchantDisplayName,
     averageAmount,
+    frequency,
   });
 
   it('excludes a series whose merchant has not charged within the liveness window', () => {
@@ -334,6 +339,70 @@ describe('buildFixedCostSeries', () => {
     );
 
     expect(result).toHaveLength(1);
+  });
+
+  it('normalizes a live weekly series to its monthly equivalent', () => {
+    const result = buildFixedCostSeries(
+      [charge('Weekly Cleaner', 60, 'weekly')],
+      new Map([['Weekly Cleaner', '2026-08-01']]),
+      new Map([['Weekly Cleaner', 60]]),
+      '2026-08-04',
+    );
+
+    // 60 * 52 / 12 = 260
+    expect(result).toEqual([{ expectedAmount: 260, paidThisMonth: 60 }]);
+  });
+
+  it('excludes a stale weekly series like a stale monthly one', () => {
+    const result = buildFixedCostSeries(
+      [charge('Cancelled Cleaner', 60, 'weekly')],
+      new Map([['Cancelled Cleaner', '2026-05-01']]),
+      new Map(),
+      '2026-08-04',
+    );
+
+    expect(result).toEqual([]);
+  });
+
+  it('keeps a yearly series regardless of when it last charged', () => {
+    // The insights endpoint fetches 6 months of transactions, so a yearly
+    // charge from 8 months ago is invisible; absence of a recent charge
+    // must not drop the series.
+    const result = buildFixedCostSeries(
+      [charge('Annual Insurance', 1200, 'yearly'), charge('Unseen Annual', 600, 'yearly')],
+      new Map([['Annual Insurance', '2026-03-15']]),
+      new Map(),
+      '2026-08-04',
+    );
+
+    // 1200 / 12 = 100 and 600 / 12 = 50 per month
+    expect(result).toEqual([
+      { expectedAmount: 100, paidThisMonth: 0 },
+      { expectedAmount: 50, paidThisMonth: 0 },
+    ]);
+  });
+
+  it('clamps a yearly series to zero remaining in its billing month', () => {
+    // The full $1200 posts in August; expected is the $100 monthly
+    // equivalent. Per-series max(0, expected - paid) must not project
+    // anything extra on top of the paid amount.
+    const fixedCostSeries = buildFixedCostSeries(
+      [charge('Annual Insurance', 1200, 'yearly')],
+      new Map([['Annual Insurance', '2026-08-02']]),
+      new Map([['Annual Insurance', 1200]]),
+      '2026-08-04',
+    );
+
+    const result = computeSpendingVelocity({
+      daysElapsed: 4,
+      daysInMonth: 31,
+      spentSoFar: 1200,
+      fixedCostSeries,
+      lastMonthTotal: 0,
+      dailyVariableSpending: [0, 0, 0, 0],
+    });
+
+    expect(result.projectedTotal).toBeCloseTo(1200, 5);
   });
 
   describe('regression: August 2026 dashboard projection', () => {
