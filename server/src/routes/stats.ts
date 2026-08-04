@@ -13,6 +13,7 @@ import {
 } from '../services/merchant-stats.js';
 import { percentChange } from '../services/mom-totals.js';
 import { getMyShareAmount, computeCategorySpend, type SpendRow } from '../services/category-spend.js';
+import { monthlyEquivalentAmount, type RecurringFrequency } from '../services/recurring-normalize.js';
 import type { CategoryData } from '../types/stats.js';
 
 const router = Router();
@@ -239,18 +240,21 @@ router.get('/insights', async (req, res) => {
     const currentMonthEnd = new Date(currentYear, currentMonth, 0)
       .toISOString().split('T')[0];
 
-    // ── Query active monthly recurring charges ────────────────────────
+    // ── Query all active recurring charges (any frequency) ────────────
     const { data: recurringCharges } = await supabase
       .from('recurring_transactions')
-      .select('merchant_display_name, average_amount')
-      .eq('is_active', true)
-      .eq('frequency', 'monthly');
+      .select('merchant_display_name, average_amount, frequency')
+      .eq('is_active', true);
 
     const recurringMerchants = new Set(
       (recurringCharges || []).map(r => r.merchant_display_name)
     );
+    // Weekly and yearly charges are normalized to a monthly equivalent.
+    // A yearly charge contributes 1/12 here but its full amount to
+    // recurring spend in its billing month; the max(0, expected - spent)
+    // clamp in spending-velocity absorbs that without double counting.
     const expectedFixedCosts = (recurringCharges || [])
-      .reduce((sum, r) => sum + r.average_amount, 0);
+      .reduce((sum, r) => sum + monthlyEquivalentAmount(r.frequency as RecurringFrequency, r.average_amount), 0);
 
     // Single query for all 6 months of transactions
     const { data: transactions, error } = await supabase
