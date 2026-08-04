@@ -8,6 +8,7 @@ import { SpendingPace } from '../components/dashboard/SpendingPace';
 import { RecentActivity } from '../components/dashboard/RecentActivity';
 import { BudgetWatchlist } from '../components/dashboard/BudgetWatchlist';
 import { BudgetVariance } from '../components/dashboard/BudgetVariance';
+import { LargeUnsplitTransactions } from '../components/dashboard/LargeUnsplitTransactions';
 import { useMonthlyStats, useMonthNavigation } from '../hooks';
 import { MONTHS } from '../utils/constants';
 
@@ -105,6 +106,11 @@ export const Dashboard = () => {
             </Card>
 
             <BudgetWatchlist
+              month={currentDate.month}
+              year={currentDate.year}
+            />
+
+            <LargeUnsplitTransactions
               month={currentDate.month}
               year={currentDate.year}
             />

@@ -77,6 +77,10 @@ export const MONTHS = [
 
 export const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
+// Unsplit expenses at or above this amount surface in the Dashboard's
+// "Possible missed splits" card.
+export const LARGE_UNSPLIT_THRESHOLD = 100;
+
 // Shared Recharts tooltip styles used across chart components
 export const CHART_TOOLTIP_STYLE = {
   backgroundColor: '#252a3d',
