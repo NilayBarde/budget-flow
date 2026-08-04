@@ -35,6 +35,7 @@ router.get('/monthly', async (req, res) => {
         amount,
         transaction_type,
         is_split,
+        pending,
         category:categories(id, name, color, icon),
         splits:transaction_splits(amount, is_my_share)
       `)
@@ -47,6 +48,7 @@ router.get('/monthly', async (req, res) => {
     let totalReturns = 0;
     let totalIncome = 0;
     let totalInvested = 0;
+    let pendingSpent = 0;
 
     transactions?.forEach(t => {
       const transactionType = t.transaction_type || (t.amount > 0 ? 'expense' : 'income');
@@ -56,7 +58,9 @@ router.get('/monthly', async (req, res) => {
       if (transactionType === 'investment') {
         totalInvested += Math.abs(t.amount);
       } else if (transactionType === 'expense') {
-        grossExpenses += getMyShareAmount(t);
+        const amountToCount = getMyShareAmount(t);
+        grossExpenses += amountToCount;
+        if (t.pending) pendingSpent += amountToCount;
       } else if (transactionType === 'return') {
         totalReturns += getMyShareAmount(t);
       } else if (transactionType === 'income') {
@@ -94,6 +98,7 @@ router.get('/monthly', async (req, res) => {
       total_spent: totalSpent,
       total_income: totalIncome,
       total_invested: totalInvested,
+      pending_spent: pendingSpent,
       by_category: byCategory,
     });
   } catch (error) {
