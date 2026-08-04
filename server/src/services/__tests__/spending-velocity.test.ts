@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { computeSpendingVelocity } from '../spending-velocity.js';
+import { buildFixedCostSeries, computeSpendingVelocity } from '../spending-velocity.js';
+
+/** Shorthand: a single fixed-cost series fully described by two numbers. */
+const series = (expectedAmount: number, paidThisMonth: number) => ({
+  expectedAmount,
+  paidThisMonth,
+});
 
 describe('computeSpendingVelocity', () => {
   describe('contract', () => {
@@ -9,8 +15,7 @@ describe('computeSpendingVelocity', () => {
           daysElapsed: 5,
           daysInMonth: 30,
           spentSoFar: 0,
-          recurringSpent: 0,
-          expectedFixedCosts: 0,
+          fixedCostSeries: [],
           lastMonthTotal: 0,
           dailyVariableSpending: [10, 20, 30],
         }),
@@ -24,8 +29,7 @@ describe('computeSpendingVelocity', () => {
         daysElapsed: 0,
         daysInMonth: 30,
         spentSoFar: 0,
-        recurringSpent: 0,
-        expectedFixedCosts: 0,
+        fixedCostSeries: [],
         lastMonthTotal: 0,
         dailyVariableSpending: [],
       });
@@ -43,8 +47,7 @@ describe('computeSpendingVelocity', () => {
         daysElapsed: 30,
         daysInMonth: 30,
         spentSoFar: 3500,
-        recurringSpent: 500,
-        expectedFixedCosts: 500,
+        fixedCostSeries: [series(500, 500)],
         lastMonthTotal: 3400,
         dailyVariableSpending,
       });
@@ -60,8 +63,7 @@ describe('computeSpendingVelocity', () => {
         daysElapsed: 10,
         daysInMonth: 30,
         spentSoFar: 1000,
-        recurringSpent: 0,
-        expectedFixedCosts: 0,
+        fixedCostSeries: [],
         lastMonthTotal: 3000,
         dailyVariableSpending: Array(10).fill(100),
       });
@@ -79,8 +81,7 @@ describe('computeSpendingVelocity', () => {
         daysElapsed: 5,
         daysInMonth: 30,
         spentSoFar: 500,
-        recurringSpent: 500,
-        expectedFixedCosts: 500,
+        fixedCostSeries: [series(500, 500)],
         lastMonthTotal: 500,
         dailyVariableSpending: [0, 0, 0, 0, 0],
       });
@@ -89,22 +90,17 @@ describe('computeSpendingVelocity', () => {
     });
 
     it('projects only the unpaid portion of expected fixed costs', () => {
-      // $300 of $1000 expected fixed has posted; no variable activity.
-      // Old (buggy) formula: 1000 + 0 = 1000 ALSO 1000, so this scenario
-      // wouldn't expose the bug. Use a case where double-count actually
-      // shows up: more recurring posted than expected.
+      // More recurring posted ($1500) than expected ($1000): the paid
+      // amount wins; nothing extra is projected on top.
       const result = computeSpendingVelocity({
         daysElapsed: 5,
         daysInMonth: 30,
         spentSoFar: 1500,
-        recurringSpent: 1500,
-        expectedFixedCosts: 1000,
+        fixedCostSeries: [series(1000, 1500)],
         lastMonthTotal: 1500,
         dailyVariableSpending: [0, 0, 0, 0, 0],
       });
 
-      // Old formula would have produced 1000 + 0 = 1000, ignoring the
-      // $1500 already paid. New formula: 1500 + max(0, 1000-1500) + 0 = 1500.
       expect(result.projectedTotal).toBeCloseTo(1500, 5);
     });
 
@@ -114,14 +110,32 @@ describe('computeSpendingVelocity', () => {
         daysElapsed: 10,
         daysInMonth: 30,
         spentSoFar: 800, // 300 recurring + 500 variable
-        recurringSpent: 300,
-        expectedFixedCosts: 1000,
+        fixedCostSeries: [series(1000, 300)],
         lastMonthTotal: 2400,
         dailyVariableSpending: Array(10).fill(50),
       });
 
       // 300 + (1000-300) + (500 + 50*20) = 300 + 700 + 1500 = 2500
       expect(result.projectedTotal).toBeCloseTo(2500, 5);
+    });
+
+    it('computes unpaid fixed per series: one series overpaying does not hide another still due', () => {
+      // Rent posted $1100 against a $1000 average; the $75 gym charge has
+      // not posted yet. An aggregate guard (max(0, 1075 - 1100) = 0) would
+      // swallow the gym's upcoming charge; per-series it must survive.
+      const result = computeSpendingVelocity({
+        daysElapsed: 5,
+        daysInMonth: 30,
+        spentSoFar: 1100,
+        fixedCostSeries: [series(1000, 1100), series(75, 0)],
+        lastMonthTotal: 1500,
+        dailyVariableSpending: [0, 0, 0, 0, 0],
+      });
+
+      // 1100 paid + 75 still due + 0 variable
+      expect(result.projectedTotal).toBeCloseTo(1175, 5);
+      expect(result.recurringSpent).toBeCloseTo(1100, 5);
+      expect(result.expectedFixedCosts).toBeCloseTo(1075, 5);
     });
   });
 
@@ -135,8 +149,7 @@ describe('computeSpendingVelocity', () => {
         daysElapsed: 10,
         daysInMonth: 30,
         spentSoFar: 2950,
-        recurringSpent: 0,
-        expectedFixedCosts: 0,
+        fixedCostSeries: [],
         lastMonthTotal: 1500,
         dailyVariableSpending,
       });
@@ -157,8 +170,7 @@ describe('computeSpendingVelocity', () => {
         daysElapsed: 10,
         daysInMonth: 30,
         spentSoFar: 1080,
-        recurringSpent: 0,
-        expectedFixedCosts: 0,
+        fixedCostSeries: [],
         lastMonthTotal: 3000,
         dailyVariableSpending,
       });
@@ -180,8 +192,7 @@ describe('computeSpendingVelocity', () => {
         daysElapsed: 10,
         daysInMonth: 30,
         spentSoFar: 200,
-        recurringSpent: 0,
-        expectedFixedCosts: 0,
+        fixedCostSeries: [],
         lastMonthTotal: 500,
         dailyVariableSpending,
       });
@@ -198,8 +209,7 @@ describe('computeSpendingVelocity', () => {
         daysElapsed: 3,
         daysInMonth: 30,
         spentSoFar: 600,
-        recurringSpent: 0,
-        expectedFixedCosts: 0,
+        fixedCostSeries: [],
         lastMonthTotal: 2000,
         dailyVariableSpending: [500, 50, 50],
       });
@@ -228,8 +238,7 @@ describe('computeSpendingVelocity', () => {
         daysElapsed: 27,
         daysInMonth: 30,
         spentSoFar: 4237.71,
-        recurringSpent: 10.89,
-        expectedFixedCosts: 2596.31,
+        fixedCostSeries: [series(2585.42, 0), series(10.89, 10.89)],
         lastMonthTotal: 4080,
         dailyVariableSpending,
       });
@@ -241,13 +250,12 @@ describe('computeSpendingVelocity', () => {
   });
 
   describe('output shape', () => {
-    it('passes through metadata fields and renames fixed costs consistently', () => {
+    it('passes through metadata fields and derives fixed-cost totals from the series', () => {
       const result = computeSpendingVelocity({
         daysElapsed: 15,
         daysInMonth: 31,
         spentSoFar: 1200,
-        recurringSpent: 200,
-        expectedFixedCosts: 300,
+        fixedCostSeries: [series(300, 200)],
         lastMonthTotal: 2500,
         dailyVariableSpending: Array(15).fill(66.67),
       });
@@ -260,6 +268,117 @@ describe('computeSpendingVelocity', () => {
       expect(result.lastMonthTotal).toBe(2500);
       expect(result.variableSpent).toBeCloseTo(15 * 66.67, 5);
       expect(result).toHaveProperty('excludedOutlierAmount');
+    });
+  });
+});
+
+describe('buildFixedCostSeries', () => {
+  const charge = (merchantDisplayName: string, averageAmount: number) => ({
+    merchantDisplayName,
+    averageAmount,
+  });
+
+  it('excludes a series whose merchant has not charged within the liveness window', () => {
+    // "Bp" was the rent payee until February; the series was never
+    // deactivated but must not be projected in August.
+    const result = buildFixedCostSeries(
+      [charge('Bp', 2405)],
+      new Map([['Bp', '2026-02-02']]),
+      new Map(),
+      '2026-08-04',
+    );
+
+    expect(result).toEqual([]);
+  });
+
+  it('excludes a series whose merchant has no transactions at all', () => {
+    const result = buildFixedCostSeries(
+      [charge('Ghost Gym', 50)],
+      new Map(),
+      new Map(),
+      '2026-08-04',
+    );
+
+    expect(result).toEqual([]);
+  });
+
+  it('includes a recently-seen series that has not posted this month yet', () => {
+    const result = buildFixedCostSeries(
+      [charge('Active N Fit Direct', 75)],
+      new Map([['Active N Fit Direct', '2026-07-30']]),
+      new Map(),
+      '2026-08-04',
+    );
+
+    expect(result).toEqual([{ expectedAmount: 75, paidThisMonth: 0 }]);
+  });
+
+  it('includes a series paid this month with its paid amount attached', () => {
+    const result = buildFixedCostSeries(
+      [charge('Bilt Card - Housing Withdrawal Withdrawal', 2404.99)],
+      new Map([['Bilt Card - Housing Withdrawal Withdrawal', '2026-08-03']]),
+      new Map([['Bilt Card - Housing Withdrawal Withdrawal', 2497.49]]),
+      '2026-08-04',
+    );
+
+    expect(result).toEqual([{ expectedAmount: 2404.99, paidThisMonth: 2497.49 }]);
+  });
+
+  it('keeps a series exactly at the liveness boundary', () => {
+    // 45 days before 2026-08-04 is 2026-06-20.
+    const result = buildFixedCostSeries(
+      [charge('Edge Case Co', 20)],
+      new Map([['Edge Case Co', '2026-06-20']]),
+      new Map(),
+      '2026-08-04',
+    );
+
+    expect(result).toHaveLength(1);
+  });
+
+  describe('regression: August 2026 dashboard projection', () => {
+    it('drops stale rent + subscription series so the projection reflects reality', () => {
+      // Live data behind the reported $10,285.46 projection on day 4 of 31
+      // against a $4,500 budget: two of the four "active monthly" series
+      // had not charged in months (old rent payee "Bp", a lapsed
+      // subscription), inflating expected fixed costs to $4,895.88.
+      const fixedCostSeries = buildFixedCostSeries(
+        [
+          charge('Bp', 2405),
+          charge('Bilt Card - Housing Withdrawal Withdrawal', 2404.99),
+          charge('Active N Fit Direct', 75),
+          charge('Claude.ai', 10.89),
+        ],
+        new Map([
+          ['Bp', '2026-02-02'],
+          ['Bilt Card - Housing Withdrawal Withdrawal', '2026-08-03'],
+          ['Active N Fit Direct', '2026-07-30'],
+          ['Claude.ai', '2026-05-23'],
+        ]),
+        new Map([['Bilt Card - Housing Withdrawal Withdrawal', 2497.49]]),
+        '2026-08-04',
+      );
+
+      expect(fixedCostSeries).toEqual([
+        { expectedAmount: 2404.99, paidThisMonth: 2497.49 },
+        { expectedAmount: 75, paidThisMonth: 0 },
+      ]);
+
+      const result = computeSpendingVelocity({
+        daysElapsed: 4,
+        daysInMonth: 31,
+        spentSoFar: 3192.92,
+        fixedCostSeries,
+        lastMonthTotal: 0,
+        dailyVariableSpending: [157.43, 407.56, 108.75, 21.69],
+      });
+
+      // Old behavior: 2497.49 + (4895.88 - 2497.49) + 695.43/4*31 ≈ 10285.46.
+      // New: 2497.49 paid + 75 gym still due + 5389.58 variable ≈ 7962.07,
+      // so the ~$2,416 of dead series no longer haunts the projection.
+      expect(result.expectedFixedCosts).toBeCloseTo(2479.99, 2);
+      expect(result.projectedTotal).toBeCloseTo(7962.07, 1);
+      expect(result.projectedTotal).toBeLessThan(8000);
     });
   });
 });

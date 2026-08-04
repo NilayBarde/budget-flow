@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
-import { computeSpendingVelocity } from '../services/spending-velocity.js';
+import { buildFixedCostSeries, computeSpendingVelocity } from '../services/spending-velocity.js';
 import {
   rankTopCategories,
   buildCategoryTrends,
@@ -265,8 +265,6 @@ router.get('/insights', async (req, res) => {
     const recurringMerchants = new Set(
       (recurringCharges || []).map(r => r.merchant_display_name)
     );
-    const expectedFixedCosts = (recurringCharges || [])
-      .reduce((sum, r) => sum + r.average_amount, 0);
 
     // Single query for all 6 months of transactions
     const { data: transactions, error } = await supabase
@@ -316,7 +314,7 @@ router.get('/insights', async (req, res) => {
 
     // ── Spending velocity (current month) ──────────────────────────────
     let currentMonthSpent = 0;
-    let currentMonthRecurringSpent = 0;
+    const recurringPaidByMerchant = new Map<string, number>();
     let prevMonthTotalSpent = 0;
 
     // ── Process all transactions ───────────────────────────────────────
@@ -373,7 +371,10 @@ router.get('/insights', async (req, res) => {
           const merchantName = t.merchant_display_name || t.merchant_name;
           const isRecurring = !!merchantName && recurringMerchants.has(merchantName);
           if (isRecurring) {
-            currentMonthRecurringSpent += amountToCount;
+            recurringPaidByMerchant.set(
+              merchantName,
+              (recurringPaidByMerchant.get(merchantName) || 0) + amountToCount,
+            );
           } else {
             dailyVariable.set(day, (dailyVariable.get(day) || 0) + amountToCount);
           }
@@ -465,12 +466,28 @@ router.get('/insights', async (req, res) => {
       dailyVariableSpending.push(dailyVariable.get(d) || 0);
     }
 
+    // Only recurring series whose merchant has actually charged recently
+    // count as fixed costs; merchantMap already holds each merchant's most
+    // recent expense date across the 6-month window.
+    const lastExpenseDateByMerchant = new Map<string, string>(
+      Array.from(merchantMap.values()).map(m => [m.merchantName, m.lastDate]),
+    );
+    const todayStr = `${currentYear}-${String(currentMonth).padStart(2, '0')}-${String(today).padStart(2, '0')}`;
+    const fixedCostSeries = buildFixedCostSeries(
+      (recurringCharges || []).map(r => ({
+        merchantDisplayName: r.merchant_display_name,
+        averageAmount: r.average_amount,
+      })),
+      lastExpenseDateByMerchant,
+      recurringPaidByMerchant,
+      todayStr,
+    );
+
     const spendingVelocity = computeSpendingVelocity({
       daysElapsed: today,
       daysInMonth,
       spentSoFar: currentMonthSpent,
-      recurringSpent: currentMonthRecurringSpent,
-      expectedFixedCosts,
+      fixedCostSeries,
       lastMonthTotal: prevMonthTotalSpent,
       dailyVariableSpending,
     });
