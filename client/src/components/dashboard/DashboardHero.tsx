@@ -61,6 +61,7 @@ export const DashboardHero = ({ month, year }: { month: number; year: number }) 
         totalInvested,
         netWorth,
         totalSpent,
+        pendingSpent,
         isLoading: healthLoading
     } = useFinancialHealth(month, year);
 
@@ -158,6 +159,11 @@ export const DashboardHero = ({ month, year }: { month: number; year: number }) 
                             <span>{formatCurrency(totalSpent)} spent</span>
                             <span>{formatCurrency(totalBudgeted)} total</span>
                         </div>
+                        {pendingSpent > 0 && (
+                            <p className={clsx('text-xs mt-1', accent.subtle)}>
+                                includes {formatCurrency(pendingSpent)} pending
+                            </p>
+                        )}
                     </div>
                 </div>
 

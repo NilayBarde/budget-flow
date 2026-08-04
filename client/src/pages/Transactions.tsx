@@ -6,6 +6,7 @@ import { Button } from '../components/ui';
 import { useTransactions, useAccounts, useCategories, useTags, useBulkAddTagToTransactions, useDeleteTransaction, useBulkDeleteTransactions, useExpectedIncome } from '../hooks';
 import type { Transaction, TransactionFilters as Filters, TransactionType } from '../types';
 import { getMonthYear } from '../utils/formatters';
+import { getMyShareAmount } from '../utils/my-share';
 import { sortTransactions, filterByAmountRange, type TransactionSortOption } from '../utils/transactionSort';
 
 type TypeFilter = TransactionType | 'all';
@@ -198,9 +199,7 @@ export const Transactions = () => {
         const type = t.transaction_type || (t.amount > 0 ? 'expense' : 'income');
 
         // For split transactions, sum only the user's share
-        const amount = t.is_split && t.splits?.length
-          ? t.splits.filter(s => s.is_my_share).reduce((sum, s) => sum + Math.abs(s.amount), 0)
-          : Math.abs(t.amount);
+        const amount = getMyShareAmount(t);
 
         if (type === 'expense') {
           acc.expenses += amount;

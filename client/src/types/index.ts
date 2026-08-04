@@ -134,6 +134,7 @@ export interface MonthlyStats {
   total_spent: number;
   total_income: number;
   total_invested: number;
+  pending_spent: number;
   by_category: { category: Category; amount: number }[];
 }
 

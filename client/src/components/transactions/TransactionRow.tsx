@@ -3,6 +3,7 @@ import { MoreHorizontal, Split, Tag, Edit2, AlertCircle, Clock, Trash2 } from 'l
 import clsx from 'clsx';
 import type { Transaction } from '../../types';
 import { formatCurrency, formatDate } from '../../utils/formatters';
+import { getMyShareAmount } from '../../utils/my-share';
 import { Badge } from '../ui/Badge';
 
 interface TransactionRowProps {
@@ -66,17 +67,10 @@ export const TransactionRow = ({ transaction, onEdit, onSplit, onDelete, isSelec
     }
   }, [selectionMode, onSelect, transaction.id, isSelected]);
 
-  // Calculate my share for split transactions
-  const myShare = transaction.is_split && transaction.splits && transaction.splits.length > 0
-    ? transaction.splits
-        .filter(s => s.is_my_share)
-        .reduce((sum, s) => sum + Math.abs(s.amount), 0)
-    : null;
-  
   // Display amount: my share if split, otherwise full amount
-  const displayAmount = myShare !== null ? myShare : Math.abs(transaction.amount);
   const totalAmount = Math.abs(transaction.amount);
-  const showSplitTotal = myShare !== null && myShare !== totalAmount;
+  const displayAmount = getMyShareAmount(transaction);
+  const showSplitTotal = transaction.is_split && displayAmount !== totalAmount;
 
   // Sort tags alphabetically
   const sortedTags = transaction.tags 

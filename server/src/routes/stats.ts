@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
 import { computeSpendingVelocity } from '../services/spending-velocity.js';
 import {
   rankTopCategories,
@@ -12,13 +13,14 @@ import {
   type MerchantAggregate,
 } from '../services/merchant-stats.js';
 import { percentChange } from '../services/mom-totals.js';
+import { getMyShareAmount, computeCategorySpend, type SpendRow } from '../services/category-spend.js';
+import { monthlyEquivalentAmount, type RecurringFrequency } from '../services/recurring-normalize.js';
 import type { CategoryData } from '../types/stats.js';
 
 const router = Router();
 
 // Get monthly stats
-router.get('/monthly', async (req, res) => {
-  try {
+router.get('/monthly', asyncHandler(async (req, res) => {
     const { month, year } = req.query;
 
     if (!month || !year) {
@@ -34,6 +36,7 @@ router.get('/monthly', async (req, res) => {
         amount,
         transaction_type,
         is_split,
+        pending,
         category:categories(id, name, color, icon),
         splits:transaction_splits(amount, is_my_share)
       `)
@@ -46,13 +49,8 @@ router.get('/monthly', async (req, res) => {
     let totalReturns = 0;
     let totalIncome = 0;
     let totalInvested = 0;
-    const categoryTotals = new Map<string, { category: CategoryData; amount: number }>();
+    let pendingSpent = 0;
 
-    // Two-pass approach: accumulate expenses first, then subtract returns
-    // This avoids order-dependent bugs where returns processed before expenses get swallowed
-    const returns: Array<{ amount: number; category: CategoryData | null }> = [];
-
-    // Pass 1: accumulate expenses, income, investments
     transactions?.forEach(t => {
       const transactionType = t.transaction_type || (t.amount > 0 ? 'expense' : 'income');
 
@@ -61,36 +59,36 @@ router.get('/monthly', async (req, res) => {
       if (transactionType === 'investment') {
         totalInvested += Math.abs(t.amount);
       } else if (transactionType === 'expense') {
-        const amountToCount = getExpenseAmount(t);
+        const amountToCount = getMyShareAmount(t);
         grossExpenses += amountToCount;
-
-        const category = t.category as unknown as CategoryData | null;
-        if (category && amountToCount > 0) {
-          const existing = categoryTotals.get(category.id);
-          if (existing) {
-            existing.amount += amountToCount;
-          } else {
-            categoryTotals.set(category.id, { category, amount: amountToCount });
-          }
-        }
+        if (t.pending) pendingSpent += amountToCount;
       } else if (transactionType === 'return') {
-        const returnAmount = Math.abs(t.amount);
-        totalReturns += returnAmount;
-        returns.push({ amount: returnAmount, category: t.category as unknown as CategoryData | null });
+        totalReturns += getMyShareAmount(t);
       } else if (transactionType === 'income') {
         totalIncome += Math.abs(t.amount);
       }
     });
 
-    // Pass 2: subtract returns from their respective categories (now fully accumulated)
-    for (const ret of returns) {
-      if (ret.category) {
-        const existing = categoryTotals.get(ret.category.id);
-        if (existing) {
-          existing.amount = Math.max(0, existing.amount - ret.amount);
-        }
-      }
-    }
+    // Per-category spend via the shared service so the Dashboard hero,
+    // budget goals, and this endpoint can never disagree.
+    const categoryById = new Map<string, CategoryData>();
+    const spendRows: SpendRow[] = (transactions || []).map(t => {
+      const category = t.category as unknown as CategoryData | null;
+      if (category) categoryById.set(category.id, category);
+      return {
+        category_id: category?.id ?? null,
+        amount: t.amount,
+        transaction_type: t.transaction_type,
+        is_split: t.is_split,
+        splits: t.splits as SpendRow['splits'],
+      };
+    });
+    const spentByCategory = computeCategorySpend(spendRows);
+
+    const byCategory = Array.from(spentByCategory.entries())
+      .filter(([, amount]) => amount > 0)
+      .map(([id, amount]) => ({ category: categoryById.get(id)!, amount }))
+      .sort((a, b) => b.amount - a.amount);
 
     // Total spent = gross expenses - returns (same formula as transactions page)
     const totalSpent = Math.max(0, grossExpenses - totalReturns);
@@ -101,17 +99,13 @@ router.get('/monthly', async (req, res) => {
       total_spent: totalSpent,
       total_income: totalIncome,
       total_invested: totalInvested,
-      by_category: Array.from(categoryTotals.values()).sort((a, b) => b.amount - a.amount),
+      pending_spent: pendingSpent,
+      by_category: byCategory,
     });
-  } catch (error) {
-    console.error('Error fetching monthly stats:', error);
-    res.status(500).json({ message: 'Failed to fetch monthly stats' });
-  }
-});
+}));
 
 // Get yearly stats
-router.get('/yearly', async (req, res) => {
-  try {
+router.get('/yearly', asyncHandler(async (req, res) => {
     const { year } = req.query;
 
     if (!year) {
@@ -165,7 +159,7 @@ router.get('/yearly', async (req, res) => {
         totalInvested += amount;
         monthlyTotals[month].invested += amount;
       } else if (transactionType === 'expense') {
-        const amountToCount = getExpenseAmount(t);
+        const amountToCount = getMyShareAmount(t);
         grossExpenses += amountToCount;
         monthlyTotals[month].spent += amountToCount;
 
@@ -179,7 +173,8 @@ router.get('/yearly', async (req, res) => {
           }
         }
       } else if (transactionType === 'return') {
-        const returnAmount = Math.abs(t.amount);
+        // Returns respect splits like everywhere else (only my share nets out)
+        const returnAmount = getMyShareAmount(t);
         totalReturns += returnAmount;
         returns.push({ amount: returnAmount, month, category: t.category as unknown as CategoryData | null });
       } else if (transactionType === 'income') {
@@ -211,30 +206,10 @@ router.get('/yearly', async (req, res) => {
       total_income: totalIncome,
       total_invested: totalInvested,
     });
-  } catch (error) {
-    console.error('Error fetching yearly stats:', error);
-    res.status(500).json({ message: 'Failed to fetch yearly stats' });
-  }
-});
-
-// Helper: compute the expense amount for a transaction, respecting splits
-const getExpenseAmount = (t: {
-  amount: number;
-  is_split: boolean;
-  splits: unknown;
-}): number => {
-  const splits = t.splits as { amount: number; is_my_share: boolean }[] | null;
-  if (t.is_split && splits && splits.length > 0) {
-    return splits
-      .filter(s => s.is_my_share)
-      .reduce((sum, s) => sum + Math.abs(s.amount), 0);
-  }
-  return Math.abs(t.amount);
-};
+}));
 
 // Get spending insights (trends, merchants, velocity, daily breakdown)
-router.get('/insights', async (req, res) => {
-  try {
+router.get('/insights', asyncHandler(async (req, res) => {
     const now = new Date();
     const currentMonth = now.getMonth() + 1; // 1-indexed
     const currentYear = now.getFullYear();
@@ -255,18 +230,21 @@ router.get('/insights', async (req, res) => {
     const currentMonthEnd = new Date(currentYear, currentMonth, 0)
       .toISOString().split('T')[0];
 
-    // ── Query active monthly recurring charges ────────────────────────
+    // ── Query all active recurring charges (any frequency) ────────────
     const { data: recurringCharges } = await supabase
       .from('recurring_transactions')
-      .select('merchant_display_name, average_amount')
-      .eq('is_active', true)
-      .eq('frequency', 'monthly');
+      .select('merchant_display_name, average_amount, frequency')
+      .eq('is_active', true);
 
     const recurringMerchants = new Set(
       (recurringCharges || []).map(r => r.merchant_display_name)
     );
+    // Weekly and yearly charges are normalized to a monthly equivalent.
+    // A yearly charge contributes 1/12 here but its full amount to
+    // recurring spend in its billing month; the max(0, expected - spent)
+    // clamp in spending-velocity absorbs that without double counting.
     const expectedFixedCosts = (recurringCharges || [])
-      .reduce((sum, r) => sum + r.average_amount, 0);
+      .reduce((sum, r) => sum + monthlyEquivalentAmount(r.frequency as RecurringFrequency, r.average_amount), 0);
 
     // Single query for all 6 months of transactions
     const { data: transactions, error } = await supabase
@@ -332,7 +310,7 @@ router.get('/insights', async (req, res) => {
       const monthKey = `${txYear}-${String(txMonth).padStart(2, '0')}`;
 
       if (transactionType === 'expense') {
-        const amountToCount = getExpenseAmount(t);
+        const amountToCount = getMyShareAmount(t);
 
         // Category trends
         const category = t.category as unknown as CategoryData | null;
@@ -388,7 +366,7 @@ router.get('/insights', async (req, res) => {
         }
       } else if (transactionType === 'return') {
         // Returns also respect splits (only subtract my share)
-        const returnAmount = getExpenseAmount(t);
+        const returnAmount = getMyShareAmount(t);
 
         // Category trends: reduce
         const category = t.category as unknown as CategoryData | null;
@@ -505,15 +483,10 @@ router.get('/insights', async (req, res) => {
       dailySpending: dailySpendingArr,
       monthOverMonth,
     });
-  } catch (error) {
-    console.error('Error fetching insights:', error);
-    res.status(500).json({ message: 'Failed to fetch insights' });
-  }
-});
+}));
 
-// Estimated monthly income — average of the last 3 complete months of income
-router.get('/estimated-income', async (req, res) => {
-  try {
+// Estimated monthly income, the average of the last 3 complete months of income
+router.get('/estimated-income', asyncHandler(async (req, res) => {
     const now = new Date();
     // Go back 3 full months from the 1st of the current month
     const endDate = new Date(now.getFullYear(), now.getMonth(), 1); // 1st of current month
@@ -547,10 +520,6 @@ router.get('/estimated-income', async (req, res) => {
       months_sampled: monthsWithData,
       monthly_breakdown: Object.fromEntries(monthlyIncome),
     });
-  } catch (error) {
-    console.error('Error estimating income:', error);
-    res.status(500).json({ message: 'Failed to estimate income' });
-  }
-});
+}));
 
 export default router;

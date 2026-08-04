@@ -5,6 +5,7 @@ import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recha
 import { Card, Spinner } from '../ui';
 import { useTransactions } from '../../hooks';
 import { formatCurrency } from '../../utils/formatters';
+import { getMyShareAmount } from '../../utils/my-share';
 import { MONTHS, CHART_TOOLTIP_STYLE, CHART_LABEL_STYLE, CHART_ITEM_STYLE } from '../../utils/constants';
 
 // Helper to get days in month
@@ -42,16 +43,9 @@ export const DailySpending = ({ month, year }: DailySpendingProps) => {
         transactions.forEach(t => {
             const txType = t.transaction_type || (t.amount > 0 ? 'expense' : 'income');
 
-            // Helper to calculating amount (handling splits)
-            let amount = Math.abs(t.amount);
-            if (t.is_split && t.splits && t.splits.length > 0) {
-                const myShare = t.splits
-                    .filter(s => s.is_my_share)
-                    .reduce((sum, s) => sum + Math.abs(s.amount), 0);
-                // If there are splits marked as my share, use that sum. 
-                // Otherwise fallback to total (though usually if split, there should be shares)
-                if (myShare > 0) amount = myShare;
-            }
+            // Split-aware amount; matches server semantics (a transaction
+            // whose splits are all someone else's share contributes 0)
+            const amount = getMyShareAmount(t);
 
             // Only count expenses
             if (txType === 'expense') {

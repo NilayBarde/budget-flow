@@ -10,6 +10,7 @@ export const useFinancialHealth = (month: number, year: number) => {
     const actualIncome = stats?.total_income || 0;
     const totalSpent = stats?.total_spent || 0;
     const totalInvested = stats?.total_invested || 0;
+    const pendingSpent = stats?.pending_spent || 0;
 
     // Estimated Savings: Money remaining after expenses, available for saving or investing
     const estimatedSavings = expectedIncome - totalSpent;
@@ -27,6 +28,7 @@ export const useFinancialHealth = (month: number, year: number) => {
         actualIncome,
         totalSpent,
         totalInvested,
+        pendingSpent,
         estimatedSavings,
         netPosition,
         savingsRate,
