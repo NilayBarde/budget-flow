@@ -1,7 +1,8 @@
 import { useState, useCallback } from 'react';
-import { Search, AlertCircle, Filter, X, Repeat, CalendarDays } from 'lucide-react';
+import { Search, AlertCircle, Filter, X, Repeat, CalendarDays, ArrowUpDown } from 'lucide-react';
 import { Input, Select, Button, MonthSelector } from '../ui';
 import type { Category, Account, Tag, TransactionFilters as Filters } from '../../types';
+import { SORT_OPTIONS, type TransactionSortOption } from '../../utils/transactionSort';
 import clsx from 'clsx';
 
 interface TransactionFiltersProps {
@@ -10,6 +11,11 @@ interface TransactionFiltersProps {
   categories: Category[];
   accounts: Account[];
   tags: Tag[];
+  sort: TransactionSortOption;
+  onSortChange: (sort: TransactionSortOption) => void;
+  minAmount: string;
+  maxAmount: string;
+  onAmountRangeChange: (min: string, max: string) => void;
 }
 
 export const TransactionFilters = ({
@@ -18,6 +24,11 @@ export const TransactionFilters = ({
   categories,
   accounts,
   tags,
+  sort,
+  onSortChange,
+  minAmount,
+  maxAmount,
+  onAmountRangeChange,
 }: TransactionFiltersProps) => {
   const [showFilters, setShowFilters] = useState(false);
   
@@ -85,6 +96,8 @@ export const TransactionFilters = ({
     filters.needs_review,
     filters.is_recurring,
     filters.date,
+    minAmount,
+    maxAmount,
   ].filter(Boolean).length;
 
   // Format date for display
@@ -162,6 +175,14 @@ export const TransactionFilters = ({
           
           <div className="space-y-3">
             <Select
+              label="Sort by"
+              value={sort}
+              onChange={e => onSortChange(e.target.value as TransactionSortOption)}
+              options={SORT_OPTIONS}
+              className="w-full"
+            />
+
+            <Select
               value={filters.category_id || ''}
               onChange={e => onFilterChange({ ...filters, category_id: e.target.value })}
               options={categoryOptions}
@@ -213,6 +234,31 @@ export const TransactionFilters = ({
               <Repeat className="h-4 w-4" />
               <span className="text-sm font-medium">Recurring</span>
             </button>
+
+            <div className="space-y-1">
+              <label className="block text-sm font-medium text-slate-300">Amount</label>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  placeholder="Min $"
+                  value={minAmount}
+                  onChange={e => onAmountRangeChange(e.target.value, maxAmount)}
+                  className="w-full"
+                />
+                <span className="text-slate-500 text-sm">to</span>
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  placeholder="Max $"
+                  value={maxAmount}
+                  onChange={e => onAmountRangeChange(minAmount, e.target.value)}
+                  className="w-full"
+                />
+              </div>
+            </div>
 
             <div className="space-y-1">
               <label className="block text-sm font-medium text-slate-300">Date</label>
@@ -284,7 +330,44 @@ export const TransactionFilters = ({
             onChange={handleDateChange}
           />
         </div>
-        
+
+        {/* Amount Range */}
+        <div className="flex items-center gap-2">
+          <div className="w-28">
+            <Input
+              type="number"
+              inputMode="decimal"
+              min="0"
+              placeholder="Min $"
+              value={minAmount}
+              onChange={e => onAmountRangeChange(e.target.value, maxAmount)}
+            />
+          </div>
+          <span className="text-slate-500 text-sm">to</span>
+          <div className="w-28">
+            <Input
+              type="number"
+              inputMode="decimal"
+              min="0"
+              placeholder="Max $"
+              value={maxAmount}
+              onChange={e => onAmountRangeChange(minAmount, e.target.value)}
+            />
+          </div>
+        </div>
+
+        {/* Sort */}
+        <div className="relative w-52">
+          <ArrowUpDown className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500 pointer-events-none z-10" />
+          <Select
+            value={sort}
+            onChange={e => onSortChange(e.target.value as TransactionSortOption)}
+            options={SORT_OPTIONS}
+            className="pl-9"
+            aria-label="Sort transactions"
+          />
+        </div>
+
         {/* Needs Review Toggle */}
         <button
           onClick={() => onFilterChange({ 
