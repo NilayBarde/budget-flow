@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { RefreshCw } from 'lucide-react';
-import { Card, CardHeader, Spinner, Button, MonthSelector, CategoryPieChart } from '../components/ui';
+import { Card, CardHeader, Spinner, Button, MonthSelector, CategoryPieChart, ErrorState } from '../components/ui';
 import { DashboardHero } from '../components/dashboard/DashboardHero';
 import { SyncHealthBanner } from '../components/dashboard/SyncHealthBanner';
 import { DailySpending } from '../components/dashboard/DailySpending';
@@ -14,7 +14,7 @@ import { MONTHS } from '../utils/constants';
 
 export const Dashboard = () => {
   const { currentDate, handlePrevMonth, handleNextMonth } = useMonthNavigation();
-  const { data: monthlyStats, isLoading, refetch } = useMonthlyStats(currentDate.month, currentDate.year);
+  const { data: monthlyStats, isLoading, isError, refetch } = useMonthlyStats(currentDate.month, currentDate.year);
 
   // Check if viewing current month for Spending Pace widget
   const isCurrentMonth = useMemo(() => {
@@ -22,13 +22,9 @@ export const Dashboard = () => {
     return currentDate.month === now.getMonth() + 1 && currentDate.year === now.getFullYear();
   }, [currentDate]);
 
-  if (isLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-midnight-900">
-        <Spinner size="lg" />
-      </div>
-    );
-  }
+  // No page-level loading gate: every widget has its own loading state, so
+  // mounting them immediately lets their queries fire in parallel instead of
+  // queuing behind /stats/monthly.
 
   // Calculate top categories for the pie chart
   const categoryData = monthlyStats?.by_category
@@ -98,10 +94,16 @@ export const Dashboard = () => {
             <Card padding="sm" className="flex flex-col">
               <CardHeader title="Spending by Category" subtitle={`${MONTHS[currentDate.month - 1]} ${currentDate.year}`} />
               <div className="flex-1 flex items-center justify-center min-h-[300px]">
-                <CategoryPieChart
-                  data={categoryData}
-                  emptyMessage="No spending data for this month"
-                />
+                {isError ? (
+                  <ErrorState onRetry={() => refetch()} />
+                ) : isLoading ? (
+                  <Spinner />
+                ) : (
+                  <CategoryPieChart
+                    data={categoryData}
+                    emptyMessage="No spending data for this month"
+                  />
+                )}
               </div>
             </Card>
 

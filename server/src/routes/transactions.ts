@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { categorizeWithPlaid, cleanMerchantName } from '../services/categorizer.js';
 import { getCategoryIdForType } from '../services/category-lookup.js';
 import { getMyShareAmount, type SplitShare } from '../services/category-spend.js';
+import { filterByTag } from '../services/transaction-filters.js';
 import type { TransactionType } from '../services/transaction-type.js';
 
 const router = Router();
@@ -13,13 +14,17 @@ router.get('/', async (req, res) => {
   try {
     const { month, year, account_id, category_id, tag_id, search, is_recurring, transaction_type, needs_review, date } = req.query;
 
+    // Explicit embed columns: accounts(*) would ship plaid_access_token and
+    // plaid_cursor to the browser. tags embeds through the transaction_tags
+    // junction in the same query, replacing a second sequential fetch.
     let query = supabase
       .from('transactions')
       .select(`
         *,
-        account:accounts(*),
-        category:categories(*),
-        splits:transaction_splits(*)
+        account:accounts(id, institution_name, account_name),
+        category:categories(id, name, icon, color),
+        splits:transaction_splits(id, parent_transaction_id, amount, description, is_my_share, created_at),
+        tags:tags(id, name, color)
       `)
       .order('date', { ascending: false });
 
@@ -63,41 +68,7 @@ router.get('/', async (req, res) => {
 
     if (error) throw error;
 
-    // Fetch tags for each transaction
-    if (data && data.length > 0) {
-      const transactionIds = data.map(t => t.id);
-
-      const { data: transactionTags } = await supabase
-        .from('transaction_tags')
-        .select('transaction_id, tag:tags(*)')
-        .in('transaction_id', transactionIds);
-
-      const tagsByTransaction = new Map<string, typeof transactionTags>();
-      transactionTags?.forEach(tt => {
-        const existing = tagsByTransaction.get(tt.transaction_id) || [];
-        existing.push(tt);
-        tagsByTransaction.set(tt.transaction_id, existing);
-      });
-
-      // Filter by tag if specified
-      let filteredData = data;
-      if (tag_id) {
-        const transactionsWithTag = new Set(
-          transactionTags?.filter(tt => tt.tag && (tt.tag as unknown as { id: string }).id === tag_id).map(tt => tt.transaction_id)
-        );
-        filteredData = data.filter(t => transactionsWithTag.has(t.id));
-      }
-
-      // Attach tags to transactions
-      filteredData.forEach(t => {
-        const tags = tagsByTransaction.get(t.id) || [];
-        (t as typeof t & { tags: unknown[] }).tags = tags.map(tt => tt.tag);
-      });
-
-      return res.json(filteredData);
-    }
-
-    res.json(data || []);
+    res.json(filterByTag(data || [], typeof tag_id === 'string' ? tag_id : undefined));
   } catch (error) {
     console.error('Error fetching transactions:', error);
     res.status(500).json({ message: 'Failed to fetch transactions' });
@@ -274,9 +245,10 @@ router.get('/:id', async (req, res) => {
       .from('transactions')
       .select(`
         *,
-        account:accounts(*),
-        category:categories(*),
-        splits:transaction_splits(*)
+        account:accounts(id, institution_name, account_name),
+        category:categories(id, name, icon, color),
+        splits:transaction_splits(id, parent_transaction_id, amount, description, is_my_share, created_at),
+        tags:tags(id, name, color)
       `)
       .eq('id', id)
       .single();

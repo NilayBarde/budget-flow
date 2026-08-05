@@ -10,15 +10,15 @@ import {
   PiggyBank
 } from 'lucide-react';
 
-import { Card, CardHeader, Spinner, Badge, EmptyState } from '../components/ui';
+import { Card, CardHeader, Spinner, Badge, EmptyState, ErrorState } from '../components/ui';
 import { useInsights, useRecurringTransactions, useUpdateRecurringTransaction, useYearlyStats, useMonthNavigation } from '../hooks';
 import { SpendingTrend } from '../components/dashboard/SpendingTrend';
 import { formatCurrency } from '../utils/formatters';
 
 export const Insights = () => {
   const { currentDate } = useMonthNavigation();
-  const { data: insights, isLoading: insightsLoading } = useInsights();
-  const { data: yearlyStats, isLoading: yearlyLoading } = useYearlyStats(currentDate.year);
+  const { data: insights, isLoading: insightsLoading, isError: insightsError, refetch } = useInsights();
+  const { data: yearlyStats, isLoading: yearlyLoading, isError: yearlyError } = useYearlyStats(currentDate.year);
 
   const { data: recurring } = useRecurringTransactions();
   const updateRecurring = useUpdateRecurringTransaction();
@@ -81,6 +81,15 @@ export const Insights = () => {
   const maxCategorySpend = useMemo(() => {
     return yearlyCategories.length > 0 ? yearlyCategories[0].totalSpent : 1;
   }, [yearlyCategories]);
+
+  if (insightsError || yearlyError) {
+    return (
+      <ErrorState
+        onRetry={() => refetch()}
+        description="Your spending insights couldn't be loaded."
+      />
+    );
+  }
 
   if (insightsLoading || yearlyLoading) {
     return (

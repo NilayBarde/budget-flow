@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import * as api from '../services/api';
 import type { TransactionFilters, Transaction, TransactionSplit } from '../types';
 
@@ -6,6 +6,8 @@ export const useTransactions = (filters: TransactionFilters = {}) => {
   return useQuery({
     queryKey: ['transactions', filters],
     queryFn: () => api.getTransactions(filters),
+    // Keep the previous list on screen while a new month/filter loads
+    placeholderData: keepPreviousData,
   });
 };
 

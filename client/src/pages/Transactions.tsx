@@ -2,11 +2,11 @@ import { useState, useCallback, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { CheckSquare, X, Copy } from 'lucide-react';
 import { TransactionList, TransactionFilters, EditTransactionModal, SplitTransactionModal, BulkSplitModal, BulkActionBar, DuplicateReviewModal } from '../components/transactions';
-import { Button } from '../components/ui';
-import { useTransactions, useAccounts, useCategories, useTags, useBulkAddTagToTransactions, useDeleteTransaction, useBulkDeleteTransactions, useExpectedIncome } from '../hooks';
+import { Button, ErrorState } from '../components/ui';
+import { useTransactions, useAccounts, useCategories, useTags, useBulkAddTagToTransactions, useDeleteTransaction, useBulkDeleteTransactions, useExpectedIncome, useDebouncedValue } from '../hooks';
 import type { Transaction, TransactionFilters as Filters, TransactionType } from '../types';
 import { getMonthYear } from '../utils/formatters';
-import { getMyShareAmount } from '../utils/my-share';
+import { computeTransactionTotals, filterByType } from '../utils/transactionTotals';
 import { sortTransactions, filterByAmountRange, type TransactionSortOption } from '../utils/transactionSort';
 
 type TypeFilter = TransactionType | 'all';
@@ -64,16 +64,22 @@ export const Transactions = () => {
   const [showBulkSplitModal, setShowBulkSplitModal] = useState(false);
   const [showDuplicates, setShowDuplicates] = useState(false);
 
-  // Build filters with transaction_type
-  const queryFilters = useMemo(() => {
-    const f: Filters = { ...filters };
-    if (typeFilter !== 'all') {
-      f.transaction_type = typeFilter;
-    }
-    return f;
-  }, [filters, typeFilter]);
+  // Debounce only the query key: the search input itself stays a controlled
+  // component updating filters.search per keystroke, but requests coalesce.
+  const debouncedSearch = useDebouncedValue(filters.search, 300);
+  const effectiveFilters = useMemo(
+    () => ({ ...filters, search: debouncedSearch || undefined }),
+    [filters, debouncedSearch]
+  );
 
-  const { data: transactions, isLoading } = useTransactions(queryFilters);
+  // Single month fetch: type tabs filter client-side (instant, no network)
+  // and the header totals share the same dataset.
+  const { data: allTransactions, isLoading, isPlaceholderData, isError, refetch } = useTransactions(effectiveFilters);
+
+  const transactions = useMemo(
+    () => filterByType(allTransactions, typeFilter),
+    [allTransactions, typeFilter]
+  );
 
   // Apply client-side amount range filter and sorting to the loaded month
   const displayedTransactions = useMemo(() => {
@@ -87,10 +93,6 @@ export const Transactions = () => {
     );
     return sortTransactions(filtered, sort);
   }, [transactions, sort, minAmount, maxAmount]);
-
-  // Separate unfiltered query for header totals — ensures totals always reflect the full month
-  // regardless of which type tab is active
-  const { data: allTransactions } = useTransactions(filters);
   const { data: accounts = [] } = useAccounts();
   const { data: categories = [] } = useCategories();
   const { data: tags = [] } = useTags();
@@ -190,33 +192,7 @@ export const Transactions = () => {
 
   // Calculate totals from ALL transactions for the month (not just the filtered tab)
   // so the header always shows the same numbers as the dashboard
-  // For split transactions, only count the user's share (is_my_share === true)
-  const totals = useMemo(() => {
-    if (!allTransactions) return { expenses: 0, returns: 0, income: 0, investments: 0, transfers: 0 };
-
-    return allTransactions.reduce(
-      (acc, t) => {
-        const type = t.transaction_type || (t.amount > 0 ? 'expense' : 'income');
-
-        // For split transactions, sum only the user's share
-        const amount = getMyShareAmount(t);
-
-        if (type === 'expense') {
-          acc.expenses += amount;
-        } else if (type === 'return') {
-          acc.returns += amount;
-        } else if (type === 'income') {
-          acc.income += amount;
-        } else if (type === 'investment') {
-          acc.investments += amount;
-        } else if (type === 'transfer') {
-          acc.transfers += amount;
-        }
-        return acc;
-      },
-      { expenses: 0, returns: 0, income: 0, investments: 0, transfers: 0 }
-    );
-  }, [allTransactions]);
+  const totals = useMemo(() => computeTransactionTotals(allTransactions), [allTransactions]);
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -225,6 +201,11 @@ export const Transactions = () => {
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-slate-100">Transactions</h1>
           {/* Desktop: single-line summary */}
+          {/* Never render $0.00 totals for a failed load */}
+          {isError ? (
+            <p className="text-slate-400 mt-1 text-base">Totals unavailable</p>
+          ) : (
+          <>
           <p className="hidden sm:block text-slate-400 mt-1 text-base">
             <span>{displayedTransactions?.length || 0} transactions</span>
             <span> • </span>
@@ -259,6 +240,8 @@ export const Transactions = () => {
               </span>
             </div>
           </div>
+          </>
+          )}
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -328,9 +311,16 @@ export const Transactions = () => {
         }}
       />
 
+      {isError ? (
+        <ErrorState
+          onRetry={() => refetch()}
+          description="Your transactions couldn't be loaded. Totals shown may be incomplete."
+        />
+      ) : (
       <TransactionList
         transactions={displayedTransactions}
         isLoading={isLoading}
+        isPlaceholderData={isPlaceholderData}
         onEdit={handleEdit}
         onSplit={handleSplit}
         onDelete={handleDelete}
@@ -338,6 +328,7 @@ export const Transactions = () => {
         onSelectionChange={handleSelectionChange}
         selectionMode={selectionMode}
       />
+      )}
 
       {/* Bulk Action Bar */}
       {selectionMode && selectedIds.size > 0 && (

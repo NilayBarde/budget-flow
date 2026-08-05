@@ -6,6 +6,9 @@ export const useBudgetGoals = (month: number, year: number) => {
   return useQuery({
     queryKey: ['budget-goals', month, year],
     queryFn: () => api.getBudgetGoals(month, year),
+    // Callers with async month sources (e.g. SpendingPace's `?? 0` fallback)
+    // otherwise fire a useless month=0&year=0 request on every mount.
+    enabled: month >= 1 && month <= 12 && year > 0,
   });
 };
 
