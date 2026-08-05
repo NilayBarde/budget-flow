@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { MoreHorizontal, Split, Tag, Edit2, AlertCircle, Clock, Trash2 } from 'lucide-react';
 import clsx from 'clsx';
 import type { Transaction } from '../../types';
-import { formatCurrency, formatDate } from '../../utils/formatters';
+import { formatCurrency, formatDate, formatAccountLabel } from '../../utils/formatters';
 import { getMyShareAmount } from '../../utils/my-share';
 import { Badge } from '../ui/Badge';
 
@@ -154,7 +154,7 @@ export const TransactionRow = ({ transaction, onEdit, onSplit, onDelete, isSelec
             {transaction.account && (
               <>
                 <span>•</span>
-                <span>{transaction.account.institution_name}</span>
+                <span>{formatAccountLabel(transaction.account)}</span>
               </>
             )}
           </div>
@@ -290,6 +290,11 @@ export const TransactionRow = ({ transaction, onEdit, onSplit, onDelete, isSelec
                 </>
               )}
             </div>
+            {transaction.account && (
+              <div className="text-xs text-slate-500 truncate">
+                {formatAccountLabel(transaction.account)}
+              </div>
+            )}
           </div>
         </div>
 
