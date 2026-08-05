@@ -27,8 +27,8 @@ interface CadenceRule {
   minCharges: number;
   // A series is still active if the last charge is within this many days.
   activeWithinDays: number;
-  // Extra tolerance when counting conforming gaps (median must still land
-  // inside [minGap, maxGap]); utilities bill anywhere from 17 to 63 days apart.
+  // Extra tolerance when counting conforming gaps (the median must still land
+  // inside [minGap, maxGap]); e.g. monthly conformance spans [17, 45] days.
   slackDays: number;
 }
 
@@ -39,9 +39,9 @@ const CADENCES: CadenceRule[] = [
   { frequency: 'yearly', minGap: 330, maxGap: 400, minCharges: 2, activeWithinDays: 430, slackDays: 35 },
 ];
 
-// At least this share of gaps must fall inside the cadence window (or its
-// doubled "skipped one period" window). Real-world billing drifts: utility
-// bills land anywhere from 17 to 41 days apart, so this is deliberately
+// At least this share of gaps must fall inside the slack-widened cadence
+// window (or its doubled "skipped one period" window). Real-world billing
+// drifts (observed utility gaps span 17 to 63 days), so this is deliberately
 // loose; the median-gap check is the primary filter.
 const GAP_CONFORMANCE = 0.6;
 

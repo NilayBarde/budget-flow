@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { Repeat, ChevronDown, ChevronUp, X, BadgeCheck, CreditCard } from 'lucide-react';
 import clsx from 'clsx';
-import { Card, Badge, Spinner } from '../ui';
+import { Card, Badge, Spinner, ErrorState } from '../ui';
 import { useRecurringOverview, useUpdateRecurringTransaction } from '../../hooks';
 import { formatCurrency } from '../../utils/formatters';
 
@@ -12,7 +12,7 @@ const FREQUENCY_COLORS: Record<string, string> = {
 };
 
 export const SubscriptionOverview = () => {
-  const { data: overview, isLoading } = useRecurringOverview();
+  const { data: overview, isLoading, isError, refetch } = useRecurringOverview();
   const updateRecurring = useUpdateRecurringTransaction();
   const [open, setOpen] = useState(false);
 
@@ -41,9 +41,11 @@ export const SubscriptionOverview = () => {
               Subscriptions & Recurring
             </p>
             <p className="text-xs text-slate-400">
-              {isLoading || !summary
-                ? 'Analyzing charges and card credits...'
-                : `True cost ~${formatCurrency(summary.net_monthly)}/mo (sticker ${formatCurrency(summary.gross_monthly)}, credits cover ${formatCurrency(summary.credits_monthly)})`}
+              {isError
+                ? "Couldn't load subscriptions"
+                : isLoading || !summary
+                  ? 'Analyzing charges and card credits...'
+                  : `True cost ~${formatCurrency(summary.net_monthly)}/mo (sticker ${formatCurrency(summary.gross_monthly)}, credits cover ${formatCurrency(summary.credits_monthly)})`}
             </p>
           </div>
         </div>
@@ -56,7 +58,12 @@ export const SubscriptionOverview = () => {
 
       {open && (
         <div className="border-t border-midnight-700">
-          {isLoading ? (
+          {isError ? (
+            <ErrorState
+              onRetry={() => refetch()}
+              description="Your subscriptions couldn't be loaded."
+            />
+          ) : isLoading ? (
             <div className="py-8 flex justify-center">
               <Spinner />
             </div>

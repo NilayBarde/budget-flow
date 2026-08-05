@@ -25,6 +25,9 @@ export const useUpdateRecurringTransaction = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['recurring-transactions'] });
       queryClient.invalidateQueries({ queryKey: ['recurring-overview'] });
+      // Recurring rows feed the fixed-cost / Spending Pace computation
+      queryClient.invalidateQueries({ queryKey: ['insights'] });
+      queryClient.invalidateQueries({ queryKey: ['stats'] });
     },
   });
 };

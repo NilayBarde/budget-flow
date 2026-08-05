@@ -121,7 +121,8 @@ const computeProjectedVariable = (
 /**
  * Filter user-marked recurring series down to the ones that are actually
  * still charging, based on each merchant's most recent expense date.
- * `is_active`/`last_seen` on recurring_transactions only reflect when the
+ * `is_active`/`last_seen` on recurring_transactions are refreshed by
+ * detection for detected rows, but manual rows still only reflect when the
  * user marked the series, so a payee that stopped charging months ago
  * (e.g. a previous landlord) stays "active" forever and would otherwise be
  * projected as an unpaid fixed cost every month.

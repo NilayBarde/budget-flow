@@ -231,10 +231,13 @@ router.get('/insights', asyncHandler(async (req, res) => {
       .toISOString().split('T')[0];
 
     // ── Query all active recurring charges (any frequency) ────────────
+    // user_hidden mirrors the hide button: a hidden series must not count
+    // toward the fixed-cost projection either.
     const { data: recurringCharges } = await supabase
       .from('recurring_transactions')
       .select('merchant_display_name, average_amount, frequency')
-      .eq('is_active', true);
+      .eq('is_active', true)
+      .eq('user_hidden', false);
 
     const recurringMerchants = new Set(
       (recurringCharges || []).map(r => r.merchant_display_name)
