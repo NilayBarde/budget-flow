@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { CheckSquare, X, Copy } from 'lucide-react';
 import { TransactionList, TransactionFilters, EditTransactionModal, SplitTransactionModal, BulkSplitModal, BulkActionBar, DuplicateReviewModal } from '../components/transactions';
-import { Button } from '../components/ui';
+import { Button, ErrorState } from '../components/ui';
 import { useTransactions, useAccounts, useCategories, useTags, useBulkAddTagToTransactions, useDeleteTransaction, useBulkDeleteTransactions, useExpectedIncome, useDebouncedValue } from '../hooks';
 import type { Transaction, TransactionFilters as Filters, TransactionType } from '../types';
 import { getMonthYear } from '../utils/formatters';
@@ -74,7 +74,7 @@ export const Transactions = () => {
 
   // Single month fetch: type tabs filter client-side (instant, no network)
   // and the header totals share the same dataset.
-  const { data: allTransactions, isLoading, isPlaceholderData } = useTransactions(effectiveFilters);
+  const { data: allTransactions, isLoading, isPlaceholderData, isError, refetch } = useTransactions(effectiveFilters);
 
   const transactions = useMemo(
     () => filterByType(allTransactions, typeFilter),
@@ -201,6 +201,11 @@ export const Transactions = () => {
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-slate-100">Transactions</h1>
           {/* Desktop: single-line summary */}
+          {/* Never render $0.00 totals for a failed load */}
+          {isError ? (
+            <p className="text-slate-400 mt-1 text-base">Totals unavailable</p>
+          ) : (
+          <>
           <p className="hidden sm:block text-slate-400 mt-1 text-base">
             <span>{displayedTransactions?.length || 0} transactions</span>
             <span> • </span>
@@ -235,6 +240,8 @@ export const Transactions = () => {
               </span>
             </div>
           </div>
+          </>
+          )}
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -304,6 +311,12 @@ export const Transactions = () => {
         }}
       />
 
+      {isError ? (
+        <ErrorState
+          onRetry={() => refetch()}
+          description="Your transactions couldn't be loaded. Totals shown may be incomplete."
+        />
+      ) : (
       <TransactionList
         transactions={displayedTransactions}
         isLoading={isLoading}
@@ -315,6 +328,7 @@ export const Transactions = () => {
         onSelectionChange={handleSelectionChange}
         selectionMode={selectionMode}
       />
+      )}
 
       {/* Bulk Action Bar */}
       {selectionMode && selectedIds.size > 0 && (
