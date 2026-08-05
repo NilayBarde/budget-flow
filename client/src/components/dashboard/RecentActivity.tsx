@@ -2,7 +2,7 @@
 import { ArrowUpRight, ArrowDownRight, ArrowRight } from 'lucide-react';
 import { Card, Spinner } from '../ui';
 import { useTransactions } from '../../hooks';
-import { formatCurrency, formatDate } from '../../utils/formatters';
+import { formatCurrency, formatDate, formatAccountLabel } from '../../utils/formatters';
 import { Link } from 'react-router-dom';
 
 interface RecentActivityProps {
@@ -48,8 +48,11 @@ export const RecentActivity = ({ month, year }: RecentActivityProps) => {
                                             <ArrowDownRight className="h-4 w-4" />}
                             </div>
                             <div>
-                                <p className="text-sm font-medium text-slate-200">{transaction.merchant_name}</p>
-                                <p className="text-xs text-slate-400">{formatDate(transaction.date)}</p>
+                                <p className="text-sm font-medium text-slate-200">{transaction.merchant_display_name || transaction.merchant_name}</p>
+                                <p className="text-xs text-slate-400">
+                                    {formatDate(transaction.date)}
+                                    {transaction.account && ` • ${formatAccountLabel(transaction.account)}`}
+                                </p>
                             </div>
                         </div>
                         <p className={`font-medium ${transaction.transaction_type === 'expense' ? 'text-slate-100' :
