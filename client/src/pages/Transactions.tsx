@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { CheckSquare, X, Copy } from 'lucide-react';
 import { TransactionList, TransactionFilters, EditTransactionModal, SplitTransactionModal, BulkSplitModal, BulkActionBar, DuplicateReviewModal } from '../components/transactions';
 import { Button } from '../components/ui';
-import { useTransactions, useAccounts, useCategories, useTags, useBulkAddTagToTransactions, useDeleteTransaction, useBulkDeleteTransactions, useExpectedIncome } from '../hooks';
+import { useTransactions, useAccounts, useCategories, useTags, useBulkAddTagToTransactions, useDeleteTransaction, useBulkDeleteTransactions, useExpectedIncome, useDebouncedValue } from '../hooks';
 import type { Transaction, TransactionFilters as Filters, TransactionType } from '../types';
 import { getMonthYear } from '../utils/formatters';
 import { getMyShareAmount } from '../utils/my-share';
@@ -64,14 +64,22 @@ export const Transactions = () => {
   const [showBulkSplitModal, setShowBulkSplitModal] = useState(false);
   const [showDuplicates, setShowDuplicates] = useState(false);
 
+  // Debounce only the query key: the search input itself stays a controlled
+  // component updating filters.search per keystroke, but requests coalesce.
+  const debouncedSearch = useDebouncedValue(filters.search, 300);
+  const effectiveFilters = useMemo(
+    () => ({ ...filters, search: debouncedSearch || undefined }),
+    [filters, debouncedSearch]
+  );
+
   // Build filters with transaction_type
   const queryFilters = useMemo(() => {
-    const f: Filters = { ...filters };
+    const f: Filters = { ...effectiveFilters };
     if (typeFilter !== 'all') {
       f.transaction_type = typeFilter;
     }
     return f;
-  }, [filters, typeFilter]);
+  }, [effectiveFilters, typeFilter]);
 
   const { data: transactions, isLoading } = useTransactions(queryFilters);
 
@@ -90,7 +98,7 @@ export const Transactions = () => {
 
   // Separate unfiltered query for header totals — ensures totals always reflect the full month
   // regardless of which type tab is active
-  const { data: allTransactions } = useTransactions(filters);
+  const { data: allTransactions } = useTransactions(effectiveFilters);
   const { data: accounts = [] } = useAccounts();
   const { data: categories = [] } = useCategories();
   const { data: tags = [] } = useTags();

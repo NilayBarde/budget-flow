@@ -11,5 +11,6 @@ export * from './useAppSettings';
 export * from './useMonthNavigation';
 export * from './useModalState';
 export * from './useFinancialHealth';
+export * from './useDebouncedValue';
 
 
