@@ -10,15 +10,18 @@ import {
   PiggyBank
 } from 'lucide-react';
 
-import { Card, CardHeader, Spinner, Badge, EmptyState, ErrorState } from '../components/ui';
-import { useInsights, useRecurringTransactions, useUpdateRecurringTransaction, useYearlyStats, useMonthNavigation } from '../hooks';
+import { Card, CardHeader, Spinner, Badge, EmptyState, ErrorState, YearSelector } from '../components/ui';
+import { useInsights, useRecurringTransactions, useUpdateRecurringTransaction, useYearlyStats } from '../hooks';
 import { SpendingTrend } from '../components/dashboard/SpendingTrend';
 import { formatCurrency } from '../utils/formatters';
 
+const CURRENT_YEAR = new Date().getFullYear();
+
 export const Insights = () => {
-  const { currentDate } = useMonthNavigation();
+  const [year, setYear] = useState(CURRENT_YEAR);
+  const isCurrentYear = year === CURRENT_YEAR;
   const { data: insights, isLoading: insightsLoading, isError: insightsError, refetch } = useInsights();
-  const { data: yearlyStats, isLoading: yearlyLoading, isError: yearlyError } = useYearlyStats(currentDate.year);
+  const { data: yearlyStats, isLoading: yearlyLoading, isError: yearlyError } = useYearlyStats(year);
 
   const { data: recurring } = useRecurringTransactions();
   const updateRecurring = useUpdateRecurringTransaction();
@@ -122,9 +125,18 @@ export const Insights = () => {
   return (
     <div className="space-y-4 md:space-y-6 animate-in fade-in duration-500">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl md:text-3xl font-bold text-slate-100">Insights</h1>
-        <p className="text-slate-400 mt-1">Yearly overview for {currentDate.year}</p>
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-bold text-slate-100">Insights</h1>
+          <p className="text-slate-400 mt-1">Yearly overview for {year}</p>
+        </div>
+        <YearSelector
+          year={year}
+          onYearChange={setYear}
+          minYear={2024}
+          maxYear={CURRENT_YEAR}
+          className="flex-1 md:flex-initial md:w-fit"
+        />
       </div>
 
       {/* ── Yearly Overview Cards ───────────────────────────────────── */}
@@ -133,7 +145,7 @@ export const Insights = () => {
         <Card padding="sm">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-xs md:text-sm text-slate-400">YTD Income</p>
+              <p className="text-xs md:text-sm text-slate-400">{isCurrentYear ? 'YTD' : year} Income</p>
               <p className="text-lg md:text-2xl font-bold text-emerald-400 mt-1">
                 {formatCurrency(ytdStats.income)}
               </p>
@@ -148,7 +160,7 @@ export const Insights = () => {
         <Card padding="sm">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-xs md:text-sm text-slate-400">YTD Spent</p>
+              <p className="text-xs md:text-sm text-slate-400">{isCurrentYear ? 'YTD' : year} Spent</p>
               <p className="text-lg md:text-2xl font-bold text-slate-100 mt-1">
                 {formatCurrency(ytdStats.spent)}
               </p>
@@ -163,7 +175,7 @@ export const Insights = () => {
         <Card padding="sm">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-xs md:text-sm text-slate-400">YTD Net</p>
+              <p className="text-xs md:text-sm text-slate-400">{isCurrentYear ? 'YTD' : year} Net</p>
               <p className={`text-lg md:text-2xl font-bold mt-1 ${ytdStats.net >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                 {formatCurrency(ytdStats.net)}
               </p>
@@ -191,13 +203,13 @@ export const Insights = () => {
       </div>
 
       {/* ── Yearly Trend Chart ────────────────────────────────────── */}
-      <SpendingTrend />
+      <SpendingTrend year={year} />
 
       {/* ── Top Categories & Top Merchants (side by side on lg) ────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
         {/* Top Categories */}
         <Card padding="sm">
-          <CardHeader title="Top Categories" subtitle={`Spending in ${currentDate.year}`} />
+          <CardHeader title="Top Categories" subtitle={`Spending in ${year}`} />
           {yearlyCategories.length > 0 ? (
             <div className="space-y-3">
               {yearlyCategories.map(cat => {
@@ -235,7 +247,7 @@ export const Insights = () => {
               })}
             </div>
           ) : (
-            <p className="text-slate-400 text-center py-8">No category data for {currentDate.year}</p>
+            <p className="text-slate-400 text-center py-8">No category data for {year}</p>
           )}
         </Card>
 

@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import * as api from '../services/api';
 import type { BudgetGoal } from '../types';
 
@@ -60,6 +60,8 @@ export const useYearlyStats = (year: number) => {
   return useQuery({
     queryKey: ['stats', 'yearly', year],
     queryFn: () => api.getYearlyStats(year),
+    // Keep the previous year's data rendered while a new year loads
+    placeholderData: keepPreviousData,
   });
 };
 

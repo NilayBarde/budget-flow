@@ -1,7 +1,6 @@
 import { useState } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { Card, CardHeader, Spinner, CategoryPieChart } from '../components/ui';
+import { Card, CardHeader, Spinner, CategoryPieChart, YearSelector } from '../components/ui';
 import { useYearlyStats } from '../hooks';
 import { formatCurrency } from '../utils/formatters';
 import { MONTHS, CHART_TOOLTIP_STYLE, CHART_LABEL_STYLE, CHART_ITEM_STYLE } from '../utils/constants';
@@ -42,23 +41,13 @@ export const YearOverview = () => {
         </div>
 
         {/* Year Selector */}
-        <div className="flex flex-1 md:flex-initial items-center gap-1 md:gap-2 bg-midnight-800 border border-midnight-600 rounded-xl p-1.5 md:p-2 md:w-fit">
-          <button
-            onClick={() => setYear(y => y - 1)}
-            className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 active:bg-midnight-600 rounded-lg transition-colors touch-target"
-            aria-label="Previous year"
-          >
-            <ChevronLeft className="h-5 w-5" />
-          </button>
-          <span className="flex-1 md:flex-initial text-base md:text-lg font-semibold text-slate-100 px-3 md:px-4 md:min-w-[60px] text-center">{year}</span>
-          <button
-            onClick={() => setYear(y => y + 1)}
-            className="p-2 text-slate-400 hover:text-slate-200 hover:bg-midnight-700 active:bg-midnight-600 rounded-lg transition-colors touch-target"
-            aria-label="Next year"
-          >
-            <ChevronRight className="h-5 w-5" />
-          </button>
-        </div>
+        <YearSelector
+          year={year}
+          onYearChange={setYear}
+          minYear={2024}
+          maxYear={new Date().getFullYear()}
+          className="flex-1 md:flex-initial md:w-fit"
+        />
       </div>
 
       {/* Summary Cards - 2x2 on mobile, row on desktop */}
