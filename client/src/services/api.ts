@@ -337,6 +337,15 @@ export const bulkSplitTransactions = (transactionIds: string[], numPeople: numbe
     body: JSON.stringify({ transactionIds, numPeople }),
   });
 
+// Data export
+export interface ExportPayload {
+  exported_at: string;
+  version: number;
+  data: Record<string, unknown[]>;
+}
+
+export const exportAllData = () => fetchApi<ExportPayload>('/export');
+
 // Recurring Transactions
 export const getRecurringTransactions = () =>
   fetchApi<RecurringTransaction[]>('/recurring-transactions');
