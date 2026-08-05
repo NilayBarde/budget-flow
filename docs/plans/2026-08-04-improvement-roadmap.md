@@ -1,5 +1,16 @@
 # BudgetFlow Improvement Roadmap (2026-08-04)
 
+> **Status update (same day, post-execution):** Phase 1 shipped in PR #6.
+> Phase 2 was struck: the category-spend service refactor on main had
+> already implemented it (only the dead insights.dailySpending removal
+> remained, folded into Phase 3). Phases 3, 3b, and 4 shipped on the
+> cleanup-and-year-picker branch. Migration numbering shifted (021 was
+> taken): indexes landed as 022, savings-goals drop as 023. The planned
+> restore/drop migrations (024/025) were skipped after live-DB pre-flights
+> showed the holdings/securities tables and balance-alert columns never
+> existed and the deleted app-settings seed was behaviorally inert; the
+> regenerated supabase-schema.sql baseline documents the real schema.
+
 Five independently planned workstreams, compiled and sequenced. Each phase was planned by a dedicated architect agent against verified file locations. Roughly 27 commits total across 4 phases plus one small independent task.
 
 ## Decisions needed before starting (flagged, with recommendations)
