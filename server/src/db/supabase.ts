@@ -95,6 +95,10 @@ export type Database = {
     frequency: 'weekly' | 'monthly' | 'yearly';
     last_seen: string;
     is_active: boolean;
+    source: 'manual' | 'detected';
+    user_hidden: boolean;
+    offset_merchant_name: string | null;
+    offset_monthly_amount: number | null;
     created_at: string;
   };
 };

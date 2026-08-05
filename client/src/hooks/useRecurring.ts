@@ -9,14 +9,25 @@ export const useRecurringTransactions = () => {
   });
 };
 
+export const useRecurringOverview = () => {
+  return useQuery({
+    queryKey: ['recurring-overview'],
+    queryFn: api.getRecurringOverview,
+  });
+};
+
 export const useUpdateRecurringTransaction = () => {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<RecurringTransaction> }) =>
       api.updateRecurringTransaction(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['recurring-transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['recurring-overview'] });
+      // Recurring rows feed the fixed-cost / Spending Pace computation
+      queryClient.invalidateQueries({ queryKey: ['insights'] });
+      queryClient.invalidateQueries({ queryKey: ['stats'] });
     },
   });
 };

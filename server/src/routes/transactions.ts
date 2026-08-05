@@ -458,6 +458,9 @@ router.patch('/:id', async (req, res) => {
             frequency: 'monthly' as const,
             last_seen: new Date().toISOString().split('T')[0],
             is_active: true,
+            // Explicit user intent must survive detection's stale-row sweep,
+            // which only deactivates source='detected' rows.
+            source: 'manual' as const,
           }, {
             onConflict: 'merchant_display_name',
           });

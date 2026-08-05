@@ -1,18 +1,15 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo } from 'react';
 import {
   TrendingUp,
-  ChevronDown,
-  ChevronUp,
-  X,
-  Repeat,
   DollarSign,
   Activity,
   PiggyBank
 } from 'lucide-react';
 
-import { Card, CardHeader, Spinner, Badge, EmptyState, ErrorState, YearSelector } from '../components/ui';
-import { useInsights, useRecurringTransactions, useUpdateRecurringTransaction, useYearlyStats } from '../hooks';
+import { Card, CardHeader, Spinner, EmptyState, ErrorState, YearSelector } from '../components/ui';
+import { useInsights, useYearlyStats } from '../hooks';
 import { SpendingTrend } from '../components/dashboard/SpendingTrend';
+import { SubscriptionOverview } from '../components/insights/SubscriptionOverview';
 import { formatCurrency } from '../utils/formatters';
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -22,26 +19,6 @@ export const Insights = () => {
   const isCurrentYear = year === CURRENT_YEAR;
   const { data: insights, isLoading: insightsLoading, isError: insightsError, refetch } = useInsights();
   const { data: yearlyStats, isLoading: yearlyLoading, isError: yearlyError } = useYearlyStats(year);
-
-  const { data: recurring } = useRecurringTransactions();
-  const updateRecurring = useUpdateRecurringTransaction();
-  const [subscriptionsOpen, setSubscriptionsOpen] = useState(false);
-
-  const handleHideSubscription = useCallback(
-    (id: string) => {
-      updateRecurring.mutate({ id, data: { is_active: false } });
-    },
-    [updateRecurring],
-  );
-
-  const toggleSubscriptions = useCallback(() => {
-    setSubscriptionsOpen(prev => !prev);
-  }, []);
-
-  const activeSubscriptions = useMemo(
-    () => recurring?.filter(r => r.is_active) || [],
-    [recurring],
-  );
 
   // Calculate YTD Stats
   const ytdStats = useMemo(() => {
@@ -113,14 +90,6 @@ export const Insights = () => {
   }
 
   const { topMerchants } = insights;
-
-  const subscriptionMonthlyTotal = activeSubscriptions
-    .filter(r => r.frequency === 'monthly')
-    .reduce((sum, r) => sum + r.average_amount, 0);
-  const subscriptionYearlyTotal = activeSubscriptions
-    .filter(r => r.frequency === 'yearly')
-    .reduce((sum, r) => sum + r.average_amount, 0);
-  const estimatedSubscriptionMonthly = subscriptionMonthlyTotal + subscriptionYearlyTotal / 12;
 
   return (
     <div className="space-y-4 md:space-y-6 animate-in fade-in duration-500">
@@ -297,84 +266,8 @@ export const Insights = () => {
         </Card>
       </div>
 
-      {/* ── Recurring Charges (collapsible) ─────────────────────────── */}
-      <Card padding="none">
-        <button
-          onClick={toggleSubscriptions}
-          className="w-full flex items-center justify-between px-4 md:px-6 py-3 md:py-4 text-left hover:bg-midnight-700/50 transition-colors"
-        >
-          <div className="flex items-center gap-3">
-            <Repeat className="h-5 w-5 text-accent-400" />
-            <div>
-              <p className="text-sm md:text-base font-medium text-slate-100">
-                Recurring Charges
-              </p>
-              <p className="text-xs text-slate-400">
-                {activeSubscriptions.length} active · ~{formatCurrency(estimatedSubscriptionMonthly)}/mo
-              </p>
-            </div>
-          </div>
-          {subscriptionsOpen ? (
-            <ChevronUp className="h-5 w-5 text-slate-400" />
-          ) : (
-            <ChevronDown className="h-5 w-5 text-slate-400" />
-          )}
-        </button>
-
-        {subscriptionsOpen && (
-          <div className="border-t border-midnight-700">
-            {activeSubscriptions.length > 0 ? (
-              <div className="divide-y divide-midnight-700">
-                {activeSubscriptions.map(sub => (
-                  <div
-                    key={sub.id}
-                    className="px-4 md:px-6 py-3 hover:bg-midnight-700/50 transition-colors flex items-center gap-3"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-medium text-slate-100 text-sm truncate">
-                          {sub.merchant_display_name}
-                        </span>
-                        <Badge
-                          color={sub.frequency === 'monthly' ? '#6366f1' : '#f59e0b'}
-                          size="sm"
-                        >
-                          {sub.frequency}
-                        </Badge>
-                      </div>
-                      <p className="text-xs text-slate-400 mt-0.5">
-                        Last: {new Date(sub.last_seen).toLocaleDateString()}
-                      </p>
-                    </div>
-                    <div className="text-right flex-shrink-0">
-                      <p className="font-semibold text-sm text-slate-100">
-                        {formatCurrency(sub.average_amount)}
-                      </p>
-                      <p className="text-xs text-slate-400">
-                        /{sub.frequency === 'monthly' ? 'mo' : 'yr'}
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => handleHideSubscription(sub.id)}
-                      className="p-2 text-slate-500 hover:text-red-400 active:bg-red-500/10 rounded-lg transition-colors flex-shrink-0 touch-target"
-                      title="Hide this subscription"
-                      aria-label="Hide subscription"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="px-4 md:px-6 py-8 text-center">
-                <p className="text-slate-400 text-sm">
-                  No recurring charges yet. Mark transactions as recurring in the transaction editor.
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-      </Card>
+      {/* ── Subscriptions & Recurring (net of card credits) ──────────── */}
+      <SubscriptionOverview />
     </div>
   );
 };

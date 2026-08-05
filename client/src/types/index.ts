@@ -117,7 +117,50 @@ export interface RecurringTransaction {
   frequency: 'weekly' | 'monthly' | 'yearly';
   last_seen: string;
   is_active: boolean;
+  source?: 'manual' | 'detected';
+  user_hidden?: boolean;
+  offset_merchant_name?: string | null;
+  offset_monthly_amount?: number | null;
   created_at: string;
+}
+
+// Subscription overview (net-of-credits view)
+export interface RecurringOverviewCharge {
+  id: string;
+  merchant: string;
+  frequency: 'weekly' | 'monthly' | 'yearly';
+  average_amount: number;
+  monthly_amount: number;
+  source: 'manual' | 'detected';
+  last_seen: string;
+  offset_merchant_name: string | null;
+  offset_monthly_amount: number | null;
+  net_monthly: number;
+}
+
+export interface RecurringOverviewCredit {
+  merchant: string;
+  frequency: 'weekly' | 'monthly' | 'yearly';
+  monthly_amount: number;
+}
+
+export interface RecurringOverviewCard {
+  account_name: string;
+  fee_annual: number;
+  credits_12mo: number;
+  net_annual: number;
+  covered: boolean;
+}
+
+export interface RecurringOverview {
+  charges: RecurringOverviewCharge[];
+  credits: RecurringOverviewCredit[];
+  cards: RecurringOverviewCard[];
+  summary: {
+    gross_monthly: number;
+    credits_monthly: number;
+    net_monthly: number;
+  };
 }
 
 export interface MonthlyStats {
