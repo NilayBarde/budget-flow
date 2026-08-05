@@ -98,14 +98,6 @@ export interface TransactionSplit {
   created_at: string;
 }
 
-export interface MerchantMapping {
-  id: string;
-  original_name: string;
-  display_name: string;
-  default_category_id: string | null;
-  created_at: string;
-}
-
 export interface Tag {
   id: string;
   name: string;
@@ -196,7 +188,6 @@ export interface InsightsData {
   topCategories: InsightsTopCategory[];
   topMerchants: InsightsTopMerchant[];
   spendingVelocity: InsightsSpendingVelocity;
-  dailySpending: { day: number; amount: number }[];
   monthOverMonth: InsightsMonthOverMonth;
 }
 
@@ -217,20 +208,6 @@ export type TransactionFilters = {
   needs_review?: boolean;
   date?: string; // exact date filter, YYYY-MM-DD
 };
-
-// Savings Goals
-export interface SavingsGoal {
-  id: string;
-  name: string;
-  target_amount: number;
-  current_amount: number;
-  monthly_contribution: number;
-  icon: string;
-  color: string;
-  deadline: string | null;
-  created_at: string;
-  updated_at: string;
-}
 
 // Investment types
 export interface AccountSummary {

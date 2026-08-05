@@ -11,14 +11,6 @@ export const useTransactions = (filters: TransactionFilters = {}) => {
   });
 };
 
-export const useTransaction = (id: string) => {
-  return useQuery({
-    queryKey: ['transaction', id],
-    queryFn: () => api.getTransaction(id),
-    enabled: !!id,
-  });
-};
-
 export const useSimilarTransactionsCount = (merchantName: string | undefined, excludeId?: string) => {
   return useQuery({
     queryKey: ['similarTransactionsCount', merchantName, excludeId],
@@ -45,20 +37,6 @@ export const useUpdateTransaction = () => {
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
       queryClient.invalidateQueries({ queryKey: ['stats'] });
       queryClient.invalidateQueries({ queryKey: ['recurring-transactions'] });
-      queryClient.invalidateQueries({ queryKey: ['insights'] });
-      queryClient.invalidateQueries({ queryKey: ['budget-goals'] });
-    },
-  });
-};
-
-export const useCreateManualTransaction = () => {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (data: Partial<Transaction>) => api.createManualTransaction(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['transactions'] });
-      queryClient.invalidateQueries({ queryKey: ['stats'] });
       queryClient.invalidateQueries({ queryKey: ['insights'] });
       queryClient.invalidateQueries({ queryKey: ['budget-goals'] });
     },

@@ -5,7 +5,6 @@ import type {
   Category,
   BudgetGoal,
   Tag,
-  MerchantMapping,
   RecurringTransaction,
   MonthlyStats,
   YearlyStats,
@@ -14,7 +13,6 @@ import type {
   TransactionSplit,
   InvestmentSummary,
   InsightsData,
-  SavingsGoal,
   SyncHealth,
 } from '../types';
 
@@ -168,14 +166,6 @@ export const updateAccount = (accountId: string, data: UpdateAccountData) =>
     body: JSON.stringify(data),
   });
 
-export interface BalanceResponse {
-  balance: number;
-  account_name: string;
-}
-
-export const refreshBalance = (accountId: string) =>
-  fetchApi<BalanceResponse>(`/accounts/${accountId}/balance`);
-
 export interface RefreshAccountsResponse {
   message: string;
   created: Array<{ id: string; name: string; type: string }>;
@@ -186,29 +176,6 @@ export interface RefreshAccountsResponse {
 
 export const refreshAccounts = (accountId: string) =>
   fetchApi<RefreshAccountsResponse>(`/accounts/${accountId}/refresh-accounts`, { method: 'POST' });
-
-export const reclassifyTransactions = () =>
-  fetchApi<{ reclassified: number; breakdown: { income: number; expense: number; transfer: number } }>(
-    '/accounts/reclassify-transactions',
-    { method: 'POST' }
-  );
-
-export const recategorizeAllTransactions = (options?: { skipManual?: boolean; force?: boolean }) =>
-  fetchApi<{
-    recategorized: number;
-    skipped: number;
-    markedForReview: number;
-    categoryBreakdown: Record<string, number>;
-  }>(
-    '/accounts/recategorize-all',
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        skip_manual: options?.skipManual ?? true,
-        force: options?.force ?? false
-      }),
-    }
-  );
 
 // Transactions
 export const getTransactions = (filters: TransactionFilters = {}) => {
@@ -221,8 +188,6 @@ export const getTransactions = (filters: TransactionFilters = {}) => {
   return fetchApi<Transaction[]>(`/transactions?${params.toString()}`);
 };
 
-export const getTransaction = (id: string) =>
-  fetchApi<Transaction>(`/transactions/${id}`);
 
 export const getSimilarTransactionsCount = (merchantName: string, excludeId?: string) => {
   const params = new URLSearchParams();
@@ -249,12 +214,6 @@ export const getSimilarTransactions = (merchantName: string, excludeId?: string)
 export const updateTransaction = (id: string, data: Partial<Transaction>, applyToAll = false) =>
   fetchApi<Transaction>(`/transactions/${id}${applyToAll ? '?applyToAll=true' : ''}`, {
     method: 'PATCH',
-    body: JSON.stringify(data),
-  });
-
-export const createManualTransaction = (data: Partial<Transaction>) =>
-  fetchApi<Transaction>('/transactions', {
-    method: 'POST',
     body: JSON.stringify(data),
   });
 
@@ -372,29 +331,20 @@ export const bulkAddTagToTransactions = (transactionIds: string[], tagId: string
     body: JSON.stringify({ transactionIds, tagId }),
   });
 
-export const bulkRemoveTagFromTransactions = (transactionIds: string[], tagId: string) =>
-  fetchApi<void>('/transactions/bulk/tags', {
-    method: 'DELETE',
-    body: JSON.stringify({ transactionIds, tagId }),
-  });
-
 export const bulkSplitTransactions = (transactionIds: string[], numPeople: number) =>
   fetchApi<{ split: number; skipped: number }>('/transactions/bulk/splits', {
     method: 'POST',
     body: JSON.stringify({ transactionIds, numPeople }),
   });
 
-// Merchant Mappings
-export const getMerchantMappings = () => fetchApi<MerchantMapping[]>('/merchant-mappings');
+// Data export
+export interface ExportPayload {
+  exported_at: string;
+  version: number;
+  data: Record<string, unknown[]>;
+}
 
-export const createMerchantMapping = (data: Omit<MerchantMapping, 'id' | 'created_at'>) =>
-  fetchApi<MerchantMapping>('/merchant-mappings', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
-
-export const deleteMerchantMapping = (id: string) =>
-  fetchApi<void>(`/merchant-mappings/${id}`, { method: 'DELETE' });
+export const exportAllData = () => fetchApi<ExportPayload>('/export');
 
 // Recurring Transactions
 export const getRecurringTransactions = () =>
@@ -495,25 +445,6 @@ export const updateAppSetting = (key: string, value: string) =>
 // Estimated Income
 export const getEstimatedIncome = () =>
   fetchApi<{ estimated_monthly_income: number; months_sampled: number }>('/stats/estimated-income');
-
-// Savings Goals
-export const getSavingsGoals = () =>
-  fetchApi<SavingsGoal[]>('/savings-goals');
-
-export const createSavingsGoal = (data: Omit<SavingsGoal, 'id' | 'created_at' | 'updated_at'>) =>
-  fetchApi<SavingsGoal>('/savings-goals', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
-
-export const updateSavingsGoal = (id: string, data: Partial<SavingsGoal>) =>
-  fetchApi<SavingsGoal>(`/savings-goals/${id}`, {
-    method: 'PATCH',
-    body: JSON.stringify(data),
-  });
-
-export const deleteSavingsGoal = (id: string) =>
-  fetchApi<void>(`/savings-goals/${id}`, { method: 'DELETE' });
 
 // Investments
 

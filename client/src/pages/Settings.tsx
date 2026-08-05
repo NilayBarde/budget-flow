@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { Card, CardHeader, Button, Modal, Input } from '../components/ui';
 import { useCategories, useCreateCategory, useUpdateCategory, useDeleteCategory } from '../hooks';
+import { exportAllData } from '../services/api';
 import type { Category } from '../types';
 
 const DEFAULT_COLORS = [
@@ -21,6 +22,25 @@ export const Settings = () => {
   const [categoryName, setCategoryName] = useState('');
   const [categoryColor, setCategoryColor] = useState(DEFAULT_COLORS[0]);
   const [categoryIcon, setCategoryIcon] = useState('');
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleExport = useCallback(async () => {
+    setIsExporting(true);
+    try {
+      const payload = await exportAllData();
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `budgetflow-export-${payload.exported_at.slice(0, 10)}.json`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert('Export failed. Is the server running?');
+    } finally {
+      setIsExporting(false);
+    }
+  }, []);
 
   const handleCreateCategory = useCallback(async () => {
     if (!categoryName.trim()) return;
@@ -278,16 +298,18 @@ export const Settings = () => {
 
       {/* Data Management */}
       <Card padding="sm">
-        <CardHeader 
-          title="Data Management" 
-          subtitle="Export or clear your data"
+        <CardHeader
+          title="Data Management"
+          subtitle="Download a JSON backup of all your data"
         />
         <div className="flex flex-col sm:flex-row gap-3 md:gap-4">
-          <Button variant="secondary" className="w-full sm:w-auto">
+          <Button
+            variant="secondary"
+            className="w-full sm:w-auto"
+            onClick={handleExport}
+            isLoading={isExporting}
+          >
             Export All Data
-          </Button>
-          <Button variant="danger" className="w-full sm:w-auto">
-            Clear All Data
           </Button>
         </div>
       </Card>

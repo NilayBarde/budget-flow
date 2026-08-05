@@ -1,14 +1,16 @@
 
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { Card, Spinner } from '../ui';
-import { useYearlyStats, useMonthNavigation } from '../../hooks';
+import { useYearlyStats } from '../../hooks';
 import { formatCurrency } from '../../utils/formatters';
 import { MONTHS } from '../../utils/constants';
 
-export const SpendingTrend = () => {
-    const { currentDate } = useMonthNavigation();
-    const currentYear = currentDate.year;
-    const { data: yearlyStats, isLoading } = useYearlyStats(currentYear);
+interface SpendingTrendProps {
+    year: number;
+}
+
+export const SpendingTrend = ({ year }: SpendingTrendProps) => {
+    const { data: yearlyStats, isLoading } = useYearlyStats(year);
 
     if (isLoading) {
         return (
@@ -28,7 +30,7 @@ export const SpendingTrend = () => {
         <Card className="h-[400px] flex flex-col" padding="none">
             <div className="p-6 border-b border-midnight-700">
                 <h3 className="text-lg font-semibold text-slate-100">Income vs Expenses</h3>
-                <p className="text-sm text-slate-400">Monthly trend for {currentYear}</p>
+                <p className="text-sm text-slate-400">Monthly trend for {year}</p>
             </div>
             <div className="flex-1 w-full min-h-0 p-4">
                 <ResponsiveContainer width="100%" height="100%">

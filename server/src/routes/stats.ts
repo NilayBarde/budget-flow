@@ -264,15 +264,11 @@ router.get('/insights', asyncHandler(async (req, res) => {
     // ── Top Merchants ──────────────────────────────────────────────────
     const merchantMap = new Map<string, MerchantAggregate>();
 
-    // ── Daily Spending (current month only) ────────────────────────────
-    // dailySpending covers the full month (for the chart). dailyVariable
-    // only covers days elapsed so far (for velocity projection); trailing
-    // zeros would dilute the rate.
-    const dailySpending = new Map<number, number>(); // day -> amount
+    // ── Daily variable spend (current month only) ──────────────────────
+    // Only covers days elapsed so far (for velocity projection); trailing
+    // zeros would dilute the rate. The DailySpending chart computes its own
+    // series client-side from the shared month query.
     const dailyVariable = new Map<number, number>(); // day -> non-recurring amount
-    for (let d = 1; d <= daysInMonth; d++) {
-      dailySpending.set(d, 0);
-    }
     for (let d = 1; d <= today; d++) {
       dailyVariable.set(d, 0);
     }
@@ -335,10 +331,9 @@ router.get('/insights', asyncHandler(async (req, res) => {
           }
         }
 
-        // Daily spending (current month only)
+        // Current-month velocity tracking
         if (txMonth === currentMonth && txYear === currentYear) {
           const day = txDate.getDate();
-          dailySpending.set(day, (dailySpending.get(day) || 0) + amountToCount);
           currentMonthSpent += amountToCount;
 
           // Track recurring vs variable for velocity
@@ -384,10 +379,9 @@ router.get('/insights', asyncHandler(async (req, res) => {
           }
         }
 
-        // Daily spending (current month)
+        // Current-month velocity tracking
         if (txMonth === currentMonth && txYear === currentYear) {
           const day = txDate.getDate();
-          dailySpending.set(day, Math.max(0, (dailySpending.get(day) || 0) - returnAmount));
           dailyVariable.set(day, Math.max(0, (dailyVariable.get(day) || 0) - returnAmount));
           currentMonthSpent = Math.max(0, currentMonthSpent - returnAmount);
         }
@@ -428,11 +422,6 @@ router.get('/insights', asyncHandler(async (req, res) => {
 
     // ── Build top merchants response ───────────────────────────────────
     const topMerchants = buildTopMerchants(merchantMap);
-
-    // ── Build daily spending response ──────────────────────────────────
-    const dailySpendingArr = Array.from(dailySpending.entries())
-      .sort(([a], [b]) => a - b)
-      .map(([day, amount]) => ({ day, amount }));
 
     // ── Build spending velocity ────────────────────────────────────────
     const dailyVariableSpending: number[] = [];
@@ -494,7 +483,6 @@ router.get('/insights', asyncHandler(async (req, res) => {
       topCategories,
       topMerchants,
       spendingVelocity,
-      dailySpending: dailySpendingArr,
       monthOverMonth,
     });
 }));
