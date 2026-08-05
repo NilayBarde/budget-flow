@@ -1,9 +1,22 @@
+import { monthlyEquivalentAmount, type RecurringFrequency } from './recurring-normalize.js';
+
+export interface FixedCostSeries {
+  /** Average monthly amount this series is expected to charge. */
+  expectedAmount: number;
+  /** How much of it has already posted in the current month. */
+  paidThisMonth: number;
+}
+
 export interface SpendingVelocityInput {
   daysElapsed: number;
   daysInMonth: number;
   spentSoFar: number;
-  recurringSpent: number;
-  expectedFixedCosts: number;
+  /**
+   * One entry per live recurring charge (rent, gym, subscriptions).
+   * Unpaid remainders are computed per series so one series posting above
+   * its average cannot mask another series that is still due this month.
+   */
+  fixedCostSeries: FixedCostSeries[];
   lastMonthTotal: number;
   /**
    * Per-day variable (non-recurring) spending for the current month.
@@ -105,6 +118,58 @@ const computeProjectedVariable = (
   };
 };
 
+/**
+ * Filter user-marked recurring series down to the ones that are actually
+ * still charging, based on each merchant's most recent expense date.
+ * `is_active`/`last_seen` on recurring_transactions only reflect when the
+ * user marked the series, so a payee that stopped charging months ago
+ * (e.g. a previous landlord) stays "active" forever and would otherwise be
+ * projected as an unpaid fixed cost every month.
+ */
+export const LIVE_SERIES_MAX_AGE_DAYS = 45;
+
+// Yearly series are exempt from the liveness check: their last charge can
+// legitimately be up to a year old, while the insights endpoint only
+// fetches 6 months of transactions, so a missing recent charge is not
+// evidence the series is dead.
+const livenessWindowDays: Record<RecurringFrequency, number | null> = {
+  weekly: LIVE_SERIES_MAX_AGE_DAYS,
+  monthly: LIVE_SERIES_MAX_AGE_DAYS,
+  yearly: null,
+};
+
+export interface RecurringChargeRow {
+  merchantDisplayName: string;
+  averageAmount: number;
+  frequency: RecurringFrequency;
+}
+
+export const buildFixedCostSeries = (
+  charges: RecurringChargeRow[],
+  lastExpenseDateByMerchant: ReadonlyMap<string, string>,
+  paidThisMonthByMerchant: ReadonlyMap<string, number>,
+  today: string,
+): FixedCostSeries[] => {
+  const cutoffDate = new Date(today);
+  cutoffDate.setUTCDate(cutoffDate.getUTCDate() - LIVE_SERIES_MAX_AGE_DAYS);
+  const cutoff = cutoffDate.toISOString().split('T')[0];
+
+  return charges
+    .filter(c => {
+      if (livenessWindowDays[c.frequency] === null) return true;
+      const lastSeen = lastExpenseDateByMerchant.get(c.merchantDisplayName);
+      return !!lastSeen && lastSeen >= cutoff;
+    })
+    .map(c => ({
+      // Weekly and yearly charges are normalized to a monthly equivalent.
+      // A yearly charge contributes 1/12 here but its full amount to paid
+      // in its billing month; the per-series max(0, expected - paid) clamp
+      // below absorbs that without double counting.
+      expectedAmount: monthlyEquivalentAmount(c.frequency, c.averageAmount),
+      paidThisMonth: paidThisMonthByMerchant.get(c.merchantDisplayName) || 0,
+    }));
+};
+
 export const computeSpendingVelocity = (
   input: SpendingVelocityInput,
 ): SpendingVelocity => {
@@ -112,8 +177,7 @@ export const computeSpendingVelocity = (
     daysElapsed,
     daysInMonth,
     spentSoFar,
-    recurringSpent,
-    expectedFixedCosts,
+    fixedCostSeries,
     lastMonthTotal,
     dailyVariableSpending,
   } = input;
@@ -125,9 +189,7 @@ export const computeSpendingVelocity = (
   }
 
   // Derive variableSpent from the per-day array so it cannot drift from
-  // the daily values used for projection. spentSoFar/recurringSpent stay
-  // as inputs because the no-double-count guard for expected fixed costs
-  // needs recurringSpent independently of the variable per-day data.
+  // the daily values used for projection.
   const variableSpent = dailyVariableSpending.reduce((sum, v) => sum + v, 0);
   const dailyAverage = daysElapsed > 0 ? variableSpent / daysElapsed : 0;
 
@@ -137,11 +199,16 @@ export const computeSpendingVelocity = (
     daysInMonth,
   );
 
-  // Avoid double-counting expected fixed costs that have already posted.
-  // recurringSpent is part of spentSoFar; expectedFixedCosts represents
-  // the *full* monthly amount. Only the unpaid remainder should be added
-  // to the projection.
-  const remainingFixed = Math.max(0, expectedFixedCosts - recurringSpent);
+  // Avoid double-counting expected fixed costs that have already posted:
+  // only each series' unpaid remainder is added to the projection. The
+  // remainder is per series; rent posting above its average must not
+  // absorb a subscription that hasn't charged yet this month.
+  const expectedFixedCosts = fixedCostSeries.reduce((sum, s) => sum + s.expectedAmount, 0);
+  const recurringSpent = fixedCostSeries.reduce((sum, s) => sum + s.paidThisMonth, 0);
+  const remainingFixed = fixedCostSeries.reduce(
+    (sum, s) => sum + Math.max(0, s.expectedAmount - s.paidThisMonth),
+    0,
+  );
   const projectedTotal = recurringSpent + remainingFixed + projectedVariable;
 
   return {
