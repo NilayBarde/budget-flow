@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import clsx from 'clsx';
 import { TransactionRow } from './TransactionRow';
 import { EmptyState, Spinner } from '../ui';
 import { Receipt } from 'lucide-react';
@@ -7,6 +8,9 @@ import type { Transaction } from '../../types';
 interface TransactionListProps {
   transactions: Transaction[] | undefined;
   isLoading: boolean;
+  // True while showing the previous query's data during a refetch
+  // (keepPreviousData) — the list dims so stale rows are distinguishable.
+  isPlaceholderData?: boolean;
   onEdit: (transaction: Transaction) => void;
   onSplit: (transaction: Transaction) => void;
   onDelete: (transaction: Transaction) => void;
@@ -15,10 +19,11 @@ interface TransactionListProps {
   selectionMode?: boolean;
 }
 
-export const TransactionList = ({ 
-  transactions, 
-  isLoading, 
-  onEdit, 
+export const TransactionList = ({
+  transactions,
+  isLoading,
+  isPlaceholderData = false,
+  onEdit,
   onSplit,
   onDelete,
   selectedIds = new Set(),
@@ -65,7 +70,12 @@ export const TransactionList = ({
   const someSelected = selectedIds.size > 0 && selectedIds.size < transactions.length;
 
   return (
-    <div className="bg-midnight-800 border border-midnight-600 rounded-xl">
+    <div
+      className={clsx(
+        'bg-midnight-800 border border-midnight-600 rounded-xl transition-opacity',
+        isPlaceholderData && 'opacity-60'
+      )}
+    >
       {/* Header with select all */}
       {selectionMode && (
         <div className="px-3 py-2 md:px-4 border-b border-midnight-600 flex items-center gap-4">

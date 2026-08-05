@@ -6,7 +6,7 @@ import { Button } from '../components/ui';
 import { useTransactions, useAccounts, useCategories, useTags, useBulkAddTagToTransactions, useDeleteTransaction, useBulkDeleteTransactions, useExpectedIncome, useDebouncedValue } from '../hooks';
 import type { Transaction, TransactionFilters as Filters, TransactionType } from '../types';
 import { getMonthYear } from '../utils/formatters';
-import { getMyShareAmount } from '../utils/my-share';
+import { computeTransactionTotals, filterByType } from '../utils/transactionTotals';
 import { sortTransactions, filterByAmountRange, type TransactionSortOption } from '../utils/transactionSort';
 
 type TypeFilter = TransactionType | 'all';
@@ -72,16 +72,14 @@ export const Transactions = () => {
     [filters, debouncedSearch]
   );
 
-  // Build filters with transaction_type
-  const queryFilters = useMemo(() => {
-    const f: Filters = { ...effectiveFilters };
-    if (typeFilter !== 'all') {
-      f.transaction_type = typeFilter;
-    }
-    return f;
-  }, [effectiveFilters, typeFilter]);
+  // Single month fetch: type tabs filter client-side (instant, no network)
+  // and the header totals share the same dataset.
+  const { data: allTransactions, isLoading, isPlaceholderData } = useTransactions(effectiveFilters);
 
-  const { data: transactions, isLoading } = useTransactions(queryFilters);
+  const transactions = useMemo(
+    () => filterByType(allTransactions, typeFilter),
+    [allTransactions, typeFilter]
+  );
 
   // Apply client-side amount range filter and sorting to the loaded month
   const displayedTransactions = useMemo(() => {
@@ -95,10 +93,6 @@ export const Transactions = () => {
     );
     return sortTransactions(filtered, sort);
   }, [transactions, sort, minAmount, maxAmount]);
-
-  // Separate unfiltered query for header totals — ensures totals always reflect the full month
-  // regardless of which type tab is active
-  const { data: allTransactions } = useTransactions(effectiveFilters);
   const { data: accounts = [] } = useAccounts();
   const { data: categories = [] } = useCategories();
   const { data: tags = [] } = useTags();
@@ -198,33 +192,7 @@ export const Transactions = () => {
 
   // Calculate totals from ALL transactions for the month (not just the filtered tab)
   // so the header always shows the same numbers as the dashboard
-  // For split transactions, only count the user's share (is_my_share === true)
-  const totals = useMemo(() => {
-    if (!allTransactions) return { expenses: 0, returns: 0, income: 0, investments: 0, transfers: 0 };
-
-    return allTransactions.reduce(
-      (acc, t) => {
-        const type = t.transaction_type || (t.amount > 0 ? 'expense' : 'income');
-
-        // For split transactions, sum only the user's share
-        const amount = getMyShareAmount(t);
-
-        if (type === 'expense') {
-          acc.expenses += amount;
-        } else if (type === 'return') {
-          acc.returns += amount;
-        } else if (type === 'income') {
-          acc.income += amount;
-        } else if (type === 'investment') {
-          acc.investments += amount;
-        } else if (type === 'transfer') {
-          acc.transfers += amount;
-        }
-        return acc;
-      },
-      { expenses: 0, returns: 0, income: 0, investments: 0, transfers: 0 }
-    );
-  }, [allTransactions]);
+  const totals = useMemo(() => computeTransactionTotals(allTransactions), [allTransactions]);
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -339,6 +307,7 @@ export const Transactions = () => {
       <TransactionList
         transactions={displayedTransactions}
         isLoading={isLoading}
+        isPlaceholderData={isPlaceholderData}
         onEdit={handleEdit}
         onSplit={handleSplit}
         onDelete={handleDelete}
