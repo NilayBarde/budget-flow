@@ -80,18 +80,6 @@ export const useBulkAddTagToTransactions = () => {
   });
 };
 
-export const useBulkRemoveTagFromTransactions = () => {
-  const queryClient = useQueryClient();
-  
-  return useMutation({
-    mutationFn: ({ transactionIds, tagId }: { transactionIds: string[]; tagId: string }) =>
-      api.bulkRemoveTagFromTransactions(transactionIds, tagId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['transactions'] });
-    },
-  });
-};
-
 export const useBulkSplitTransactions = () => {
   const queryClient = useQueryClient();
   

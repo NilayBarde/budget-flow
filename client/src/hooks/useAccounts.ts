@@ -148,17 +148,6 @@ export const useUpdateAccount = () => {
   });
 };
 
-export const useRefreshBalance = () => {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (accountId: string) => api.refreshBalance(accountId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['accounts'] });
-    },
-  });
-};
-
 export const useRefreshAccounts = () => {
   const queryClient = useQueryClient();
 

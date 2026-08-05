@@ -98,14 +98,6 @@ export interface TransactionSplit {
   created_at: string;
 }
 
-export interface MerchantMapping {
-  id: string;
-  original_name: string;
-  display_name: string;
-  default_category_id: string | null;
-  created_at: string;
-}
-
 export interface Tag {
   id: string;
   name: string;
@@ -196,7 +188,6 @@ export interface InsightsData {
   topCategories: InsightsTopCategory[];
   topMerchants: InsightsTopMerchant[];
   spendingVelocity: InsightsSpendingVelocity;
-  dailySpending: { day: number; amount: number }[];
   monthOverMonth: InsightsMonthOverMonth;
 }
 
