@@ -317,22 +317,6 @@ router.post('/exchange-token', async (req, res) => {
       console.error('Auto-sync failed (accounts created, but transactions need manual sync):', syncError);
     }
 
-    // Auto-sync investment holdings for initial balance display
-    const INVESTMENT_TYPES = ['investment', 'brokerage', '401k', '401a', '403b', 'ira', 'roth', 'pension', 'retirement', 'stock plan', 'crypto exchange'];
-    const hasInvestmentAccounts = plaidAccounts.some(a => {
-      const accountType = (a.subtype || a.type || '').toLowerCase();
-      return INVESTMENT_TYPES.some(t => accountType.includes(t));
-    });
-
-    if (hasInvestmentAccounts) {
-      console.log('Attempting to sync initial investment balances...');
-      try {
-        await plaidService.getInvestmentHoldings(accessToken);
-      } catch (holdingsError) {
-        console.log('Initial investment balance sync skipped or failed');
-      }
-    }
-
     // Return the first created account for backwards compatibility
     const { data: firstAccount } = await supabase
       .from('accounts')

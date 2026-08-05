@@ -234,29 +234,11 @@ export const removeItem = async (accessToken: string) => {
   return response.data;
 };
 
-// Investment holdings types
-export interface PlaidSecurity {
-  security_id: string;
-  ticker_symbol: string | null;
-  name: string | null;
-  type: string | null;
-  close_price: number | null;
-  close_price_as_of: string | null;
-  iso_currency_code: string | null;
-}
-
-export interface PlaidHolding {
-  account_id: string;
-  security_id: string;
-  quantity: number;
-  cost_basis: number | null;
-  institution_value: number | null;
-  iso_currency_code: string | null;
-}
-
+// Result of the holdings endpoint, slimmed to account balances: the app is
+// balance-only (holdings/securities storage was removed in 3ffbed8), but
+// /investments/holdings/get remains the reliable balance source for
+// investment accounts that the regular accounts endpoint omits.
 export interface InvestmentHoldingsResult {
-  holdings: PlaidHolding[];
-  securities: PlaidSecurity[];
   accounts: Array<{
     account_id: string;
     name: string;
@@ -268,35 +250,16 @@ export interface InvestmentHoldingsResult {
   }>;
 }
 
-// Get investment holdings from Plaid
+// Get investment account balances from Plaid's holdings endpoint
 export const getInvestmentHoldings = async (accessToken: string): Promise<InvestmentHoldingsResult> => {
   try {
     const response = await plaidClient.investmentsHoldingsGet({
       access_token: accessToken,
     });
-    
-    const { holdings, securities, accounts } = response.data;
-    
-    console.log(`Fetched ${holdings.length} holdings across ${securities.length} securities`);
-    
+
+    const { accounts } = response.data;
+
     return {
-      holdings: holdings.map(h => ({
-        account_id: h.account_id,
-        security_id: h.security_id,
-        quantity: h.quantity,
-        cost_basis: h.cost_basis,
-        institution_value: h.institution_value,
-        iso_currency_code: h.iso_currency_code,
-      })),
-      securities: securities.map(s => ({
-        security_id: s.security_id,
-        ticker_symbol: s.ticker_symbol,
-        name: s.name,
-        type: s.type,
-        close_price: s.close_price,
-        close_price_as_of: s.close_price_as_of,
-        iso_currency_code: s.iso_currency_code,
-      })),
       accounts: accounts.map(a => ({
         account_id: a.account_id,
         name: a.name,
