@@ -62,6 +62,8 @@ export const useSyncAccount = () => {
       queryClient.invalidateQueries({ queryKey: ['accounts'] });
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
       queryClient.invalidateQueries({ queryKey: ['stats'] });
+      // A successful sync clears needs_reauth server-side; refresh the banner
+      queryClient.invalidateQueries({ queryKey: ['sync-health'] });
     },
   });
 };

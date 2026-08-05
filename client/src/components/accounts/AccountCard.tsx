@@ -171,9 +171,20 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: Acc
   const onUpdateSuccess = useCallback(async () => {
     console.log('Plaid Link update completed successfully for', account.institution_name);
     setUpdateLinkToken(null);
-    setRefreshResult('Connection updated successfully!');
-    setTimeout(() => setRefreshResult(null), 5000);
-  }, [account.institution_name]);
+    // needs_reauth only clears on the next successful sync, so run one now
+    // instead of leaving the reconnect warning up until a manual sync.
+    setRefreshResult('Connection updated! Syncing...');
+    syncAccount.mutate(account.id, {
+      onSuccess: () => {
+        setRefreshResult('Connection updated and synced!');
+        setTimeout(() => setRefreshResult(null), 5000);
+      },
+      onError: () => {
+        setRefreshResult('Connection updated, but the sync failed. Try Sync manually.');
+        setTimeout(() => setRefreshResult(null), 8000);
+      },
+    });
+  }, [account.institution_name, account.id, syncAccount]);
 
   // Plaid Link exit handler
   const onUpdateExit = useCallback((err: { error_code?: string; error_message?: string } | null) => {
