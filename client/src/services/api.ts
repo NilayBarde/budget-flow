@@ -6,6 +6,7 @@ import type {
   BudgetGoal,
   Tag,
   RecurringTransaction,
+  RecurringOverview,
   MonthlyStats,
   YearlyStats,
   TransactionFilters,
@@ -349,6 +350,9 @@ export const exportAllData = () => fetchApi<ExportPayload>('/export');
 // Recurring Transactions
 export const getRecurringTransactions = () =>
   fetchApi<RecurringTransaction[]>('/recurring-transactions');
+
+export const getRecurringOverview = () =>
+  fetchApi<RecurringOverview>('/recurring-transactions/overview');
 
 export const updateRecurringTransaction = (id: string, data: Partial<RecurringTransaction>) =>
   fetchApi<RecurringTransaction>(`/recurring-transactions/${id}`, {
