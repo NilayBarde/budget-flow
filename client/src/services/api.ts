@@ -14,7 +14,6 @@ import type {
   TransactionSplit,
   InvestmentSummary,
   InsightsData,
-  SavingsGoal,
   SyncHealth,
 } from '../types';
 
@@ -495,25 +494,6 @@ export const updateAppSetting = (key: string, value: string) =>
 // Estimated Income
 export const getEstimatedIncome = () =>
   fetchApi<{ estimated_monthly_income: number; months_sampled: number }>('/stats/estimated-income');
-
-// Savings Goals
-export const getSavingsGoals = () =>
-  fetchApi<SavingsGoal[]>('/savings-goals');
-
-export const createSavingsGoal = (data: Omit<SavingsGoal, 'id' | 'created_at' | 'updated_at'>) =>
-  fetchApi<SavingsGoal>('/savings-goals', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
-
-export const updateSavingsGoal = (id: string, data: Partial<SavingsGoal>) =>
-  fetchApi<SavingsGoal>(`/savings-goals/${id}`, {
-    method: 'PATCH',
-    body: JSON.stringify(data),
-  });
-
-export const deleteSavingsGoal = (id: string) =>
-  fetchApi<void>(`/savings-goals/${id}`, { method: 'DELETE' });
 
 // Investments
 

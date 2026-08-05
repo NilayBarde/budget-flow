@@ -218,20 +218,6 @@ export type TransactionFilters = {
   date?: string; // exact date filter, YYYY-MM-DD
 };
 
-// Savings Goals
-export interface SavingsGoal {
-  id: string;
-  name: string;
-  target_amount: number;
-  current_amount: number;
-  monthly_contribution: number;
-  icon: string;
-  color: string;
-  deadline: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
 // Investment types
 export interface AccountSummary {
   id: string;
