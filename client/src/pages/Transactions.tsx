@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { CheckSquare, X, Copy } from 'lucide-react';
 import { TransactionList, TransactionFilters, EditTransactionModal, SplitTransactionModal, BulkSplitModal, BulkActionBar, DuplicateReviewModal } from '../components/transactions';
 import { Button, ErrorState } from '../components/ui';
-import { useTransactions, useAccounts, useCategories, useTags, useBulkAddTagToTransactions, useDeleteTransaction, useBulkDeleteTransactions, useExpectedIncome, useDebouncedValue } from '../hooks';
+import { useTransactions, useAccounts, useCategories, useTags, useBulkAddTagToTransactions, useDeleteTransaction, useBulkDeleteTransactions, useExpectedIncome, useDebouncedValue, usePrefetchAdjacentMonths } from '../hooks';
 import type { Transaction, TransactionFilters as Filters, TransactionType } from '../types';
 import { getMonthYear } from '../utils/formatters';
 import { computeTransactionTotals, filterByType } from '../utils/transactionTotals';
@@ -75,6 +75,9 @@ export const Transactions = () => {
   // Single month fetch: type tabs filter client-side (instant, no network)
   // and the header totals share the same dataset.
   const { data: allTransactions, isLoading, isPlaceholderData, isError, refetch } = useTransactions(effectiveFilters);
+
+  // Warm the cache for the neighboring months so prev/next paints instantly
+  usePrefetchAdjacentMonths(filters.month, filters.year);
 
   const transactions = useMemo(
     () => filterByType(allTransactions, typeFilter),

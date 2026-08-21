@@ -9,12 +9,15 @@ import { RecentActivity } from '../components/dashboard/RecentActivity';
 import { BudgetWatchlist } from '../components/dashboard/BudgetWatchlist';
 import { BudgetVariance } from '../components/dashboard/BudgetVariance';
 import { LargeUnsplitTransactions } from '../components/dashboard/LargeUnsplitTransactions';
-import { useMonthlyStats, useMonthNavigation } from '../hooks';
+import { useMonthlyStats, useMonthNavigation, usePrefetchAdjacentMonths } from '../hooks';
 import { MONTHS } from '../utils/constants';
 
 export const Dashboard = () => {
   const { currentDate, handlePrevMonth, handleNextMonth } = useMonthNavigation();
   const { data: monthlyStats, isLoading, isError, refetch } = useMonthlyStats(currentDate.month, currentDate.year);
+
+  // Warm the cache for the neighboring months so prev/next paints instantly
+  usePrefetchAdjacentMonths(currentDate.month, currentDate.year);
 
   // Check if viewing current month for Spending Pace widget
   const isCurrentMonth = useMemo(() => {
