@@ -8,6 +8,7 @@ export * from './useInvestments';
 export * from './useInsights';
 export * from './useAppSettings';
 export * from './useMonthNavigation';
+export * from './usePrefetchAdjacentMonths';
 export * from './useModalState';
 export * from './useFinancialHealth';
 export * from './useDebouncedValue';

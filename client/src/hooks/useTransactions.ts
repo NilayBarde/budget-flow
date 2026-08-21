@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import * as api from '../services/api';
+import { monthStaleTime } from '../utils/monthCache';
 import type { TransactionFilters, Transaction, TransactionSplit } from '../types';
 
 export const useTransactions = (filters: TransactionFilters = {}) => {
@@ -8,6 +9,7 @@ export const useTransactions = (filters: TransactionFilters = {}) => {
     queryFn: () => api.getTransactions(filters),
     // Keep the previous list on screen while a new month/filter loads
     placeholderData: keepPreviousData,
+    staleTime: monthStaleTime(filters.month, filters.year),
   });
 };
 
