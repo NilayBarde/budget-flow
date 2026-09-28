@@ -43,3 +43,31 @@ export const resolveTransactionType = (
   detectedType: TransactionType,
   mapping: MerchantMapping | undefined,
 ): TransactionType => mapping?.default_transaction_type || detectedType;
+
+// Plaid transaction IDs are ~40 chars; batching keeps the generated query URL from
+// growing unbounded on large historical syncs.
+const ID_BATCH_SIZE = 200;
+
+/**
+ * Plaid transaction IDs whose type the user set by hand. Callers use this to update
+ * a transaction's amount/date/pending without reverting a manual type correction.
+ */
+export const loadManuallyTypedIds = async (
+  transactions: { transaction_id: string }[],
+): Promise<Set<string>> => {
+  const manuallyTypedIds = new Set<string>();
+
+  for (let i = 0; i < transactions.length; i += ID_BATCH_SIZE) {
+    const ids = transactions.slice(i, i + ID_BATCH_SIZE).map((tx) => tx.transaction_id);
+    const { data } = await supabase
+      .from('transactions')
+      .select('plaid_transaction_id, type_manually_set')
+      .in('plaid_transaction_id', ids);
+
+    for (const row of data || []) {
+      if (row.type_manually_set) manuallyTypedIds.add(row.plaid_transaction_id);
+    }
+  }
+
+  return manuallyTypedIds;
+};

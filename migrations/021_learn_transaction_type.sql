@@ -16,7 +16,3 @@ CHECK (default_transaction_type IS NULL OR default_transaction_type IN ('income'
 -- updates amount/date/pending without overwriting the corrected type.
 ALTER TABLE transactions
 ADD COLUMN IF NOT EXISTS type_manually_set BOOLEAN DEFAULT false;
-
--- Mappings are looked up by the lowercased merchant name, so make that lookup indexable.
-CREATE INDEX IF NOT EXISTS idx_merchant_mappings_original_name_lower
-ON merchant_mappings (LOWER(original_name));
