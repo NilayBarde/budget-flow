@@ -3,6 +3,7 @@ import { supabase } from '../db/supabase.js';
 import * as plaidService from '../services/plaid.js';
 import { categorizeWithPlaid, cleanMerchantName, PlaidPFC } from '../services/categorizer.js';
 import { detectTransactionType } from '../services/transaction-type.js';
+import { loadManuallyTypedIds, loadMerchantMappings, resolveTransactionType } from '../services/merchant-mappings.js';
 import { getCategoryIdForType } from '../services/category-lookup.js';
 import { buildAccountResolver } from '../services/sync-attribution.js';
 import { reconcilePendingTransaction } from '../services/pending-reconciliation.js';
@@ -237,12 +238,8 @@ router.post('/:id/sync', async (req, res) => {
 
     const categoryMap = new Map(categories?.map(c => [c.name, c.id]) || []);
 
-    // Get merchant mappings
-    const { data: mappings } = await supabase
-      .from('merchant_mappings')
-      .select('*');
-
-    const mappingMap = new Map(mappings?.map(m => [m.original_name.toLowerCase(), m]) || []);
+    // Get merchant mappings (user's previous corrections)
+    const merchantMappings = await loadMerchantMappings();
 
     // A Plaid item can hold multiple accounts (e.g. an Amex login with both a
     // Gold and a Platinum card). /transactions/sync returns all of them tagged
@@ -286,12 +283,13 @@ router.post('/:id/sync', async (req, res) => {
       }
 
       const texts = [tx.merchant_name || '', tx.name || '', (tx as { original_description?: string }).original_description || ''];
-      const mapping = mappingMap.get(tx.merchant_name?.toLowerCase() || '');
+      const mapping = merchantMappings.find(tx.merchant_name, tx.name);
       const displayName = mapping?.display_name || cleanMerchantName(tx.merchant_name || tx.name);
       const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
 
-      // Detect transaction type with Plaid PFC
-      const transactionType = detectTransactionType(tx.amount, texts, plaidPFC);
+      // Detect transaction type with Plaid PFC, unless the user already corrected this merchant
+      const detectedType = detectTransactionType(tx.amount, texts, plaidPFC);
+      const transactionType = resolveTransactionType(detectedType, mapping);
 
       // Auto-assign category only for expenses and returns
       // Income, investment, and transfer types don't need categories - the type is sufficient
@@ -325,6 +323,7 @@ router.post('/:id/sync', async (req, res) => {
         merchant_display_name: displayName,
         category_id: categoryId,
         transaction_type: transactionType,
+        type_manually_set: Boolean(mapping?.default_transaction_type),
         is_split: false,
         is_recurring: false,
         needs_review: needsReview,
@@ -342,13 +341,17 @@ router.post('/:id/sync', async (req, res) => {
       }
     }
 
-    // Handle modified transactions
+    // Handle modified transactions.
+    // Fetch the manual-type flags up front so the loop below doesn't query per transaction.
+    const manuallyTypedIds = await loadManuallyTypedIds(syncResult.modified);
+
     for (const tx of syncResult.modified) {
       const texts = [tx.merchant_name || '', tx.name || '', (tx as { original_description?: string }).original_description || ''];
       const newMerchantName = tx.merchant_name || tx.name;
+      const mapping = merchantMappings.find(tx.merchant_name, tx.name);
       const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
 
-      const transactionType = detectTransactionType(tx.amount, texts, plaidPFC);
+      const detectedType = detectTransactionType(tx.amount, texts, plaidPFC);
 
       // Preserve a user-customized display name. merchant_display_name is
       // user-editable and wins in the UI, so only refresh it when it still
@@ -365,15 +368,19 @@ router.post('/:id/sync', async (req, res) => {
         date: tx.date,
         merchant_name: newMerchantName,
         original_description: (tx as { original_description?: string }).original_description || tx.name,
-        transaction_type: transactionType,
         pending: tx.pending,
       };
+
+      // Never overwrite a type the user set by hand
+      if (!manuallyTypedIds.has(tx.transaction_id)) {
+        update.transaction_type = resolveTransactionType(detectedType, mapping);
+      }
 
       const userCustomizedDisplayName =
         !!existing?.merchant_display_name &&
         existing.merchant_display_name !== cleanMerchantName(existing.merchant_name);
       if (!userCustomizedDisplayName) {
-        update.merchant_display_name = cleanMerchantName(newMerchantName);
+        update.merchant_display_name = mapping?.display_name || cleanMerchantName(newMerchantName);
       }
 
       await supabase
@@ -713,32 +720,45 @@ router.post('/reclassify-transactions', async (req, res) => {
   try {
     console.log('Starting transaction reclassification...');
 
+    // Get merchant mappings (user's corrections) so a bulk reclassify doesn't
+    // undo every type the user has fixed by hand
+    const merchantMappings = await loadMerchantMappings();
+
     // Get all transactions
     const { data: transactions, error } = await supabase
       .from('transactions')
-      .select('id, amount, merchant_name, original_description');
+      .select('id, amount, merchant_name, original_description, type_manually_set');
 
     if (error) throw error;
 
     let reclassified = 0;
+    let skipped = 0;
     let incomeCount = 0;
     let expenseCount = 0;
     let transferCount = 0;
     let investmentCount = 0;
 
     for (const tx of transactions || []) {
+      if (tx.type_manually_set) {
+        skipped++;
+        continue;
+      }
+
       // Detect transaction type using both merchant_name and original_description
       // Note: personal_finance_category not available for reclassification (not stored)
       const detectedType = detectTransactionType(
         tx.amount,
         [tx.merchant_name || '', tx.original_description || ''],
       );
-
+      const resolvedType = resolveTransactionType(
+        detectedType,
+        merchantMappings.find(tx.merchant_name),
+      );
 
       // Update the transaction
       const { error: updateError } = await supabase
         .from('transactions')
-        .update({ transaction_type: detectedType })
+        .update({ transaction_type: resolvedType })
         .eq('id', tx.id);
 
       if (updateError) {
@@ -747,14 +767,15 @@ router.post('/reclassify-transactions', async (req, res) => {
       }
 
       reclassified++;
-      if (detectedType === 'income') incomeCount++;
-      else if (detectedType === 'expense') expenseCount++;
-      else if (detectedType === 'transfer') transferCount++;
-      else if (detectedType === 'investment') investmentCount++;
+      if (resolvedType === 'income') incomeCount++;
+      else if (resolvedType === 'expense') expenseCount++;
+      else if (resolvedType === 'transfer') transferCount++;
+      else if (resolvedType === 'investment') investmentCount++;
     }
 
     res.json({
       reclassified,
+      skipped,
       breakdown: {
         income: incomeCount,
         expense: expenseCount,
@@ -854,8 +875,7 @@ router.post('/recategorize-all', async (req, res) => {
     const categoryNameById = new Map(categories?.map(c => [c.id, c.name]) || []);
 
     // Get merchant mappings (user's corrections)
-    const { data: mappings } = await supabase.from('merchant_mappings').select('*');
-    const mappingMap = new Map(mappings?.map(m => [m.original_name.toLowerCase(), m]) || []);
+    const merchantMappings = await loadMerchantMappings();
 
     // Get all expense transactions
     let query = supabase
@@ -879,7 +899,7 @@ router.post('/recategorize-all', async (req, res) => {
 
     for (const tx of transactions || []) {
       // Skip if merchant has a mapping (user correction) and skip_manual is true
-      const mapping = mappingMap.get((tx.merchant_name || '').toLowerCase());
+      const mapping = merchantMappings.find(tx.merchant_name);
       if (skip_manual && mapping?.default_category_id) {
         skipped++;
         continue;

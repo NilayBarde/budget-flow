@@ -7,6 +7,7 @@ import { reconcilePendingTransaction } from '../services/pending-reconciliation.
 import { v4 as uuidv4 } from 'uuid';
 
 import { detectTransactionType } from '../services/transaction-type.js';
+import { loadManuallyTypedIds, loadMerchantMappings, resolveTransactionType } from '../services/merchant-mappings.js';
 
 const router = Router();
 
@@ -34,9 +35,8 @@ const processSyncedTransactions = async (
   const { data: categories } = await supabase.from('categories').select('id, name');
   const categoryMap = new Map(categories?.map(c => [c.name, c.id]) || []);
 
-  // Get merchant mappings
-  const { data: mappings } = await supabase.from('merchant_mappings').select('*');
-  const mappingMap = new Map(mappings?.map(m => [m.original_name.toLowerCase(), m]) || []);
+  // Get merchant mappings (user's previous corrections)
+  const merchantMappings = await loadMerchantMappings();
 
   let addedCount = 0;
   let modifiedCount = 0;
@@ -68,10 +68,11 @@ const processSyncedTransactions = async (
     }
 
     const texts = [tx.merchant_name || '', tx.name || '', (tx as { original_description?: string }).original_description || ''];
-    const mapping = mappingMap.get(tx.merchant_name?.toLowerCase() || '');
+    const mapping = merchantMappings.find(tx.merchant_name, tx.name);
     const displayName = mapping?.display_name || cleanMerchantName(tx.merchant_name || tx.name);
     const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
-    const transactionType = detectTransactionType(tx.amount, texts, plaidPFC);
+    const detectedType = detectTransactionType(tx.amount, texts, plaidPFC);
+    const transactionType = resolveTransactionType(detectedType, mapping);
 
     // Auto-assign category based on type with Plaid-first approach
     let categoryId: string | null = null;
@@ -109,6 +110,7 @@ const processSyncedTransactions = async (
       merchant_display_name: displayName,
       category_id: categoryId,
       transaction_type: transactionType,
+      type_manually_set: Boolean(mapping?.default_transaction_type),
       is_split: false,
       is_recurring: false,
       needs_review: needsReview,
@@ -123,11 +125,16 @@ const processSyncedTransactions = async (
     }
   }
 
-  // Handle modified transactions
+  // Handle modified transactions.
+  // Fetch the manual-type flags up front so the loop below doesn't query per transaction.
+  const manuallyTypedIds = await loadManuallyTypedIds(syncResult.modified);
+
   for (const tx of syncResult.modified) {
     const texts = [tx.merchant_name || '', tx.name || '', (tx as { original_description?: string }).original_description || ''];
     const newMerchantName = tx.merchant_name || tx.name;
-    const transactionType = detectTransactionType(tx.amount, texts);
+    const mapping = merchantMappings.find(tx.merchant_name, tx.name);
+    const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
+    const detectedType = detectTransactionType(tx.amount, texts, plaidPFC);
 
     // Preserve a user-customized display name (it wins in the UI); only refresh
     // it when it still equals the auto-cleaned form of the prior merchant_name.
@@ -143,15 +150,19 @@ const processSyncedTransactions = async (
       date: tx.date,
       merchant_name: newMerchantName,
       original_description: (tx as { original_description?: string }).original_description || tx.name,
-      transaction_type: transactionType,
       pending: tx.pending,
     };
+
+    // Never overwrite a type the user set by hand
+    if (!manuallyTypedIds.has(tx.transaction_id)) {
+      update.transaction_type = resolveTransactionType(detectedType, mapping);
+    }
 
     const userCustomizedDisplayName =
       !!existing?.merchant_display_name &&
       existing.merchant_display_name !== cleanMerchantName(existing.merchant_name);
     if (!userCustomizedDisplayName) {
-      update.merchant_display_name = cleanMerchantName(newMerchantName);
+      update.merchant_display_name = mapping?.display_name || cleanMerchantName(newMerchantName);
     }
 
     await supabase
