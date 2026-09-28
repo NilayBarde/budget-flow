@@ -45,6 +45,7 @@ export type Database = {
     needs_review: boolean;
     pending: boolean;
     plaid_category: { primary?: string; detailed?: string } | null;
+    type_manually_set: boolean;
     notes: string | null;
     created_at: string;
   };
@@ -76,6 +77,7 @@ export type Database = {
     original_name: string;
     display_name: string;
     default_category_id: string | null;
+    default_transaction_type: string | null;
     created_at: string;
   };
   tags: {

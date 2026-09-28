@@ -3,6 +3,7 @@ import { supabase } from '../db/supabase.js';
 import * as plaidService from '../services/plaid.js';
 import { categorizeWithPlaid, cleanMerchantName, PlaidPFC } from '../services/categorizer.js';
 import { detectTransactionType } from '../services/transaction-type.js';
+import { loadMerchantMappings, resolveTransactionType } from '../services/merchant-mappings.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -242,8 +243,7 @@ router.post('/exchange-token', async (req, res) => {
       const categoryMap = new Map(categories?.map(c => [c.name, c.id]) || []);
 
       // Get merchant mappings for user-defined categorizations
-      const { data: mappings } = await supabase.from('merchant_mappings').select('*');
-      const mappingMap = new Map(mappings?.map(m => [m.original_name.toLowerCase(), m]) || []);
+      const merchantMappings = await loadMerchantMappings();
 
       let syncedCount = 0;
       for (const tx of syncResult.added) {
@@ -257,10 +257,12 @@ router.post('/exchange-token', async (req, res) => {
         const texts = [tx.merchant_name || '', tx.name || '', tx.original_description || ''];
         const displayName = cleanMerchantName(tx.merchant_name || tx.name);
         const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
-        const transactionType = detectTransactionType(tx.amount, texts, plaidPFC);
 
         // Check for existing merchant mapping (user's previous corrections)
-        const mapping = mappingMap.get((tx.merchant_name || '').toLowerCase());
+        const mapping = merchantMappings.find(tx.merchant_name, tx.name);
+
+        const detectedType = detectTransactionType(tx.amount, texts, plaidPFC);
+        const transactionType = resolveTransactionType(detectedType, mapping);
 
         // Auto-assign category based on type and Plaid's categorization
         let categoryId: string | null = null;
@@ -296,6 +298,7 @@ router.post('/exchange-token', async (req, res) => {
           merchant_display_name: mapping?.display_name || displayName,
           category_id: categoryId,
           transaction_type: transactionType,
+          type_manually_set: Boolean(mapping?.default_transaction_type),
           is_split: false,
           is_recurring: false,
           needs_review: needsReview,

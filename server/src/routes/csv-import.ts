@@ -23,6 +23,7 @@ const upload = multer({
 });
 
 import { detectTransactionType, type TransactionType } from '../services/transaction-type.js';
+import { loadMerchantMappings, resolveTransactionType } from '../services/merchant-mappings.js';
 
 // Column mapping types for different CSV formats
 interface ColumnMapping {
@@ -277,6 +278,10 @@ router.post('/:accountId/preview', upload.single('file'), async (req, res) => {
     // Get categories for categorization
     const { data: categories } = await supabase.from('categories').select('id, name');
     const categoryMap = new Map(categories?.map(c => [c.name, c.id]) || []);
+    const categoryNameById = new Map(categories?.map(c => [c.id, c.name]) || []);
+
+    // Get merchant mappings so the preview reflects the user's previous corrections
+    const merchantMappings = await loadMerchantMappings();
 
     // Parse transactions
     const transactions: ParsedTransaction[] = [];
@@ -319,17 +324,23 @@ router.post('/:accountId/preview', upload.single('file'), async (req, res) => {
           duplicateCount++;
         }
 
-        const transactionType = detectTransactionType(amount, [description]);
-        
+        const merchantMapping = merchantMappings.find(description);
+        const detectedType = detectTransactionType(amount, [description]);
+        const transactionType = resolveTransactionType(detectedType, merchantMapping);
+
         // Categorize the transaction - only expenses and returns get categories
         // Income, investment, and transfer types don't need categories - the type is sufficient
         let categoryName: string | null = null;
         let needsReview = false;
 
         if (transactionType === 'expense' || transactionType === 'return') {
-          const result = categorizeWithPlaid(description, extendedDetails || null, null);
-          categoryName = result.categoryName;
-          needsReview = result.needsReview;
+          if (merchantMapping?.default_category_id) {
+            categoryName = categoryNameById.get(merchantMapping.default_category_id) || null;
+          } else {
+            const result = categorizeWithPlaid(description, extendedDetails || null, null);
+            categoryName = result.categoryName;
+            needsReview = result.needsReview;
+          }
         }
 
         transactions.push({
@@ -439,8 +450,7 @@ router.post('/:accountId/import', upload.single('file'), async (req, res) => {
     const { data: categories } = await supabase.from('categories').select('id, name');
     const categoryMap = new Map(categories?.map(c => [c.name, c.id]) || []);
 
-    const { data: mappings } = await supabase.from('merchant_mappings').select('*');
-    const merchantMappingMap = new Map(mappings?.map(m => [m.original_name.toLowerCase(), m]) || []);
+    const merchantMappings = await loadMerchantMappings();
 
     // Create import record
     const importId = uuidv4();
@@ -497,10 +507,11 @@ router.post('/:accountId/import', upload.single('file'), async (req, res) => {
           continue;
         }
 
-        const transactionType = detectTransactionType(amount, [description]);
+        // Check for merchant mapping (user's previous corrections)
+        const merchantMapping = merchantMappings.find(description);
 
-        // Check for merchant mapping
-        const merchantMapping = merchantMappingMap.get(description.toLowerCase());
+        const detectedType = detectTransactionType(amount, [description]);
+        const transactionType = resolveTransactionType(detectedType, merchantMapping);
 
         // Categorize - only expenses and returns get categories
         // Income, investment, and transfer types don't need categories - the type is sufficient
@@ -531,6 +542,7 @@ router.post('/:accountId/import', upload.single('file'), async (req, res) => {
           merchant_display_name: merchantMapping?.display_name || displayName,
           category_id: categoryId,
           transaction_type: transactionType,
+          type_manually_set: Boolean(merchantMapping?.default_transaction_type),
           is_split: false,
           is_recurring: false,
           needs_review: needsReview,

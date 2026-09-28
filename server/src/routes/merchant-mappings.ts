@@ -23,7 +23,7 @@ router.get(
 router.post(
   '/',
   asyncHandler(async (req, res) => {
-    const { original_name, display_name, default_category_id } = req.body;
+    const { original_name, display_name, default_category_id, default_transaction_type } = req.body;
 
     const { data, error } = await supabase
       .from('merchant_mappings')
@@ -32,6 +32,7 @@ router.post(
         original_name,
         display_name,
         default_category_id,
+        default_transaction_type: default_transaction_type || null,
         created_at: new Date().toISOString(),
       })
       .select()

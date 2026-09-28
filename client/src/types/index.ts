@@ -54,6 +54,7 @@ export interface Transaction {
   merchant_display_name: string | null;
   category_id: string | null;
   transaction_type: TransactionType;
+  type_manually_set: boolean;  // User set the type by hand; sync won't overwrite it
   is_split: boolean;
   parent_transaction_id: string | null;
   is_recurring: boolean;

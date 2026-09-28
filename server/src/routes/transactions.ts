@@ -346,11 +346,19 @@ router.patch('/:id', async (req, res) => {
       }
     }
 
-    // If updating category or merchant display name, create/update merchant mapping
+    // If updating category, type, or merchant display name, create/update merchant mapping
     // This ensures the app "learns" your categorization preferences
-    if (transaction && (updates.category_id || updates.merchant_display_name)) {
+    const isCorrectingType = Boolean(updates.transaction_type) &&
+      updates.transaction_type !== transaction?.transaction_type;
+
+    if (transaction && (updates.category_id || updates.merchant_display_name || isCorrectingType)) {
       // Clear the needs_review flag since user is manually categorizing
       updates.needs_review = false;
+
+      // Flag the type as user-set so incoming Plaid updates don't overwrite it
+      if (isCorrectingType) {
+        updates.type_manually_set = true;
+      }
 
       // Check if a mapping already exists for this merchant
       const { data: existingMapping } = await supabase
@@ -365,6 +373,9 @@ router.patch('/:id', async (req, res) => {
         transaction.merchant_name;
 
       const categoryId = updates.category_id || existingMapping?.default_category_id || null;
+      const transactionType = updates.transaction_type ||
+        existingMapping?.default_transaction_type ||
+        null;
 
       await supabase
         .from('merchant_mappings')
@@ -373,6 +384,7 @@ router.patch('/:id', async (req, res) => {
           original_name: transaction.merchant_name,
           display_name: displayName,
           default_category_id: categoryId,
+          default_transaction_type: transactionType,
         }, {
           onConflict: 'original_name',
         });
@@ -382,6 +394,10 @@ router.patch('/:id', async (req, res) => {
         const bulkUpdates: Record<string, unknown> = {};
         if (updates.category_id) bulkUpdates.category_id = updates.category_id;
         if (updates.merchant_display_name) bulkUpdates.merchant_display_name = updates.merchant_display_name;
+        if (isCorrectingType) {
+          bulkUpdates.transaction_type = updates.transaction_type;
+          bulkUpdates.type_manually_set = true;
+        }
         bulkUpdates.needs_review = false; // Clear review flag for all matching transactions
 
         if (Object.keys(bulkUpdates).length > 0) {
