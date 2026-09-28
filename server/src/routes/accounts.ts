@@ -3,7 +3,7 @@ import { supabase } from '../db/supabase.js';
 import * as plaidService from '../services/plaid.js';
 import { categorizeWithPlaid, cleanMerchantName, PlaidPFC } from '../services/categorizer.js';
 import { detectTransactionType } from '../services/transaction-type.js';
-import { loadMerchantMappings, resolveTransactionType } from '../services/merchant-mappings.js';
+import { loadManuallyTypedIds, loadMerchantMappings, resolveTransactionType } from '../services/merchant-mappings.js';
 import { getCategoryIdForType } from '../services/category-lookup.js';
 import { buildAccountResolver } from '../services/sync-attribution.js';
 import { reconcilePendingTransaction } from '../services/pending-reconciliation.js';
@@ -720,32 +720,45 @@ router.post('/reclassify-transactions', async (req, res) => {
   try {
     console.log('Starting transaction reclassification...');
 
+    // Get merchant mappings (user's corrections) so a bulk reclassify doesn't
+    // undo every type the user has fixed by hand
+    const merchantMappings = await loadMerchantMappings();
+
     // Get all transactions
     const { data: transactions, error } = await supabase
       .from('transactions')
-      .select('id, amount, merchant_name, original_description');
+      .select('id, amount, merchant_name, original_description, type_manually_set');
 
     if (error) throw error;
 
     let reclassified = 0;
+    let skipped = 0;
     let incomeCount = 0;
     let expenseCount = 0;
     let transferCount = 0;
     let investmentCount = 0;
 
     for (const tx of transactions || []) {
+      if (tx.type_manually_set) {
+        skipped++;
+        continue;
+      }
+
       // Detect transaction type using both merchant_name and original_description
       // Note: personal_finance_category not available for reclassification (not stored)
       const detectedType = detectTransactionType(
         tx.amount,
         [tx.merchant_name || '', tx.original_description || ''],
       );
-
+      const resolvedType = resolveTransactionType(
+        detectedType,
+        merchantMappings.find(tx.merchant_name),
+      );
 
       // Update the transaction
       const { error: updateError } = await supabase
         .from('transactions')
-        .update({ transaction_type: detectedType })
+        .update({ transaction_type: resolvedType })
         .eq('id', tx.id);
 
       if (updateError) {
@@ -754,14 +767,15 @@ router.post('/reclassify-transactions', async (req, res) => {
       }
 
       reclassified++;
-      if (detectedType === 'income') incomeCount++;
-      else if (detectedType === 'expense') expenseCount++;
-      else if (detectedType === 'transfer') transferCount++;
-      else if (detectedType === 'investment') investmentCount++;
+      if (resolvedType === 'income') incomeCount++;
+      else if (resolvedType === 'expense') expenseCount++;
+      else if (resolvedType === 'transfer') transferCount++;
+      else if (resolvedType === 'investment') investmentCount++;
     }
 
     res.json({
       reclassified,
+      skipped,
       breakdown: {
         income: incomeCount,
         expense: expenseCount,

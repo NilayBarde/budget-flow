@@ -7,7 +7,7 @@ import { reconcilePendingTransaction } from '../services/pending-reconciliation.
 import { v4 as uuidv4 } from 'uuid';
 
 import { detectTransactionType } from '../services/transaction-type.js';
-import { loadMerchantMappings, resolveTransactionType } from '../services/merchant-mappings.js';
+import { loadManuallyTypedIds, loadMerchantMappings, resolveTransactionType } from '../services/merchant-mappings.js';
 
 const router = Router();
 
