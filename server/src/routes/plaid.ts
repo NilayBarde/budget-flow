@@ -4,6 +4,8 @@ import * as plaidService from '../services/plaid.js';
 import { categorizeWithPlaid, cleanMerchantName, PlaidPFC } from '../services/categorizer.js';
 import { detectTransactionType } from '../services/transaction-type.js';
 import { loadMerchantMappings, resolveTransactionType } from '../services/merchant-mappings.js';
+import { redactError } from '../services/plaid-errors.js';
+import { toPublicAccount } from '../services/account-redaction.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -37,7 +39,7 @@ router.post('/create-link-token', async (req, res) => {
       expiration: linkToken.expiration,
     });
   } catch (error: unknown) {
-    console.error('Error creating link token:', error);
+    console.error('Error creating link token:', redactError(error));
     const plaidError = error as { response?: { data?: unknown } };
     if (plaidError.response?.data) {
       console.error('Plaid error details:', JSON.stringify(plaidError.response.data, null, 2));
@@ -93,7 +95,7 @@ router.post('/create-update-link-token', async (req, res) => {
       expiration: linkToken.expiration,
     });
   } catch (error: unknown) {
-    console.error('Error creating update link token:', error);
+    console.error('Error creating update link token:', redactError(error));
     const plaidError = error as { response?: { data?: unknown } };
     if (plaidError.response?.data) {
       console.error('Plaid error details:', JSON.stringify(plaidError.response.data, null, 2));
@@ -326,7 +328,7 @@ router.post('/exchange-token', async (req, res) => {
 
       console.log(`Auto-synced ${syncedCount} transactions across ${createdAccounts.length} accounts`);
     } catch (syncError) {
-      console.error('Auto-sync failed (accounts created, but transactions need manual sync):', syncError);
+      console.error('Auto-sync failed (accounts created, but transactions need manual sync):', redactError(syncError));
     }
 
     // Return the first created account for backwards compatibility
@@ -336,9 +338,9 @@ router.post('/exchange-token', async (req, res) => {
       .eq('id', createdAccounts[0].id)
       .single();
 
-    res.json(firstAccount);
+    res.json(firstAccount && toPublicAccount(firstAccount));
   } catch (error) {
-    console.error('Error exchanging token:', error);
+    console.error('Error exchanging token:', redactError(error));
 
     // Extract Plaid error details if available
     const plaidError = error as { response?: { data?: { error_code?: string; error_message?: string; display_message?: string } } };

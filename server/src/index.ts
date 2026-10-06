@@ -5,6 +5,7 @@ import { existsSync } from 'fs';
 import express from 'express';
 import compression from 'compression';
 import cors from 'cors';
+import { redactError } from './services/plaid-errors.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -113,7 +114,7 @@ try {
 
 // Error handler
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('Error:', err);
+  console.error('Error:', redactError(err));
   res.status(500).json({ message: 'Internal server error' });
 });
 
