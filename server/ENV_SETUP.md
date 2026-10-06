@@ -17,7 +17,30 @@ PLAID_ENV=sandbox
 # Server Configuration
 PORT=3001
 
+# API access key (required). Every /api route except /api/health and the Plaid
+# webhook rejects requests without it. Generate one with:
+#   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+# You enter it once in the browser lock screen; it is never baked into the client.
+API_ACCESS_KEY=generate-a-long-random-string
+
+# Browser origins allowed to call the API (comma separated).
+# Defaults to the Vite dev server when unset.
+CORS_ORIGINS=http://localhost:5173
+
+# Set to 1 when running behind a reverse proxy (Render, etc.) so rate limiting
+# sees the real client IP. Leave unset when the server is exposed directly.
+# TRUST_PROXY=1
+
 ```
+
+## Security Notes
+
+- The server uses a **service role** key (`SUPABASE_SERVICE_ROLE_KEY`) when set, which
+  bypasses row level security. Treat it like a password and never commit it.
+- Plaid webhooks are verified against Plaid's signed JWT. Point your Plaid webhook URL at
+  `/api/webhooks/plaid` on your deployed server.
+- If you fork this project, create your **own** Supabase project, Plaid keys, and
+  `API_ACCESS_KEY`. Do not reuse anyone else's.
 
 ## Getting Your Credentials
 

@@ -1,4 +1,5 @@
 import { API_BASE_URL } from '../utils/constants';
+import { authHeaders, clearAccessKey, notifyAuthRequired, setAccessKey } from './auth';
 import type {
   Account,
   Transaction,
@@ -25,9 +26,15 @@ const fetchApi = async <T>(
     ...options,
     headers: {
       'Content-Type': 'application/json',
+      ...authHeaders(),
       ...options.headers,
     },
   });
+
+  if (response.status === 401) {
+    notifyAuthRequired();
+    throw new Error('Access key required');
+  }
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: 'Request failed' }));
@@ -106,6 +113,17 @@ export interface CreateManualAccountData {
 }
 
 // Accounts
+// Stores the key, then confirms the server accepts it. Clears it again on failure.
+export const verifyAccessKey = async (key: string): Promise<void> => {
+  setAccessKey(key);
+  try {
+    await fetchApi<{ ok: boolean }>('/auth/check');
+  } catch (error) {
+    clearAccessKey();
+    throw error;
+  }
+};
+
 export const getAccounts = () => fetchApi<Account[]>('/accounts');
 
 export const getSyncHealth = () => fetchApi<SyncHealth>('/accounts/sync-health');
@@ -377,6 +395,7 @@ export const previewCsvImport = async (accountId: string, file: File): Promise<C
 
   const response = await fetch(`${API_BASE_URL}/csv-import/${accountId}/preview`, {
     method: 'POST',
+    headers: authHeaders(),
     body: formData,
   });
 
@@ -399,6 +418,7 @@ export const importCsv = async (
 
   const response = await fetch(`${API_BASE_URL}/csv-import/${accountId}/import`, {
     method: 'POST',
+    headers: authHeaders(),
     body: formData,
   });
 
@@ -425,6 +445,7 @@ export const backfillCsvReferences = async (
 
   const response = await fetch(`${API_BASE_URL}/csv-import/${accountId}/backfill-references`, {
     method: 'POST',
+    headers: authHeaders(),
     body: formData,
   });
 

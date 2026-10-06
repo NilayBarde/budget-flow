@@ -5,6 +5,8 @@ import { existsSync } from 'fs';
 import express from 'express';
 import compression from 'compression';
 import cors from 'cors';
+import helmet from 'helmet';
+import { rateLimit } from 'express-rate-limit';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,8 +21,11 @@ console.log('  PLAID_SECRET:', process.env.PLAID_SECRET ? 'Set' : 'NOT SET');
 console.log('  PLAID_ENV:', process.env.PLAID_ENV || 'NOT SET');
 console.log('  SUPABASE_URL:', process.env.SUPABASE_URL ? 'Set' : 'NOT SET');
 console.log('  SUPABASE_KEY:', process.env.SUPABASE_SERVICE_ROLE_KEY ? 'service_role' : process.env.SUPABASE_ANON_KEY ? 'anon' : 'NOT SET');
+console.log('  API_ACCESS_KEY:', process.env.API_ACCESS_KEY ? 'Set' : 'NOT SET (all /api requests except health and Plaid webhooks will be rejected)');
 
 // Now import routes (env vars are already loaded)
+const { requireAccessKey } = await import('./middleware/requireAccessKey.js');
+const { verifyPlaidWebhook } = await import('./middleware/verifyPlaidWebhook.js');
 const { default: accountsRouter } = await import('./routes/accounts.js');
 const { default: plaidRouter } = await import('./routes/plaid.js');
 const { default: transactionsRouter } = await import('./routes/transactions.js');
@@ -41,10 +46,64 @@ console.log('Routes loaded successfully');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Behind a reverse proxy (Render, etc.) set TRUST_PROXY=1 so rate limiting sees
+// the real client IP. Leave unset when the server is exposed directly.
+if (process.env.TRUST_PROXY) {
+  app.set('trust proxy', Number(process.env.TRUST_PROXY));
+}
+
 // Middleware
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", 'https://cdn.plaid.com'],
+      frameSrc: ["'self'", 'https://cdn.plaid.com'],
+      connectSrc: ["'self'", 'https://*.plaid.com'],
+      imgSrc: ["'self'", 'data:', 'https://*.plaid.com'],
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
+    },
+  },
+}));
 app.use(compression());
-app.use(cors());
-app.use(express.json());
+
+// Only the configured client origins may call the API from a browser.
+// CORS_ORIGINS is a comma separated list; the default is the Vite dev server.
+const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173')
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
+app.use(cors({ origin: allowedOrigins }));
+
+// Keep the raw bytes of webhook bodies: Plaid signs a SHA-256 of the exact payload.
+app.use(express.json({
+  verify: (req, _res, buf) => {
+    (req as import('./middleware/verifyPlaidWebhook.js').RawBodyRequest).rawBody = buf;
+  },
+}));
+
+// Health check (unauthenticated, reveals nothing)
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
+
+// Plaid webhooks authenticate with Plaid's signed JWT instead of the access key.
+const webhookLimiter = rateLimit({ windowMs: 60 * 1000, limit: 120 });
+app.use('/api/webhooks', webhookLimiter, verifyPlaidWebhook, webhooksRouter);
+
+// Everything else requires the access key. Failed attempts are rate limited
+// per IP to make guessing the key impractical.
+const failedRequestLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 50,
+  skipSuccessfulRequests: true,
+});
+app.use('/api', failedRequestLimiter, requireAccessKey);
+
+app.get('/api/auth/check', (req, res) => {
+  res.json({ ok: true });
+});
 
 // Routes
 app.use('/api/accounts', accountsRouter);
@@ -56,18 +115,12 @@ app.use('/api/tags', tagsRouter);
 app.use('/api/recurring-transactions', recurringRouter);
 app.use('/api/stats', statsRouter);
 app.use('/api/merchant-mappings', merchantMappingsRouter);
-app.use('/api/webhooks', webhooksRouter);
 app.use('/api/csv-import', csvImportRouter);
 app.use('/api/investments', investmentsRouter);
 app.use('/api/settings', appSettingsRouter);
 app.use('/api/export', exportRouter);
 
 console.log('Routes registered');
-
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
 
 // Serve static files from client/dist only if they exist (for monolith deployments)
 // If client is deployed separately (e.g., Vercel), this will be skipped

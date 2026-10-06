@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Install server dependencies
+        run: npm ci --prefix server
+      - name: Install client dependencies
+        run: npm ci --prefix client
+      - name: Build server
+        run: npm run build --prefix server
+      - name: Build client
+        run: npm run build --prefix client
+      - name: Test server
+        run: npm run test --prefix server
+      - name: Test client
+        run: npm run test --prefix client
+      - name: Audit server dependencies
+        run: npm audit --omit=dev --audit-level=high --prefix server
+      - name: Audit client dependencies
+        run: npm audit --omit=dev --audit-level=high --prefix client

@@ -190,7 +190,6 @@ router.post('/plaid', async (req, res) => {
     const { webhook_type, webhook_code, item_id, initial_update_complete, historical_update_complete } = req.body;
 
     console.log(`Plaid webhook received: ${webhook_type} - ${webhook_code}`);
-    console.log('Webhook body:', JSON.stringify(req.body, null, 2));
 
     // Handle ITEM webhooks (authentication issues)
     if (webhook_type === 'ITEM') {
