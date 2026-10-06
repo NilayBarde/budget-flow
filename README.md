@@ -180,7 +180,7 @@ All routes are prefixed with `/api`. `GET /api/health` is a health check.
 
 | Resource | Endpoints |
 |----------|-----------|
-| `/accounts` | `GET /`, `GET /sync-health`, `POST /manual`, `POST /:id/sync`, `PATCH /:id`, `DELETE /:id`, `POST /:id/refresh-accounts`, `POST /:id/reset-cursor`, `POST /:id/update-webhook`, plus maintenance actions (`POST /reclassify-transactions`, `/assign-type-categories`, `/clear-transfer-categories`, `/recategorize-all`) |
+| `/accounts` | `GET /`, `GET /sync-health`, `POST /manual`, `POST /:id/sync`, `PATCH /:id`, `DELETE /:id`, `POST /:id/refresh-accounts`, `POST /:id/reset-cursor`, `POST /:id/update-webhook` |
 | `/plaid` | `POST /create-link-token`, `/create-update-link-token`, `/exchange-token`, `/log-link-event` |
 | `/webhooks` | `POST /plaid` |
 | `/transactions` | `GET /`, `GET /:id`, `POST /`, `PATCH /:id`, `DELETE /:id`, `GET /duplicates`, `GET /similar/:merchantName` (and `/count`), `POST /:id/splits`, `DELETE /:id/splits`, `POST` and `DELETE /:id/tags/:tagId`, bulk actions under `/bulk/delete`, `/bulk/splits`, `/bulk/tags` |
