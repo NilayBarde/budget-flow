@@ -75,7 +75,7 @@ export const Insights = () => {
 
   if (insightsLoading || yearlyLoading) {
     return (
-      <div className="flex h-screen items-center justify-center">
+      <div className="flex items-center justify-center py-24">
         <Spinner size="lg" />
       </div>
     );

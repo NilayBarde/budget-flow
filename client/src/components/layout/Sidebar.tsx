@@ -51,7 +51,7 @@ export const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
+        <nav aria-label="Main" className="flex-1 p-4 space-y-1 overflow-y-auto">
           {NAV_ITEMS.map(({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
@@ -91,7 +91,7 @@ export const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
       </aside>
 
       {/* Bottom Tab Navigation - Mobile Only */}
-      <nav className="fixed bottom-0 left-0 right-0 h-20 bg-midnight-900 border-t border-midnight-700 z-40 md:hidden safe-area-bottom">
+      <nav aria-label="Mobile" className="fixed bottom-0 left-0 right-0 h-20 bg-midnight-900 border-t border-midnight-700 z-40 md:hidden safe-area-bottom">
         <div className="flex items-center justify-around h-full px-2 pb-2">
           {MOBILE_NAV_ITEMS.map(({ to, icon: Icon, label, mobileLabel }) => (
             <NavLink
