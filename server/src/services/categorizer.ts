@@ -226,6 +226,25 @@ export const categorizeWithPlaid = (
   return { categoryName: null, needsReview: true, source: 'none' };
 };
 
+/**
+ * The category and review flag for a spending row (an expense or return) from Plaid's data alone, as the
+ * sync would assign them. Income and Investment are never chosen here: they belong to rows typed that way,
+ * so spending Plaid tags as income is left blank for the user. A row left without a category is flagged
+ * for review, even when Plaid named a category this user does not have.
+ */
+export const categorizeForSpending = (
+  merchantName: string,
+  originalDescription: string | null | undefined,
+  plaidPFC: PlaidPFC | null | undefined,
+  categoryMap: ReadonlyMap<string, string>,
+): { categoryId: string | null; needsReview: boolean } => {
+  const result = categorizeWithPlaid(merchantName, originalDescription, plaidPFC);
+  const categoryId = resolveCategoryId(result.categoryName, categoryMap);
+  const reserved = [categoryMap.get('Income'), categoryMap.get('Investment')];
+  if (categoryId && reserved.includes(categoryId)) return { categoryId: null, needsReview: true };
+  return { categoryId, needsReview: result.needsReview || categoryId === null };
+};
+
 export const cleanMerchantName = (rawName: string): string => {
   let cleaned = rawName
     // Remove Wealthfront/Plaid specific patterns

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { parse } from 'csv-parse/sync';
 import { supabase } from '../db/supabase.js';
-import { categorizeWithPlaid, cleanMerchantName, resolveCategoryId } from '../services/categorizer.js';
+import { categorizeForSpending, categorizeWithPlaid, cleanMerchantName } from '../services/categorizer.js';
 import { randomUUID } from 'node:crypto';
 
 const router = Router();
@@ -522,9 +522,7 @@ router.post('/:accountId/import', upload.single('file'), async (req, res) => {
           if (merchantMapping?.default_category_id) {
             categoryId = merchantMapping.default_category_id;
           } else {
-            const result = categorizeWithPlaid(description, extendedDetails || null, null);
-            categoryId = resolveCategoryId(result.categoryName, categoryMap);
-            needsReview = result.needsReview;
+            ({ categoryId, needsReview } = categorizeForSpending(description, extendedDetails || null, null, categoryMap));
           }
         }
 
