@@ -5,6 +5,7 @@ import { Card, Button } from '../ui';
 import type { Account } from '../../types';
 import { formatDate } from '../../utils/formatters';
 import { isManualAccount } from '../../utils/account-types';
+import { ReconnectNotice } from './ReconnectNotice';
 import { useSyncAccount, useDeleteAccount, useRefreshAccounts, useCreatePlaidUpdateLinkToken, useToggleAccountInvestmentExclusion } from '../../hooks';
 
 
@@ -98,7 +99,10 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: Acc
   }, []);
 
   const handleSync = useCallback(() => {
-    syncAccount.mutate(account.id);
+    setUpdateError(null);
+    // Show why a sync failed (for example "This connection needs to be reconnected")
+    // instead of the spinner just stopping.
+    syncAccount.mutate(account.id, { onError: (error) => setUpdateError(error.message) });
   }, [syncAccount, account.id]);
 
   const handleDelete = useCallback(() => {
@@ -254,6 +258,11 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: Acc
       )}
 
       <Card className="hover:border-midnight-500 transition-colors" padding="sm">
+        {/* The bank login expired: offer the reconnect flow right on the card */}
+        {account.needs_reauth && !isManual && (
+          <ReconnectNotice onReconnect={handleOpenUpdateLink} isLoading={createUpdateLinkToken.isPending} />
+        )}
+
         {/* Refresh accounts result message */}
         {refreshResult && (
           <div className="mb-3 p-2 bg-accent-500/10 border border-accent-500/30 rounded-lg text-sm text-accent-400">
