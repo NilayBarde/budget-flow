@@ -1,3 +1,5 @@
+import { isGamblingOperator } from './transaction-type.js';
+
 // Plaid Personal Finance Category (PFC) mapping to our categories
 // See: https://plaid.com/docs/api/products/transactions/#transactionspersonal_finance_category
 const PLAID_PFC_MAP: Record<string, string> = {
@@ -128,10 +130,16 @@ export interface CategorizationResult {
  * 3. No category - mark for review
  */
 export const categorizeWithPlaid = (
-  _merchantName: string,
-  _originalDescription: string | null | undefined,
+  merchantName: string,
+  originalDescription: string | null | undefined,
   plaidPFC: PlaidPFC | null | undefined
 ): CategorizationResult => {
+  // A betting site is typed as spending or a return (see detectTransactionType), so its category
+  // has to be spending too, even when Plaid tagged a cashout as income.
+  if (isGamblingOperator([merchantName, originalDescription])) {
+    return { categoryName: 'Entertainment', needsReview: false, source: 'plaid' };
+  }
+
   // Try Plaid detailed category first (most specific)
   if (plaidPFC?.detailed) {
     const category = PLAID_PFC_MAP[plaidPFC.detailed];

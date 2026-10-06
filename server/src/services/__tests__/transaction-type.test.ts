@@ -300,6 +300,65 @@ describe('detectTransactionType', () => {
     });
   });
 
+  // ── Gambling cashouts ─────────────────────────────────────────────────
+
+  describe('gambling cashouts', () => {
+    // Money from a betting site is the return of what was deposited, not earnings. Counting it as
+    // income inflates cash flow in a good month; a return nets against the deposits instead.
+    it('a cashout Plaid tags as contractor income is a return', () => {
+      // Real row: "Fliff Credit via Nuv" on a checking account.
+      expect(
+        detectTransactionType(
+          -171,
+          ['Fliff Credit via Nuv'],
+          { primary: 'INCOME', detailed: 'INCOME_CONTRACTOR' },
+          'checking',
+        ),
+      ).toBe('return');
+    });
+
+    it.each(['DraftKings', 'FanDuel', 'BetMGM', 'PrizePicks', 'Underdog Fantasy', 'ESPN BET', 'bet365'])(
+      'recognises %s as a betting site',
+      (operator) => {
+        expect(detectTransactionType(-50, [operator], { primary: 'INCOME' }, 'checking')).toBe('return');
+      },
+    );
+
+    it('a deposit to the site stays an expense', () => {
+      expect(detectTransactionType(100, ['Fliff Credit via Nuv'], { primary: 'INCOME' }, 'checking')).toBe('expense');
+    });
+
+    it('does not mistake a payroll deposit for a cashout', () => {
+      expect(detectTransactionType(-3000, ['GreenLight Workf'], { primary: 'INCOME', detailed: 'INCOME_SALARY' }, 'checking')).toBe('income');
+    });
+
+    it.each(['Draft Kings', 'Fan Duel', 'DK*DRAFTKINGS', 'FANDUEL*SPORTSBOOK'])(
+      'recognises the spaced or descriptor form %s',
+      (text) => {
+        expect(detectTransactionType(-50, [text], { primary: 'INCOME' }, 'checking')).toBe('return');
+      },
+    );
+
+    it('still types money moving between the user\'s own accounts as a transfer', () => {
+      // The precedence guarantee: wording that says "transfer" wins over the operator name.
+      expect(detectTransactionType(-50, ['DraftKings Transfer'], { primary: 'INCOME' }, 'checking')).toBe('transfer');
+    });
+
+    it('types a betting site refund the same way when Plaid gives a spending category', () => {
+      expect(detectTransactionType(-50, ['DraftKings'], { primary: 'ENTERTAINMENT', detailed: 'ENTERTAINMENT_CASINOS_AND_GAMBLING' }, 'checking')).toBe('return');
+      expect(detectTransactionType(50, ['DraftKings'], { primary: 'ENTERTAINMENT', detailed: 'ENTERTAINMENT_CASINOS_AND_GAMBLING' }, 'checking')).toBe('expense');
+    });
+
+    it('does not mistake a sports bar named like a betting app for one', () => {
+      expect(detectTransactionType(30, ['Underdog Sports Bar'], { primary: 'FOOD_AND_DRINK' }, 'credit card')).toBe('expense');
+      expect(detectTransactionType(-30, ['Underdog Sports Bar'], { primary: 'FOOD_AND_DRINK' }, 'credit card')).toBe('return');
+    });
+
+    it('does not match a word that merely contains an operator name', () => {
+      expect(detectTransactionType(-40, ['Fanduelity Consulting'], { primary: 'INCOME' }, 'checking')).toBe('income');
+    });
+  });
+
   // ── Card bill wording on the bank side ────────────────────────────────
 
   describe('card bill payments from a bank account', () => {

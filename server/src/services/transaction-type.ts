@@ -17,6 +17,32 @@ export const INVESTMENT_PATTERNS = [
   /betterment/i,
 ];
 
+// Betting and sweepstakes sites. Money from them is the return of what was deposited, not
+// earnings, but Plaid often tags a cashout as income (a Fliff payout comes back as
+// INCOME_CONTRACTOR). Whole word matches, so an unrelated name that merely contains one of these
+// is left alone. The list names operators only: a payment processor such as Stripe also carries
+// real payouts, so it cannot be classified from its name.
+export const GAMBLING_OPERATOR_PATTERNS = [
+  /\bfliff\b/i,
+  /\bdraft\s*kings\b/i,
+  /\bfan\s*duel\b/i,
+  /\bbet\s*mgm\b/i,
+  /\bprize\s*picks\b/i,
+  /\bunderdog\s*fantasy\b/i,
+  /\bespn\s*bet\b/i,
+  /\bbet\s*365\b/i,
+  /\bbet\s*rivers\b/i,
+  /\bpoints\s*bet\b/i,
+  /\bcaesars\s*sportsbook\b/i,
+  /\bhard\s*rock\s*bet\b/i,
+  /\bfanatics\s*sportsbook\b/i,
+  /\bchumba\b/i,
+  /\bpulsz\b/i,
+];
+
+export const isGamblingOperator = (texts: (string | null | undefined)[]): boolean =>
+  texts.some((text) => Boolean(text) && GAMBLING_OPERATOR_PATTERNS.some((pattern) => pattern.test(text as string)));
+
 // Wording used when paying a bill to a merchant (utility, phone, insurance). Plaid's
 // spending category is more reliable than these, so they yield to it. Every other
 // transfer pattern (card payments, autopay, Zelle, ACH pmt, ...) describes money moving
@@ -97,7 +123,7 @@ export const isCashAccount = (accountType?: string | null): boolean => {
 /**
  * Detect transaction type based on amount and patterns.
  *
- * Priority: transfers (bill-pay wording yields to a Plaid spending category) > investments >
+ * Priority: transfers (bill-pay wording yields to a Plaid spending category) > betting sites > investments >
  * Plaid PFC > amount sign
  *
  * @param amount - Transaction amount (positive = expense, negative = money in)
@@ -123,6 +149,9 @@ export const detectTransactionType = (
     transferPatterns.some((pattern) => pattern.test(text)),
   );
   if (matchesTransferPattern) return 'transfer';
+
+  // A betting site is spending going in and a return coming out, whatever category Plaid chose.
+  if (isGamblingOperator(texts)) return amount < 0 ? 'return' : 'expense';
 
   // Plaid says it's spending and nothing says money moved between accounts. Money coming
   // in against a spending category is a refund.
