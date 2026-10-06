@@ -38,7 +38,7 @@ Required vars (see `server/ENV_SETUP.md`):
 - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (preferred) or `SUPABASE_ANON_KEY`
 - `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV` (sandbox/development/production)
 - `PORT` (defaults to 3001)
-- Client: `VITE_API_URL=http://localhost:3001/api`
+- Client: no env file needed locally (the client calls `/api` and the Vite dev server proxies it to `http://localhost:3001`). Set `VITE_API_URL` in `client/.env` (or the host's build env) only when the client is hosted separately from the API, for example on Vercel
 
 ## Server Conventions
 
@@ -100,11 +100,11 @@ export function useUpdateTransaction() {
 **Migration naming**: `NNN_description_in_snake_case.sql` — next file should increment from the highest existing number.
 
 ```
-migrations/019_enable_rls_all_tables.sql  ← current latest
-migrations/020_your_new_migration.sql     ← next one
+migrations/025_learn_transaction_type.sql  ← current latest
+migrations/026_your_new_migration.sql     ← next one
 ```
 
-Run migrations in Supabase SQL editor (no CLI migration runner configured).
+Run migrations in Supabase SQL editor (no CLI migration runner configured). `supabase-schema.sql` is a full baseline as of migration 023, so a fresh project runs it and then migrations 024 and up. Regenerate it when you want to move the baseline forward.
 
 **RLS**: Enabled on all tables (migration 019). Server uses service-role key to bypass — no permissive policies needed. Don't add `user_id` filtering to server queries; the key handles isolation.
 
