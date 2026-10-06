@@ -491,6 +491,29 @@ describe('applySyncResult', () => {
       expect(opsOf('accounts', 'update')).toHaveLength(0);
     });
 
+    it('counts a pending reconciliation that throws as one failure instead of aborting the batch', async () => {
+      reconcilePending.mockRejectedValueOnce(new Error('splits could not be copied'));
+
+      // The first row's reconciliation throws; the second row must still be saved.
+      await expect(
+        apply(emptySync({ added: [tx({ transaction_id: 'a', pending_transaction_id: 'p1' }), tx({ transaction_id: 'b' })] })),
+      ).rejects.toThrow(/1 transaction/);
+
+      expect(opsOf('transactions', 'insert')).toHaveLength(2);
+      expect(opsOf('accounts', 'update')).toHaveLength(0);
+    });
+
+    it('does the same when the reconciliation of an already stored row throws', async () => {
+      db.existingByPlaidId.set('posted', { id: 'row-9', account_id: 'acct-1' });
+      reconcilePending.mockRejectedValueOnce(new Error('tags could not be copied'));
+
+      await expect(
+        apply(emptySync({ added: [tx({ transaction_id: 'posted', pending_transaction_id: 'p9' })] })),
+      ).rejects.toThrow(/1 transaction/);
+
+      expect(opsOf('accounts', 'update')).toHaveLength(0);
+    });
+
     it('counts only the rows that really saved', async () => {
       db.failDeleteFor = new Set(['r1']);
 
