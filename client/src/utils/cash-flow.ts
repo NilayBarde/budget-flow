@@ -25,8 +25,10 @@ export const computeCashFlow = ({
     isCurrentMonth,
 }: CashFlowInput): CashFlowResult => ({
     cashFlow: actualIncome - totalSpent - totalInvested,
+    // Income already received can exceed the expectation, and a projection must never read
+    // lower than the cash flow so far.
     projectedCashFlow:
         isCurrentMonth && expectedIncome > 0
-            ? expectedIncome - totalSpent - totalInvested
+            ? Math.max(expectedIncome, actualIncome) - totalSpent - totalInvested
             : null,
 });

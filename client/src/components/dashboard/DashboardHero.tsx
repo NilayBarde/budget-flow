@@ -35,7 +35,7 @@ const StatRow = ({
             <div className={`p-1.5 rounded-lg bg-midnight-700/50 flex-shrink-0 ${iconClassName}`}>
                 <Icon className="h-4 w-4" />
             </div>
-            <div className="flex-1">
+            <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-slate-400">{label}</p>
                 {subtext && <p className="text-xs text-slate-500">{subtext}</p>}
             </div>

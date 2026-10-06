@@ -29,6 +29,20 @@ describe('computeCashFlow', () => {
     expect(result.projectedCashFlow).toBe(5885);
   });
 
+  it('never projects below what has already come in when income beats the expected setting', () => {
+    // $10,000 received against a $6,885 expectation: the projection must not drop under "so far".
+    const result = computeCashFlow({
+      actualIncome: 10000,
+      expectedIncome: 6885,
+      totalSpent: 800,
+      totalInvested: 200,
+      isCurrentMonth: true,
+    });
+
+    expect(result.cashFlow).toBe(9000);
+    expect(result.projectedCashFlow).toBe(9000);
+  });
+
   it('does not project when no expected income is set', () => {
     const result = computeCashFlow({
       actualIncome: 1500,
