@@ -100,8 +100,8 @@ export function useUpdateTransaction() {
 **Migration naming**: `NNN_description_in_snake_case.sql` — next file should increment from the highest existing number.
 
 ```
-migrations/025_learn_transaction_type.sql  ← current latest
-migrations/026_your_new_migration.sql     ← next one
+migrations/026_add_account_last_sync_error.sql  ← current latest
+migrations/027_your_new_migration.sql           ← next one
 ```
 
 Run migrations in Supabase SQL editor (no CLI migration runner configured). `supabase-schema.sql` is a full baseline as of migration 023, so a fresh project runs it and then migrations 024 and up. Regenerate it when you want to move the baseline forward.

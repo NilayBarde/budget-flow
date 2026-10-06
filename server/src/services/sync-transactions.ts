@@ -127,6 +127,8 @@ const recordSuccessfulSync = async (plaidItemId: string, nextCursor: string, his
       last_synced_at: new Date().toISOString(),
       needs_reauth: false,
       reauth_detected_at: null,
+      last_sync_error: null,
+      last_sync_error_at: null,
     })
     .eq('plaid_item_id', plaidItemId);
   if (error) throw error;

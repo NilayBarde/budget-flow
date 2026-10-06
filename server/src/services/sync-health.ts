@@ -12,6 +12,9 @@ interface SyncHealthAccount {
   account_type?: string | null;
   needs_reauth: boolean;
   last_synced_at: string | null;
+  // Why the most recent sync failed; cleared by the next success. Optional so a row read before
+  // the column existed still classifies.
+  last_sync_error?: string | null;
 }
 
 // The ?staleDays= override is a debugging aid. It must be a plain decimal number inside a sane
@@ -32,19 +35,23 @@ export const staleDaysFor = (accountType?: string | null, override?: number): nu
   return isHoldingsAccountType(accountType) ? INVESTMENT_STALE_DAYS : DEFAULT_STALE_DAYS;
 };
 
+const isFailing = (a: SyncHealthAccount): boolean => !a.needs_reauth && Boolean(a.last_sync_error);
+
 /**
- * Split accounts into those that need the user to reconnect and those that have not synced
- * within their type's window. An account never synced counts as stale. Accounts already
- * flagged for re-auth are not listed twice.
+ * Split accounts into those that need the user to reconnect, those whose last sync failed for
+ * another reason, and those that have not synced within their type's window. An account never
+ * synced counts as stale. Each account is listed once, under the most specific group: reconnect,
+ * then failing (which has a reason to show), then stale.
  */
 export const classifySyncHealth = <T extends SyncHealthAccount>(
   accounts: T[],
   now: number = Date.now(),
   staleDaysOverride?: number,
-): { needsReauth: T[]; stale: T[] } => ({
+): { needsReauth: T[]; failing: T[]; stale: T[] } => ({
   needsReauth: accounts.filter(a => a.needs_reauth),
+  failing: accounts.filter(isFailing),
   stale: accounts.filter(a => {
-    if (a.needs_reauth) return false;
+    if (a.needs_reauth || isFailing(a)) return false;
     if (!a.last_synced_at) return true;
     const syncedAt = new Date(a.last_synced_at).getTime();
     // An unreadable date is not evidence of a recent sync.

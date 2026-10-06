@@ -9,6 +9,7 @@ interface TestAccount {
   account_type: string;
   needs_reauth: boolean;
   last_synced_at: string | null;
+  last_sync_error?: string | null;
 }
 
 const account = (overrides: Partial<TestAccount> = {}): TestAccount => ({
@@ -93,7 +94,7 @@ describe('classifySyncHealth', () => {
 
   it('returns nothing for healthy accounts', () => {
     const result = classifySyncHealth([account()], NOW);
-    expect(result).toEqual({ needsReauth: [], stale: [] });
+    expect(result).toEqual({ needsReauth: [], failing: [], stale: [] });
   });
 
   it('pins the card boundary: exactly 5 days is not stale, 5 days and a second is', () => {
@@ -112,6 +113,40 @@ describe('classifySyncHealth', () => {
   it('treats an unparseable last sync date as stale instead of healthy', () => {
     const { stale } = classifySyncHealth([account({ last_synced_at: 'not a date' })], NOW);
     expect(stale).toHaveLength(1);
+  });
+
+  describe('failed syncs', () => {
+    it('lists an account whose last sync failed even though it synced a day ago', () => {
+      const { failing, stale } = classifySyncHealth(
+        [account({ last_sync_error: 'Failed to save 1 transaction(s).', last_synced_at: daysAgo(1) })],
+        NOW,
+      );
+      expect(failing).toHaveLength(1);
+      expect(stale).toHaveLength(0);
+    });
+
+    it('lists it once, as failing, when it is also past its window', () => {
+      const { failing, stale } = classifySyncHealth(
+        [account({ last_sync_error: 'boom', last_synced_at: daysAgo(30) })],
+        NOW,
+      );
+      expect(failing).toHaveLength(1);
+      expect(stale).toHaveLength(0);
+    });
+
+    it('leaves an account that needs reconnecting under reconnect, not failing', () => {
+      const result = classifySyncHealth([account({ needs_reauth: true, last_sync_error: 'ITEM_LOGIN_REQUIRED: x' })], NOW);
+      expect(result.needsReauth).toHaveLength(1);
+      expect(result.failing).toHaveLength(0);
+    });
+
+    it('does not list an account with no error or a blank one', () => {
+      const result = classifySyncHealth(
+        [account({ id: 'a', last_sync_error: null }), account({ id: 'b', last_sync_error: '' }), account({ id: 'c' })],
+        NOW,
+      );
+      expect(result.failing).toHaveLength(0);
+    });
   });
 });
 

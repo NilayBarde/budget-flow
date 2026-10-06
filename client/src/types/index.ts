@@ -16,6 +16,8 @@ export interface Account {
   needs_reauth?: boolean;
   reauth_detected_at?: string | null;
   last_synced_at?: string | null;
+  last_sync_error?: string | null;
+  last_sync_error_at?: string | null;
   created_at: string;
 }
 
@@ -27,6 +29,8 @@ export interface SyncHealthAccount {
   needs_reauth: boolean;
   reauth_detected_at: string | null;
   last_synced_at: string | null;
+  last_sync_error?: string | null;
+  last_sync_error_at?: string | null;
 }
 
 export interface SyncHealth {
@@ -34,6 +38,8 @@ export interface SyncHealth {
   staleDays: number;
   investmentStaleDays: number;
   needs_reauth: SyncHealthAccount[];
+  /** Accounts whose last sync failed for a reason other than needing a reconnect. */
+  failing?: SyncHealthAccount[];
   stale: SyncHealthAccount[];
 }
 
