@@ -170,3 +170,57 @@ export function matchCreditsToCharges(
 
   return matches;
 }
+
+// Posting level pairs first: they use real amounts, dates and accounts, so
+// they catch generic perk credits that name matching cannot. Credit series
+// already claimed that way are not offered to the name matcher again.
+const matchAllCredits = (
+  charges: DetectedSeries[],
+  credits: DetectedSeries[],
+  txns: PostingTxn[]
+): Map<string, MatchedCredit> => {
+  const postingOffsets = matchCreditsByPosting(charges, txns);
+  const claimed = new Set([...postingOffsets.values()].map(m => m.merchant));
+  const nameOffsets = matchCreditsToCharges(
+    charges.filter(c => !postingOffsets.has(c.merchant)),
+    credits.filter(c => !claimed.has(c.merchant))
+  );
+  return new Map([...postingOffsets, ...nameOffsets]);
+};
+
+const creditNames = (offsets: Map<string, MatchedCredit>): string[] =>
+  [...offsets.values()].map(m => m.merchant);
+
+export interface ResolvedCreditOffsets {
+  /** Offsets for visible charges only. */
+  offsets: Map<string, MatchedCredit>;
+  /**
+   * Credit names claimed by any charge, including ones the user deleted. A
+   * deleted charge's credit is not a free standing credit, so it must not be
+   * counted as one against the remaining subscriptions.
+   */
+  matchedCreditNames: Set<string>;
+}
+
+// Deleted charges are matched after the visible ones, against the credits the
+// visible ones left over, so a deleted series (e.g. a grocery "Walmart"
+// series) can never take a credit away from a live subscription.
+export function resolveCreditOffsets(input: {
+  charges: DetectedSeries[];
+  deletedCharges: DetectedSeries[];
+  credits: DetectedSeries[];
+  txns: PostingTxn[];
+}): ResolvedCreditOffsets {
+  const { charges, deletedCharges, credits, txns } = input;
+  const offsets = matchAllCredits(charges, credits, txns);
+  const claimed = new Set(creditNames(offsets));
+  const deletedOffsets = matchAllCredits(
+    deletedCharges,
+    credits.filter(c => !claimed.has(c.merchant)),
+    txns
+  );
+  return {
+    offsets,
+    matchedCreditNames: new Set([...claimed, ...creditNames(deletedOffsets)]),
+  };
+}

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { detectRecurringSeries, type DetectionTxn, type DetectedSeries } from '../services/recurring-detection.js';
-import { matchCreditsByPosting, matchCreditsToCharges } from '../services/credit-matching.js';
+import { resolveCreditOffsets } from '../services/credit-matching.js';
 import { getMyShareAmount, type SplitShare } from '../services/category-spend.js';
 import { monthlyEquivalentAmount, type RecurringFrequency } from '../services/recurring-normalize.js';
 
@@ -65,25 +65,25 @@ interface RefreshResult {
   txns: WindowTxn[];
 }
 
-// Merchants the user deleted (kept as hidden rows). Detection skips them so a
-// deleted series is not re-created, re-activated, or paired with credits.
+// Merchants the user deleted (kept as hidden rows) are skipped: a deleted
+// series is not re-created or re-activated, and does not offset anything. Its
+// credit stays in matchedCreditNames so it is not counted as a free standing
+// credit against the remaining subscriptions.
 const runDetection = (txns: WindowTxn[], today: string, deletedMerchants: ReadonlySet<string>) => {
-  const charges = detectRecurringSeries(txns, today, 'expense').filter(
-    c => !deletedMerchants.has(c.merchant),
-  );
+  const detected = detectRecurringSeries(txns, today, 'expense');
   const credits = detectRecurringSeries(txns, today, 'return');
-
-  // Posting level pairs first: they use real amounts, dates and accounts, so
-  // they catch generic perk credits that name matching cannot. Credit series
-  // already claimed that way are not offered to the name matcher again.
-  const postingOffsets = matchCreditsByPosting(charges, txns);
-  const claimedCredits = new Set([...postingOffsets.values()].map(m => m.merchant));
-  const nameOffsets = matchCreditsToCharges(
-    charges.filter(c => !postingOffsets.has(c.merchant)),
-    credits.filter(c => !claimedCredits.has(c.merchant)),
-  );
-  const offsets = new Map([...postingOffsets, ...nameOffsets]);
-  return { charges, credits, offsets };
+  const { offsets, matchedCreditNames } = resolveCreditOffsets({
+    charges: detected.filter(c => !deletedMerchants.has(c.merchant)),
+    deletedCharges: detected.filter(c => deletedMerchants.has(c.merchant)),
+    credits,
+    txns,
+  });
+  return {
+    charges: detected.filter(c => !deletedMerchants.has(c.merchant)),
+    credits,
+    offsets,
+    matchedCreditNames,
+  };
 };
 
 // Reconcile the recurring_transactions table with what detection found.
@@ -98,7 +98,11 @@ const refreshRecurringTable = async (today: string): Promise<RefreshResult> => {
     (existing || []).filter(r => r.user_hidden).map(r => r.merchant_display_name),
   );
 
-  const { charges, credits, offsets } = runDetection(txns, today, deletedMerchants);
+  const { charges, credits, offsets, matchedCreditNames } = runDetection(
+    txns,
+    today,
+    deletedMerchants,
+  );
 
   if (charges.length > 0) {
     const upserts = charges.map(c => ({
@@ -134,7 +138,6 @@ const refreshRecurringTable = async (today: string): Promise<RefreshResult> => {
     .from('app_settings')
     .upsert({ key: LAST_REFRESHED_KEY, value: new Date().toISOString() }, { onConflict: 'key' });
 
-  const matchedCreditNames = new Set([...offsets.values()].map(m => m.merchant));
   return { charges, credits, matchedCreditNames, txns };
 };
 
@@ -220,13 +223,8 @@ router.get(
         .eq('user_hidden', true);
       if (deletedError) throw deletedError;
       const deletedMerchants = new Set((deletedRows || []).map(r => r.merchant_display_name));
-      const { charges, credits, offsets } = runDetection(txns, today, deletedMerchants);
-      result = {
-        charges,
-        credits,
-        matchedCreditNames: new Set([...offsets.values()].map(m => m.merchant)),
-        txns,
-      };
+      const { charges, credits, matchedCreditNames } = runDetection(txns, today, deletedMerchants);
+      result = { charges, credits, matchedCreditNames, txns };
     }
 
     const { data: rows, error } = await supabase

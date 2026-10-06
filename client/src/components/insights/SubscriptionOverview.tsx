@@ -76,6 +76,12 @@ export const SubscriptionOverview = () => {
             </div>
           ) : (
             <>
+              {deleteRecurring.isError && (
+                <p role="alert" className="px-4 md:px-6 py-2 text-xs text-rose-400 bg-rose-500/10">
+                  Couldn't delete that charge. Try again.
+                </p>
+              )}
+
               {/* Recurring charges with net cost */}
               {charges.length > 0 ? (
                 <div className="divide-y divide-midnight-700">
@@ -126,7 +132,7 @@ export const SubscriptionOverview = () => {
                         </div>
                         <button
                           onClick={() => handleDelete(charge.id, charge.merchant)}
-                          disabled={deleteRecurring.isPending}
+                          disabled={deleteRecurring.isPending && deleteRecurring.variables === charge.id}
                           className="p-2 text-slate-500 hover:text-red-400 active:bg-red-500/10 rounded-lg transition-colors flex-shrink-0 touch-target disabled:opacity-50"
                           title="Delete this recurring charge"
                           aria-label="Delete recurring charge"

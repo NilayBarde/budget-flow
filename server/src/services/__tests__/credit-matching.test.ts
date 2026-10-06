@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { matchCreditsByPosting, matchCreditsToCharges, type PostingTxn } from '../credit-matching.js';
+import {
+  matchCreditsByPosting,
+  matchCreditsToCharges,
+  resolveCreditOffsets,
+  type PostingTxn,
+} from '../credit-matching.js';
 import type { DetectedSeries } from '../recurring-detection.js';
 
 const series = (merchant: string, averageAmount: number, frequency: 'weekly' | 'monthly' | 'yearly' = 'monthly'): DetectedSeries => ({
@@ -251,5 +256,76 @@ describe('matchCreditsByPosting', () => {
     );
 
     expect(matches.size).toBe(0);
+  });
+});
+
+describe('resolveCreditOffsets', () => {
+  const ACCOUNT = 'Platinum Card';
+  const walmartPlus = series('Walmart+', 12.95);
+  const walmartCredit = series('Walmart', 12.95);
+  const walmartTxns: PostingTxn[] = [
+    ...['2026-07-03', '2026-08-03', '2026-09-03'].map(date => ({
+      merchant: 'Walmart+',
+      amount: 12.95,
+      date,
+      transaction_type: 'expense',
+      accountName: ACCOUNT,
+    })),
+    ...['2026-07-04', '2026-08-04', '2026-09-04'].map(date => ({
+      merchant: 'Walmart',
+      amount: 12.95,
+      date,
+      transaction_type: 'return',
+      accountName: ACCOUNT,
+    })),
+  ];
+
+  it('prefers a posting match over the name match for the same credit', () => {
+    const { offsets } = resolveCreditOffsets({
+      charges: [walmartPlus],
+      deletedCharges: [],
+      credits: [walmartCredit],
+      txns: walmartTxns,
+    });
+
+    expect(offsets.get('Walmart+')).toEqual({ merchant: 'Walmart', monthlyAmount: 12.95 });
+  });
+
+  it('keeps a deleted charge\'s credit marked as matched so it is not counted as free standing', () => {
+    const { offsets, matchedCreditNames } = resolveCreditOffsets({
+      charges: [],
+      deletedCharges: [walmartPlus],
+      credits: [walmartCredit],
+      txns: walmartTxns,
+    });
+
+    expect(offsets.size).toBe(0);
+    expect(matchedCreditNames.has('Walmart')).toBe(true);
+  });
+
+  it('does not let a deleted charge take a credit from a visible one', () => {
+    // A deleted "Walmart" grocery series shares the credit's name; the live
+    // Walmart+ subscription must still get it.
+    const deletedWalmart = series('Walmart', 14.1);
+    const { offsets } = resolveCreditOffsets({
+      charges: [walmartPlus],
+      deletedCharges: [deletedWalmart],
+      credits: [walmartCredit],
+      txns: walmartTxns,
+    });
+
+    expect(offsets.get('Walmart+')?.merchant).toBe('Walmart');
+    expect(offsets.has('Walmart')).toBe(false);
+  });
+
+  it('reports every claimed credit name, visible and deleted', () => {
+    const { matchedCreditNames } = resolveCreditOffsets({
+      charges: [series('Dunkin\'', 7)],
+      deletedCharges: [walmartPlus],
+      credits: [series('Dunkin\'', 7), walmartCredit],
+      txns: walmartTxns,
+    });
+
+    expect([...matchedCreditNames].sort()).toEqual(['Dunkin\'', 'Walmart']);
   });
 });

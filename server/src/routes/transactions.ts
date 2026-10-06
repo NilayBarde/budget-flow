@@ -492,10 +492,12 @@ router.patch('/:id', async (req, res) => {
           .neq('id', id); // exclude the current one being unmarked
 
         if (!count || count === 0) {
-          // No more recurring transactions for this merchant — deactivate
+          // No more recurring transactions for this merchant: deactivate and
+          // mark it deleted (same marker as the subscriptions tab) so the next
+          // detection refresh does not bring the series back.
           await supabase
             .from('recurring_transactions')
-            .update({ is_active: false })
+            .update({ is_active: false, user_hidden: true })
             .eq('merchant_display_name', merchantName);
         }
       }
