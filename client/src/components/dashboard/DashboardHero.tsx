@@ -7,6 +7,7 @@ import { useBudgetGoals, useAppSettings, useFinancialHealth } from '../../hooks'
 
 interface StatRowProps {
     label: string;
+    subtext?: string;
     value: number;
     icon: React.ElementType;
     className?: string;
@@ -18,6 +19,7 @@ interface StatRowProps {
 
 const StatRow = ({
     label,
+    subtext,
     value,
     icon: Icon,
     className = "",
@@ -33,7 +35,10 @@ const StatRow = ({
             <div className={`p-1.5 rounded-lg bg-midnight-700/50 flex-shrink-0 ${iconClassName}`}>
                 <Icon className="h-4 w-4" />
             </div>
-            <p className="text-sm font-medium text-slate-400 flex-1">{label}</p>
+            <div className="flex-1">
+                <p className="text-sm font-medium text-slate-400">{label}</p>
+                {subtext && <p className="text-xs text-slate-500">{subtext}</p>}
+            </div>
             <div className="flex items-center gap-1.5">
                 <span className={`text-sm font-semibold text-slate-100 transition-all duration-300 ${valueClassName}`}>
                     {isVisible ? formatter(value) : '••••••'}
@@ -57,6 +62,8 @@ export const DashboardHero = ({ month, year }: { month: number; year: number }) 
     // Use centralized hook for financial data
     const {
         netPosition,
+        projectedCashFlow,
+        isCurrentMonth,
         actualIncome,
         totalInvested,
         netWorth,
@@ -186,7 +193,8 @@ export const DashboardHero = ({ month, year }: { month: number; year: number }) 
                     iconClassName="text-emerald-400"
                 />
                 <StatRow
-                    label="Est. Cash Flow"
+                    label={isCurrentMonth ? 'Cash Flow so far' : 'Cash Flow'}
+                    subtext={projectedCashFlow !== null ? `${formatCurrency(projectedCashFlow)} projected` : undefined}
                     value={netPosition}
                     icon={PiggyBank}
                     iconClassName={netPosition >= 0 ? "text-emerald-400" : "text-rose-400"}
