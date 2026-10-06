@@ -43,6 +43,17 @@ export interface SyncHealth {
   stale: SyncHealthAccount[];
 }
 
+// A merchant rule: what the user told the app a merchant is. It decides the category and type of that
+// merchant's future transactions, and the name shown for it.
+export interface MerchantRule {
+  id: string;
+  original_name: string;
+  display_name: string;
+  default_category_id: string | null;
+  default_transaction_type: TransactionType | null;
+  created_at?: string;
+}
+
 export interface PlaidPFC {
   primary?: string;
   detailed?: string;

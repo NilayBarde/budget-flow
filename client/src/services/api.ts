@@ -15,6 +15,7 @@ import type {
   InvestmentSummary,
   InsightsData,
   SyncHealth,
+  MerchantRule,
 } from '../types';
 
 const fetchApi = async <T>(
@@ -282,6 +283,12 @@ export const updateCategory = (id: string, data: Partial<Category>) =>
 
 export const deleteCategory = (id: string) =>
   fetchApi<void>(`/categories/${id}`, { method: 'DELETE' });
+
+// Merchant rules
+export const getMerchantRules = () => fetchApi<MerchantRule[]>('/merchant-mappings');
+
+export const deleteMerchantRule = (id: string) =>
+  fetchApi<void>(`/merchant-mappings/${id}`, { method: 'DELETE' });
 
 // Budget Goals
 export const getBudgetGoals = (month: number, year: number) =>
