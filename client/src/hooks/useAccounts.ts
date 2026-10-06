@@ -59,10 +59,14 @@ export const useSyncAccount = () => {
   return useMutation({
     mutationFn: (accountId: string) => api.syncAccount(accountId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['accounts'] });
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
       queryClient.invalidateQueries({ queryKey: ['stats'] });
-      // A successful sync clears needs_reauth server-side; refresh the banner
+    },
+    // Success or failure, the server has just changed the account: a good sync clears
+    // needs_reauth, and a failed one (expired login) sets it. Refresh the banner and the cards
+    // either way so the Reconnect button appears without a page reload.
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
       queryClient.invalidateQueries({ queryKey: ['sync-health'] });
     },
   });

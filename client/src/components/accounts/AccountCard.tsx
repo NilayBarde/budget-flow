@@ -101,7 +101,10 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: Acc
   }, []);
 
   const handleSync = useCallback(() => {
-    syncAccount.mutate(account.id);
+    setUpdateError(null);
+    // Show why a sync failed (for example "This connection needs to be reconnected")
+    // instead of the spinner just stopping.
+    syncAccount.mutate(account.id, { onError: (error) => setUpdateError(error.message) });
   }, [syncAccount, account.id]);
 
   const handleDelete = useCallback(() => {
