@@ -38,7 +38,7 @@ Required vars (see `server/ENV_SETUP.md`):
 - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (preferred) or `SUPABASE_ANON_KEY`
 - `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV` (sandbox/development/production)
 - `PORT` (defaults to 3001)
-- Client: `VITE_API_URL=http://localhost:3001/api`
+- Client: no env file needed locally (the client calls `/api` and the Vite dev server proxies it to `http://localhost:3001`). Set `VITE_API_URL` in `client/.env` (or the host's build env) only when the client is hosted separately from the API, for example on Vercel
 
 ## Server Conventions
 
