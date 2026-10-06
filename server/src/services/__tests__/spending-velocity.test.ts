@@ -276,6 +276,42 @@ describe('computeSpendingVelocity', () => {
       expect(result.variableSpent).toBeCloseTo(15 * 66.67, 5);
       expect(result).toHaveProperty('excludedOutlierAmount');
     });
+
+    it('splits the projected total into the fixed part and the variable part, so the card can show where it comes from', () => {
+      // The October 2026 case: $2,625 of fixed costs ($2,511 already paid) and $133.61 a day of variable
+      // spending over 6 of 31 days. The projection is paid fixed + unpaid fixed + variable extrapolated to month end.
+      const result = computeSpendingVelocity({
+        daysElapsed: 6,
+        daysInMonth: 31,
+        spentSoFar: 3312.46,
+        fixedCostSeries: [series(2497.49, 2497.49), series(127.21, 13.29)],
+        lastMonthTotal: 2774.24,
+        dailyVariableSpending: [10, 20, 400, 250, 100, 21.68],
+      });
+
+      expect(result.remainingFixed).toBeCloseTo(127.21 - 13.29, 5);
+      expect(result.projectedVariable).toBeCloseTo(801.68 + (801.68 / 6) * 25, 2);
+      expect(result.projectedTotal).toBeCloseTo(
+        result.recurringSpent + result.remainingFixed + result.projectedVariable,
+        5,
+      );
+    });
+
+    it('reports the variable projection after an outlier day is left out of the rate', () => {
+      const days = [10, 12, 9, 11, 10, 13, 400];
+      const result = computeSpendingVelocity({
+        daysElapsed: 7,
+        daysInMonth: 30,
+        spentSoFar: 465,
+        fixedCostSeries: [],
+        lastMonthTotal: 0,
+        dailyVariableSpending: days,
+      });
+
+      // 400 is kept in what was spent but not repeated: remaining 23 days run at the other days' mean (10.83).
+      expect(result.excludedOutlierAmount).toBe(400);
+      expect(result.projectedVariable).toBeCloseTo(465 + (65 / 6) * 23, 5);
+    });
   });
 });
 

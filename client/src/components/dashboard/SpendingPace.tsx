@@ -4,6 +4,7 @@ import { ProgressBar } from '../ui/ProgressBar';
 import { useInsights, useAppSettings, useBudgetGoals } from '../../hooks';
 import { formatCurrency } from '../../utils/formatters';
 import { resolveBudgetTarget } from '../../utils/budget-target';
+import { describePace } from '../../utils/pace';
 import { MONTHS } from '../../utils/constants';
 
 export const SpendingPace = () => {
@@ -33,11 +34,12 @@ export const SpendingPace = () => {
         ? (spendingVelocity.daysElapsed / spendingVelocity.daysInMonth) * 100
         : 0;
 
-    // Determine if on pace against the budget (with 5% grace period)
+    // On pace against the budget (with a 5% grace), and by how much it is over or under
     const benchmark = hasBudget ? budgetTarget : spendingVelocity.lastMonthTotal;
-    const isOnPace = benchmark > 0
-        ? spendingVelocity.projectedTotal <= benchmark * 1.05
-        : true;
+    const pace = describePace({ projectedTotal: spendingVelocity.projectedTotal, budget: benchmark, hasBudget });
+    const isOnPace = pace.onPace;
+    // The projected total takes its color from the same verdict as the status, so the two cannot disagree.
+    const projectedColor = !pace.onPace ? 'text-rose-400' : pace.withinGrace ? 'text-amber-400' : 'text-emerald-400';
 
     return (
         <Card padding="sm">
@@ -95,8 +97,11 @@ export const SpendingPace = () => {
                     </div>
                     <div>
                         <p className="text-xs text-slate-500">Projected Total</p>
-                        <p className={`text-sm font-medium ${spendingVelocity.projectedTotal > benchmark ? 'text-rose-400' : 'text-emerald-400'}`}>
+                        <p className={`text-sm font-medium ${projectedColor}`}>
                             {formatCurrency(spendingVelocity.projectedTotal)}
+                        </p>
+                        <p className="text-[10px] text-slate-500 mt-0.5">
+                            {formatCurrency(spendingVelocity.recurringSpent + spendingVelocity.remainingFixed)} fixed + {formatCurrency(spendingVelocity.projectedVariable)} variable
                         </p>
                         {spendingVelocity.excludedOutlierAmount > 0 && (
                             <p
@@ -112,6 +117,11 @@ export const SpendingPace = () => {
                         <p className={`text-sm font-medium ${isOnPace ? 'text-emerald-400' : 'text-amber-400'}`}>
                             {isOnPace ? 'On pace' : 'Over pace'}
                         </p>
+                        {pace.difference !== null && (
+                            <p className="text-[10px] text-slate-500 mt-0.5">
+                                {formatCurrency(pace.difference)} {pace.direction} {pace.against}{pace.withinGrace ? ' (within 5%)' : ''}
+                            </p>
+                        )}
                     </div>
                 </div>
             </div>

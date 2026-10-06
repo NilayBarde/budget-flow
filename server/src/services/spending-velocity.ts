@@ -35,6 +35,10 @@ export interface SpendingVelocity {
   expectedFixedCosts: number;
   recurringSpent: number;
   variableSpent: number;
+  /** Fixed costs still due this month, summed per series (a series that overpaid does not cancel another). */
+  remainingFixed: number;
+  /** Variable spending so far plus the remaining days at the daily rate. */
+  projectedVariable: number;
   /**
    * Amount of a single day excluded from the daily-rate extrapolation
    * because it was a statistical outlier (e.g. a one-time large
@@ -477,6 +481,8 @@ export const computeSpendingVelocity = (
     expectedFixedCosts,
     recurringSpent,
     variableSpent,
+    remainingFixed,
+    projectedVariable,
     excludedOutlierAmount: excludedOutlier,
   };
 };
