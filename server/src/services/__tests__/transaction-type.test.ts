@@ -137,6 +137,91 @@ describe('detectTransactionType', () => {
     });
   });
 
+  // ── Plaid spending category beats text patterns ───────────────────────
+
+  describe('Plaid spending category overrides text patterns', () => {
+    it('utility bill payment is an expense, not a transfer', () => {
+      expect(
+        detectTransactionType(394.21, ['Con Edison', 'CONED BILL PAYMENT'], {
+          primary: 'RENT_AND_UTILITIES',
+          detailed: 'RENT_AND_UTILITIES_GAS_AND_ELECTRICITY',
+        }),
+      ).toBe('expense');
+    });
+
+    it('phone bill payment is an expense', () => {
+      expect(
+        detectTransactionType(30.39, ['ATT* BILL PAYMENT'], {
+          primary: 'RENT_AND_UTILITIES',
+          detailed: 'RENT_AND_UTILITIES_OTHER_UTILITIES',
+        }),
+      ).toBe('expense');
+    });
+
+    it('card payment stays a transfer even when Plaid mislabels it as spending', () => {
+      // Plaid returned RENT_AND_UTILITIES_RENT for a Bilt card payment
+      expect(
+        detectTransactionType(13.18, ['Bilt Card - PMT Withdrawal WITHDRAWAL'], {
+          primary: 'RENT_AND_UTILITIES',
+          detailed: 'RENT_AND_UTILITIES_RENT',
+        }),
+      ).toBe('transfer');
+      expect(
+        detectTransactionType(40, ['Zelle Cafe'], { primary: 'FOOD_AND_DRINK' }),
+      ).toBe('transfer');
+      expect(
+        detectTransactionType(317.99, ['Amex Epayment - ACH Payment Withdrawal'], {
+          primary: 'GENERAL_SERVICES',
+        }),
+      ).toBe('transfer');
+    });
+
+    it('direct debit and billpay wording also yield to a spending category', () => {
+      expect(
+        detectTransactionType(80, ['Direct Debit Insurance'], { primary: 'GENERAL_SERVICES' }),
+      ).toBe('expense');
+      expect(
+        detectTransactionType(60, ['BillPay Water'], { primary: 'RENT_AND_UTILITIES' }),
+      ).toBe('expense');
+    });
+
+    it('spending category beats an investment pattern', () => {
+      expect(
+        detectTransactionType(100, ['Fidelity Cafe'], { primary: 'FOOD_AND_DRINK' }),
+      ).toBe('expense');
+    });
+
+    it('negative amount on a spending category is a return', () => {
+      expect(
+        detectTransactionType(-30, ['Bill Pay Refund'], { primary: 'GENERAL_MERCHANDISE' }),
+      ).toBe('return');
+    });
+
+    it('vague Plaid categories still fall through to the text patterns', () => {
+      expect(
+        detectTransactionType(50, ['Zelle Payment'], { primary: 'OTHER' }),
+      ).toBe('transfer');
+      expect(
+        detectTransactionType(100, ['Fidelity'], { primary: 'TRANSFER_OUT' }),
+      ).toBe('investment');
+      expect(
+        detectTransactionType(520, ['Payment'], { primary: 'LOAN_PAYMENTS' }),
+      ).toBe('transfer');
+    });
+
+    it('INCOME category does not override a transfer pattern', () => {
+      expect(
+        detectTransactionType(-63.45, ['Emergency fund Money in CASH_CATEGORY'], {
+          primary: 'INCOME',
+        }),
+      ).toBe('transfer');
+    });
+
+    it('missing Plaid category keeps the text pattern behavior', () => {
+      expect(detectTransactionType(394.21, ['CONED BILL PAYMENT'], null)).toBe('transfer');
+    });
+  });
+
   // ── Legacy Plaid category detection ───────────────────────────────────
 
   describe('legacy Plaid category detection', () => {
