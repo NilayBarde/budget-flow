@@ -15,7 +15,6 @@ import { SubscriptionOverview } from '../components/insights/SubscriptionOvervie
 import { formatCurrency } from '../utils/formatters';
 
 const CURRENT_YEAR = new Date().getFullYear();
-const CURRENT_MONTH = new Date().getMonth() + 1;
 
 export const Insights = () => {
   const [year, setYear] = useState(CURRENT_YEAR);
@@ -113,8 +112,12 @@ export const Insights = () => {
 
       {/* ── This month: how today's spending is tracking ─────────────── */}
       {isCurrentYear && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
-          <DailySpending month={CURRENT_MONTH} year={CURRENT_YEAR} />
+        <div className="grid grid-cols-1 lg:grid-cols-2 items-start gap-4 md:gap-6">
+          {/* Both cards use the server's current month, so they cannot disagree after a month rolls over. */}
+          <DailySpending
+            month={insights.monthOverMonth.currentMonth.month}
+            year={insights.monthOverMonth.currentMonth.year}
+          />
           <SpendingPace />
         </div>
       )}

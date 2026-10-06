@@ -43,11 +43,15 @@ export const BUDGET_STATUS_MAX_ROWS = 5;
 
 // What the dashboard's budget card shows: every category close to or past its limit, fullest
 // first, plus spending outside any budget. One card answers both "what is about to put me over?"
-// and "what already did?".
+// and "what already did?". What is over comes first, biggest dollar overage first, since that is
+// what put the month over; then what is close, fullest first. `budgetTarget` is the overall
+// monthly budget (the user's own figure when set, see resolveBudgetTarget) and defaults to the sum
+// of the category limits.
 export function buildBudgetStatus(
   goals: BudgetGoal[],
   byCategory: MonthlyStats['by_category'],
   totalSpent: number,
+  budgetTarget?: number,
 ): BudgetStatus {
   const { unbudgetedSpend, totalBudgeted } = computeBudgetVariance(goals, byCategory);
 
@@ -67,10 +71,10 @@ export function buildBudgetStatus(
       };
     })
     .filter(row => row.ratio > BUDGET_WATCH_THRESHOLD)
-    .sort((a, b) => b.ratio - a.ratio || b.overage - a.overage);
+    .sort((a, b) => Number(b.isOver) - Number(a.isOver) || (a.isOver ? b.overage - a.overage : b.ratio - a.ratio));
 
   const rows = qualifying.slice(0, BUDGET_STATUS_MAX_ROWS);
-  const overallOver = goals.length > 0 && totalSpent > totalBudgeted;
+  const overallOver = goals.length > 0 && totalSpent > (budgetTarget ?? totalBudgeted);
 
   return {
     rows,

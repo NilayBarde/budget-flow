@@ -7,12 +7,14 @@ const state = {
   goals: undefined as BudgetGoal[] | undefined,
   stats: undefined as { total_spent: number; by_category: unknown[] } | undefined,
   loading: false,
+  settings: undefined as { monthly_budget_limit?: string } | undefined,
 };
 
 vi.mock('../../../hooks', async importOriginal => ({
   ...(await importOriginal<typeof import('../../../hooks')>()),
   useBudgetGoals: () => ({ data: state.goals, isLoading: state.loading }),
   useMonthlyStats: () => ({ data: state.stats }),
+  useAppSettings: () => ({ data: state.settings }),
 }));
 
 const { BudgetStatus } = await import('../BudgetStatus');
@@ -32,6 +34,7 @@ describe('BudgetStatus', () => {
     state.goals = undefined;
     state.stats = undefined;
     state.loading = false;
+    state.settings = undefined;
   });
 
   it('shows a category that is over its limit, with how far over', () => {
@@ -88,13 +91,48 @@ describe('BudgetStatus', () => {
     expect(container.textContent).toBe('');
   });
 
-  it('renders nothing while the data is loading or when there are no goals', () => {
+  it('renders nothing while loading, even when data from a previous load is present', () => {
+    state.goals = [goal('dining', 'Dining', 100, 150)];
+    state.stats = { total_spent: 150, by_category: [] };
     state.loading = true;
-    expect(renderCard().container.textContent).toBe('');
 
-    state.loading = false;
+    expect(renderCard().container.textContent).toBe('');
+  });
+
+  it('renders nothing when there are no goals', () => {
     state.goals = [];
     state.stats = { total_spent: 500, by_category: [] };
+
     expect(renderCard().container.textContent).toBe('');
+  });
+
+  it('calls a category exactly at its limit close, not over', () => {
+    state.goals = [goal('groc', 'Groceries', 400, 400)];
+    state.stats = { total_spent: 400, by_category: [] };
+    renderCard();
+
+    expect(screen.getByText('Close to budget limit')).toBeTruthy();
+    expect(screen.getByText('100%')).toBeTruthy();
+    expect(screen.queryByText(/over$/)).toBeNull();
+  });
+
+  it('labels money spent against a zero limit as having no limit', () => {
+    state.goals = [goal('misc', 'Misc', 0, 25)];
+    state.stats = { total_spent: 25, by_category: [] };
+    renderCard();
+
+    expect(screen.getByText('No limit')).toBeTruthy();
+    expect(screen.getByText(/\+\$25\.00 over/)).toBeTruthy();
+  });
+
+  it('does not say over budget when the total is under the user\'s own monthly budget', () => {
+    // Category limits add up to $200 and $250 is spent, but the monthly budget set in Settings is $5,600.
+    state.goals = [goal('a', 'Dining', 100, 60), goal('b', 'Gym', 100, 60)];
+    state.stats = { total_spent: 250, by_category: [{ category: { id: 'x', name: 'Other' }, amount: 130, count: 1 }] };
+    state.settings = { monthly_budget_limit: '5600' };
+    const { container } = renderCard();
+
+    expect(screen.queryByText('Over budget')).toBeNull();
+    expect(container.textContent).not.toContain('exceeds the overall budget');
   });
 });

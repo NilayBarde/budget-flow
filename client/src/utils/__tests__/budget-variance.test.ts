@@ -77,6 +77,41 @@ describe('buildBudgetStatus', () => {
     expect(status.rows[1]).toMatchObject({ isOver: false, overage: 0 });
   });
 
+  it('puts what is over before what is merely close, and ranks the overs by dollars over', () => {
+    // A $10 category at 150% is a small problem next to rent at 125% and $500 over.
+    const status = buildBudgetStatus(
+      [
+        goal('near', 'Groceries', 100, 95),
+        goal('small', 'Coffee', 20, 30),
+        goal('rent', 'Rent', 2000, 2500),
+      ],
+      byCategory([]),
+      2625,
+    );
+
+    expect(status.rows.map(r => r.categoryName)).toEqual(['Rent', 'Coffee', 'Groceries']);
+  });
+
+  it('keeps the largest dollar overages when more categories qualify than fit', () => {
+    const goals = [
+      ...Array.from({ length: 5 }, (_, i) => goal(`s${i}`, `Small ${i}`, 10, 20)),
+      goal('big', 'Rent', 2000, 2500),
+    ];
+    const status = buildBudgetStatus(goals, byCategory([]), 2550);
+
+    expect(status.rows.map(r => r.categoryName)).toContain('Rent');
+    expect(status.hiddenCount).toBe(1);
+  });
+
+  it('judges the overall budget against the target it is given, such as a manual monthly budget', () => {
+    const goals = [goal('a', 'Dining', 1500, 100), goal('b', 'Gym', 1500, 100)];
+
+    // Goals add up to $3,000 and $4,000 is spent, but the user's own monthly budget is $5,600.
+    expect(buildBudgetStatus(goals, byCategory([['x', 3800]]), 4000, 5600).overallOver).toBe(false);
+    expect(buildBudgetStatus(goals, byCategory([['x', 3800]]), 4000).overallOver).toBe(true);
+    expect(buildBudgetStatus(goals, byCategory([['x', 3800]]), 6000, 5600).overallOver).toBe(true);
+  });
+
   it('keeps five rows and says how many more there are', () => {
     const goals = Array.from({ length: 7 }, (_, i) => goal(`c${i}`, `Cat ${i}`, 100, 80 + i));
     const status = buildBudgetStatus(goals, byCategory([]), 600);

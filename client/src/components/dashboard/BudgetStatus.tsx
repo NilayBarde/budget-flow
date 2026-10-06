@@ -2,8 +2,9 @@ import { AlertCircle, ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Card } from '../ui';
 import { ProgressBar } from '../ui/ProgressBar';
-import { useBudgetGoals, useMonthlyStats } from '../../hooks';
+import { useAppSettings, useBudgetGoals, useMonthlyStats } from '../../hooks';
 import { buildBudgetStatus } from '../../utils/budget-variance';
+import { resolveBudgetTarget } from '../../utils/budget-target';
 import { formatCurrency } from '../../utils/formatters';
 
 interface BudgetStatusProps {
@@ -16,10 +17,18 @@ interface BudgetStatusProps {
 export const BudgetStatus = ({ month, year }: BudgetStatusProps) => {
   const { data: budgetGoals, isLoading } = useBudgetGoals(month, year);
   const { data: monthlyStats } = useMonthlyStats(month, year);
+  const { data: appSettings, isLoading: settingsLoading } = useAppSettings();
 
-  if (isLoading || !budgetGoals || !monthlyStats || budgetGoals.length === 0) return null;
+  // Wait for the settings too: without the user's own monthly budget the target falls back to the
+  // category limits, which could flash "Over budget" while the real figure is still loading.
+  if (isLoading || settingsLoading || !budgetGoals || !monthlyStats || budgetGoals.length === 0) return null;
 
-  const status = buildBudgetStatus(budgetGoals, monthlyStats.by_category, monthlyStats.total_spent);
+  const status = buildBudgetStatus(
+    budgetGoals,
+    monthlyStats.by_category,
+    monthlyStats.total_spent,
+    resolveBudgetTarget(appSettings?.monthly_budget_limit, budgetGoals),
+  );
   if (!status.hasContent) return null;
 
   const anyOver = status.overallOver || status.rows.some(row => row.isOver);
