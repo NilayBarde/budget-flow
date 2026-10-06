@@ -300,6 +300,43 @@ describe('detectTransactionType', () => {
     });
   });
 
+  // ── Gambling cashouts ─────────────────────────────────────────────────
+
+  describe('gambling cashouts', () => {
+    // Money from a betting site is the return of what was deposited, not earnings. Counting it as
+    // income inflates cash flow in a good month; a return nets against the deposits instead.
+    it('a cashout Plaid tags as contractor income is a return', () => {
+      // Real row: "Fliff Credit via Nuv" on a checking account.
+      expect(
+        detectTransactionType(
+          -171,
+          ['Fliff Credit via Nuv'],
+          { primary: 'INCOME', detailed: 'INCOME_CONTRACTOR' },
+          'checking',
+        ),
+      ).toBe('return');
+    });
+
+    it.each(['DraftKings', 'FanDuel', 'BetMGM', 'PrizePicks', 'Underdog Fantasy', 'ESPN BET', 'bet365'])(
+      'recognises %s as a betting site',
+      (operator) => {
+        expect(detectTransactionType(-50, [operator], { primary: 'INCOME' }, 'checking')).toBe('return');
+      },
+    );
+
+    it('a deposit to the site stays an expense', () => {
+      expect(detectTransactionType(100, ['Fliff Credit via Nuv'], { primary: 'INCOME' }, 'checking')).toBe('expense');
+    });
+
+    it('does not mistake a payroll deposit for a cashout', () => {
+      expect(detectTransactionType(-3000, ['GreenLight Workf'], { primary: 'INCOME', detailed: 'INCOME_SALARY' }, 'checking')).toBe('income');
+    });
+
+    it('does not match a word that merely contains an operator name', () => {
+      expect(detectTransactionType(-40, ['Fanduelity Consulting'], { primary: 'INCOME' }, 'checking')).toBe('income');
+    });
+  });
+
   // ── Card bill wording on the bank side ────────────────────────────────
 
   describe('card bill payments from a bank account', () => {
