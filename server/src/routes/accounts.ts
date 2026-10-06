@@ -6,6 +6,7 @@ import { detectTransactionType } from '../services/transaction-type.js';
 import { loadManuallyTypedIds, loadMerchantMappings, resolveTransactionType } from '../services/merchant-mappings.js';
 import { getCategoryIdForType } from '../services/category-lookup.js';
 import { buildAccountResolver } from '../services/sync-attribution.js';
+import { getPlaidErrorCode, needsReconnect } from '../services/plaid-errors.js';
 import { reconcilePendingTransaction } from '../services/pending-reconciliation.js';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -442,8 +443,28 @@ router.post('/:id/sync', async (req, res) => {
       historical_complete: historicalComplete || account.historical_sync_complete,
     });
   } catch (error) {
-    console.error('Error syncing account:', error);
-    res.status(500).json({ message: 'Failed to sync account' });
+    const plaidErrorCode = getPlaidErrorCode(error);
+    // Log the code only: the raw axios error carries the request headers, including the Plaid secret.
+    console.error('Error syncing account:', plaidErrorCode ?? (error instanceof Error ? error.message : error));
+
+    if (needsReconnect(plaidErrorCode)) {
+      // Webhooks are the only other place that flags this, and they can be missed. Flag every
+      // account on the item so the dashboard offers Reconnect instead of a vague stale warning.
+      const { data: failedAccount } = await supabase
+        .from('accounts')
+        .select('plaid_item_id')
+        .eq('id', req.params.id)
+        .single();
+      if (failedAccount) {
+        await supabase
+          .from('accounts')
+          .update({ needs_reauth: true, reauth_detected_at: new Date().toISOString() })
+          .eq('plaid_item_id', failedAccount.plaid_item_id);
+      }
+      return res.status(409).json({ message: 'This connection needs to be reconnected', code: plaidErrorCode });
+    }
+
+    res.status(500).json({ message: 'Failed to sync account', code: plaidErrorCode });
   }
 });
 
