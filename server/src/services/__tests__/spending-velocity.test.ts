@@ -651,11 +651,18 @@ describe('findSupersededSeries', () => {
     ['New Rent Name', '2026-10-05'],
   ]);
 
+  // Old name charged through September, new name started in October.
+  const months = new Map([
+    ['Old Rent Name', new Set(['2026-07', '2026-08', '2026-09'])],
+    ['New Rent Name', new Set(['2026-10'])],
+  ]);
+
   it('drops an unpaid series when a same-sized sibling already paid near its billing day', () => {
     const superseded = findSupersededSeries(
       [oldRent, newRent],
       new Map([['New Rent Name', 2497.49]]),
       lastSeen,
+      months,
       31,
     );
 
@@ -664,6 +671,7 @@ describe('findSupersededSeries', () => {
 
   it('keeps an unpaid series when no sibling has paid', () => {
     expect(findSupersededSeries([oldRent, newRent], new Map(), lastSeen,
+      months,
       31,
     ).size).toBe(0);
   });
@@ -673,6 +681,7 @@ describe('findSupersededSeries', () => {
       [oldRent, newRent],
       new Map([['Old Rent Name', 2404.99], ['New Rent Name', 2497.49]]),
       lastSeen,
+      months,
       31,
     );
 
@@ -684,6 +693,7 @@ describe('findSupersededSeries', () => {
       [monthly('Old Rent Name', 1500), newRent],
       new Map([['New Rent Name', 2497.49]]),
       lastSeen,
+      months,
       31,
     );
 
@@ -695,6 +705,7 @@ describe('findSupersededSeries', () => {
       [oldRent, newRent],
       new Map([['New Rent Name', 2497.49]]),
       new Map([['Old Rent Name', '2026-09-22'], ['New Rent Name', '2026-10-05']]),
+      months,
       31,
     );
 
@@ -706,6 +717,7 @@ describe('findSupersededSeries', () => {
       [monthly('Gym A', 75), monthly('Gym B', 76)],
       new Map([['Gym B', 76]]),
       new Map([['Gym A', '2026-09-03'], ['Gym B', '2026-10-03']]),
+      months,
       31,
     );
 
@@ -717,10 +729,59 @@ describe('findSupersededSeries', () => {
       [{ ...oldRent, frequency: 'yearly' as const }, newRent],
       new Map([['New Rent Name', 2497.49]]),
       lastSeen,
+      months,
       31,
     );
 
     expect(superseded.size).toBe(0);
+  });
+
+  describe('similar looking bills that are not the same series', () => {
+    const internet = monthly('Internet Co', 120);
+    const phone = monthly('Phone Co', 125);
+
+    it('keeps an unpaid phone bill when internet of a similar size and day already paid', () => {
+      // Both charge every month, so neither is a rename of the other.
+      const superseded = findSupersededSeries(
+        [internet, phone],
+        new Map([['Internet Co', 120]]),
+        new Map([['Internet Co', '2026-10-02'], ['Phone Co', '2026-09-05']]),
+        new Map([
+          ['Internet Co', new Set(['2026-07', '2026-08', '2026-09', '2026-10'])],
+          ['Phone Co', new Set(['2026-07', '2026-08', '2026-09'])],
+        ]),
+        31,
+      );
+
+      expect(superseded.size).toBe(0);
+    });
+
+    it('keeps the unpaid series when either side has no charge history', () => {
+      const superseded = findSupersededSeries(
+        [oldRent, newRent],
+        new Map([['New Rent Name', 2497.49]]),
+        lastSeen,
+        new Map([['Old Rent Name', new Set(['2026-09'])]]),
+        31,
+      );
+
+      expect(superseded.size).toBe(0);
+    });
+
+    it('supersedes a genuine rename that wraps across the month boundary', () => {
+      const superseded = findSupersededSeries(
+        [oldRent, newRent],
+        new Map([['New Rent Name', 2497.49]]),
+        new Map([['Old Rent Name', '2026-08-31'], ['New Rent Name', '2026-10-01']]),
+        new Map([
+          ['Old Rent Name', new Set(['2026-07', '2026-08'])],
+          ['New Rent Name', new Set(['2026-10'])],
+        ]),
+        31,
+      );
+
+      expect([...superseded]).toEqual(['Old Rent Name']);
+    });
   });
 
   describe('regression: October 2026 rent tracked under two merchant names', () => {
@@ -728,6 +789,7 @@ describe('findSupersededSeries', () => {
       const charges = [oldRent, newRent];
       const paid = new Map([['New Rent Name', 2497.49]]);
       const superseded = findSupersededSeries(charges, paid, lastSeen,
+      months,
       31,
     );
 

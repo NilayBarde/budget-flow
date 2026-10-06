@@ -246,17 +246,30 @@ export const matchRenamedRecurringPayments = (
 // unpaid, and the bill would be projected twice. An unpaid monthly series is
 // a superseded alias when a sibling monthly series already paid this month
 // with a similar average and a similar billing day (same thresholds as the
-// renamed payment match). Returns the merchant names to drop from the
-// fixed-cost projection.
+// renamed payment match) AND the history shows a rename: the old series' last
+// charging month is before the sibling's first one. Two bills that merely look
+// alike (internet $120 on the 2nd, phone $125 on the 5th) charge in the same
+// months, so they are never merged. Returns the merchant names to drop from
+// the fixed-cost projection.
 export const findSupersededSeries = (
   liveCharges: RecurringChargeRow[],
   paidThisMonthByMerchant: ReadonlyMap<string, number>,
   lastExpenseDateByMerchant: ReadonlyMap<string, string>,
+  chargeMonthsByMerchant: ReadonlyMap<string, ReadonlySet<string>>,
   daysInMonth: number,
 ): Set<string> => {
   const billingDay = (charge: RecurringChargeRow): number | null => {
     const lastSeen = lastExpenseDateByMerchant.get(charge.merchantDisplayName);
     return lastSeen ? parseInt(lastSeen.split('-')[2], 10) : null;
+  };
+  // Months are YYYY-MM strings, so lexicographic order is chronological.
+  const lastChargeMonth = (charge: RecurringChargeRow): string | null => {
+    const months = chargeMonthsByMerchant.get(charge.merchantDisplayName);
+    return months && months.size > 0 ? [...months].sort().at(-1)! : null;
+  };
+  const firstChargeMonth = (charge: RecurringChargeRow): string | null => {
+    const months = chargeMonthsByMerchant.get(charge.merchantDisplayName);
+    return months && months.size > 0 ? [...months].sort()[0] : null;
   };
   const isPaid = (charge: RecurringChargeRow) =>
     (paidThisMonthByMerchant.get(charge.merchantDisplayName) || 0) > 0;
@@ -271,10 +284,14 @@ export const findSupersededSeries = (
     if (isPaid(charge)) continue;
     const day = billingDay(charge);
     if (day === null) continue;
+    const oldLastMonth = lastChargeMonth(charge);
+    if (oldLastMonth === null) continue;
 
     const hasPaidTwin = paidSiblings.some(sibling => {
       const siblingDay = billingDay(sibling);
       if (siblingDay === null) return false;
+      const siblingFirstMonth = firstChargeMonth(sibling);
+      if (siblingFirstMonth === null || oldLastMonth >= siblingFirstMonth) return false;
       const relativeDiff =
         Math.abs(sibling.averageAmount - charge.averageAmount) / charge.averageAmount;
       return (

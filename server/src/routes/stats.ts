@@ -273,6 +273,9 @@ router.get('/insights', asyncHandler(async (req, res) => {
 
     // ── Top Merchants ──────────────────────────────────────────────────
     const merchantMap = new Map<string, MerchantAggregate>();
+    // Calendar months (YYYY-MM) each merchant charged in, used to tell a
+    // renamed recurring series apart from a similar looking separate bill.
+    const chargeMonthsByMerchant = new Map<string, Set<string>>();
 
     // ── Daily variable spend (current month only) ──────────────────────
     // Only covers days elapsed so far (for velocity projection); trailing
@@ -328,6 +331,9 @@ router.get('/insights', asyncHandler(async (req, res) => {
         // Top merchants (all 6 months aggregated)
         const merchant = t.merchant_display_name || t.merchant_name;
         if (merchant && amountToCount > 0) {
+          const months = chargeMonthsByMerchant.get(merchant) ?? new Set<string>();
+          months.add(monthKey);
+          chargeMonthsByMerchant.set(merchant, months);
           const existing = merchantMap.get(merchant);
           if (existing) {
             existing.totalSpent += amountToCount;
@@ -476,6 +482,7 @@ router.get('/insights', asyncHandler(async (req, res) => {
       liveCharges,
       recurringPaidByMerchant,
       lastExpenseDateByMerchant,
+      chargeMonthsByMerchant,
       daysInMonth,
     );
 
