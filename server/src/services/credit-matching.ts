@@ -57,6 +57,15 @@ const PAIR_AMOUNT_TOLERANCE_RATIO = 0.05;
 const PERK_CREDIT_PATTERN = /credit/i;
 const NOT_PERK_PATTERN = /dispute/i;
 
+const EXACT_AMOUNT_EPSILON = 0.005;
+
+const isBetterRank = (a: readonly number[], b: readonly number[]): boolean => {
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return a[i] < b[i];
+  }
+  return false;
+};
+
 const dayDiff = (from: string, to: string): number =>
   Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000);
 
@@ -66,13 +75,17 @@ const medianOf = (values: number[]): number => {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 };
 
+// usedCredits is shared across calls so a later pass (e.g. deleted charges)
+// cannot claim postings an earlier pass already consumed.
 export function matchCreditsByPosting(
   charges: DetectedSeries[],
-  txns: PostingTxn[]
+  txns: PostingTxn[],
+  usedCredits: Set<PostingTxn> = new Set()
 ): Map<string, MatchedCredit> {
   const matches = new Map<string, MatchedCredit>();
   const credits = txns.filter(t => t.transaction_type === 'return' && t.accountName);
-  const usedCredits = new Set<PostingTxn>();
+  // Newest posting in the data approximates "today" for pending credits.
+  const latestDate = txns.reduce((max, t) => (t.date > max ? t.date : max), '');
 
   // Larger series first so a big charge claims its credit before a smaller
   // one with a coincidentally similar amount.
@@ -96,27 +109,35 @@ export function matchCreditsByPosting(
     );
 
     const pairs: PostingTxn[] = [];
+    let pending = 0; // unpaired charges whose credit window is still open
     const claimed = new Set<PostingTxn>();
     for (const chargeTxn of recent) {
       const tolerance = Math.max(PAIR_AMOUNT_TOLERANCE_ABS, chargeTxn.amount * PAIR_AMOUNT_TOLERANCE_RATIO);
       let best: PostingTxn | null = null;
-      let bestScore = Infinity;
+      let bestRank: [number, number, number] | null = null;
       for (const c of eligible) {
         if (claimed.has(c) || c.accountName !== chargeTxn.accountName) continue;
         const days = dayDiff(chargeTxn.date, c.date);
         if (days < -CREDIT_WINDOW_BEFORE_DAYS || days > CREDIT_WINDOW_AFTER_DAYS) continue;
         const amountDiff = Math.abs(c.amount - chargeTxn.amount);
         if (amountDiff > tolerance) continue;
-        // Prefer the closest amount, then the closest date.
-        const score = amountDiff * 100 + Math.abs(days);
-        if (score < bestScore) {
-          bestScore = score;
+        // An exact amount (to the cent) beats any near miss regardless of
+        // date; within a bucket the closest date wins, then the closest amount.
+        const rank: [number, number, number] = [
+          amountDiff <= EXACT_AMOUNT_EPSILON ? 0 : 1,
+          Math.abs(days),
+          amountDiff,
+        ];
+        if (!bestRank || isBetterRank(rank, bestRank)) {
+          bestRank = rank;
           best = c;
         }
       }
       if (best) {
         claimed.add(best);
         pairs.push(best);
+      } else if (dayDiff(chargeTxn.date, latestDate) <= CREDIT_WINDOW_AFTER_DAYS) {
+        pending++;
       }
     }
 
@@ -128,7 +149,12 @@ export function matchCreditsByPosting(
     for (const p of pairs) labelCounts.set(p.merchant, (labelCounts.get(p.merchant) || 0) + 1);
     const [label] = [...labelCounts.entries()].sort((a, b) => b[1] - a[1])[0];
 
-    const monthlyAmount = Math.min(medianOf(pairs.map(p => p.amount)), series.averageAmount);
+    // A perk that covered only some of the recent charges offsets only that
+    // share of the monthly cost, not the full amount.
+    // Charges too recent for their credit to have posted yet do not count
+    // against it.
+    const coverage = pairs.length / (recent.length - pending);
+    const monthlyAmount = Math.min(medianOf(pairs.map(p => p.amount)), series.averageAmount) * coverage;
     matches.set(series.merchant, { merchant: label, monthlyAmount: Math.round(monthlyAmount * 100) / 100 });
   }
 
@@ -177,9 +203,10 @@ export function matchCreditsToCharges(
 const matchAllCredits = (
   charges: DetectedSeries[],
   credits: DetectedSeries[],
-  txns: PostingTxn[]
+  txns: PostingTxn[],
+  usedPostings: Set<PostingTxn>
 ): Map<string, MatchedCredit> => {
-  const postingOffsets = matchCreditsByPosting(charges, txns);
+  const postingOffsets = matchCreditsByPosting(charges, txns, usedPostings);
   const claimed = new Set([...postingOffsets.values()].map(m => m.merchant));
   const nameOffsets = matchCreditsToCharges(
     charges.filter(c => !postingOffsets.has(c.merchant)),
@@ -212,12 +239,15 @@ export function resolveCreditOffsets(input: {
   txns: PostingTxn[];
 }): ResolvedCreditOffsets {
   const { charges, deletedCharges, credits, txns } = input;
-  const offsets = matchAllCredits(charges, credits, txns);
+  // Postings consumed by visible charges stay unavailable to deleted ones.
+  const usedPostings = new Set<PostingTxn>();
+  const offsets = matchAllCredits(charges, credits, txns, usedPostings);
   const claimed = new Set(creditNames(offsets));
   const deletedOffsets = matchAllCredits(
     deletedCharges,
     credits.filter(c => !claimed.has(c.merchant)),
-    txns
+    txns,
+    usedPostings
   );
   return {
     offsets,

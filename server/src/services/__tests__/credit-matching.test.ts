@@ -243,6 +243,142 @@ describe('matchCreditsByPosting', () => {
     expect(matches.size).toBe(1);
   });
 
+  it('does not reuse postings already consumed through a shared used set', () => {
+    const a = series('Service A', 10);
+    const b = series('Service B', 10);
+    const txns = [
+      charge('Service A', 10, '2026-07-01'),
+      charge('Service A', 10, '2026-08-01'),
+      charge('Service A', 10, '2026-09-01'),
+      charge('Service B', 10, '2026-07-01'),
+      charge('Service B', 10, '2026-08-01'),
+      charge('Service B', 10, '2026-09-01'),
+      credit('Amex Streaming Credit', 10, '2026-07-02'),
+      credit('Amex Streaming Credit', 10, '2026-08-02'),
+      credit('Amex Streaming Credit', 10, '2026-09-02'),
+    ];
+    const used = new Set<PostingTxn>();
+
+    const first = matchCreditsByPosting([a], txns, used);
+    const second = matchCreditsByPosting([b], txns, used);
+
+    expect(first.has('Service A')).toBe(true);
+    expect(used.size).toBe(3);
+    expect(second.size).toBe(0);
+  });
+
+  it('prefers an exact amount over a nearer date with a near miss amount', () => {
+    const matches = matchCreditsByPosting(
+      [series('Service A', 10)],
+      [
+        charge('Service A', 10, '2026-08-01'),
+        charge('Service A', 10, '2026-09-01'),
+        // Near miss one day later, exact amount nine days later.
+        credit('Amex Streaming Credit', 10.05, '2026-08-02'),
+        credit('Amex Streaming Credit', 10, '2026-08-10'),
+        credit('Amex Streaming Credit', 10.05, '2026-09-02'),
+        credit('Amex Streaming Credit', 10, '2026-09-10'),
+      ],
+    );
+
+    expect(matches.get('Service A')?.monthlyAmount).toBe(10);
+  });
+
+  it('breaks exact amount ties by the closest date', () => {
+    const near = credit('Near Credit', 10, '2026-09-03');
+    const far = credit('Far Credit', 10, '2026-09-09');
+    const matches = matchCreditsByPosting(
+      [series('Service A', 10)],
+      [
+        charge('Service A', 10, '2026-08-01'),
+        charge('Service A', 10, '2026-09-01'),
+        credit('Near Credit', 10, '2026-08-03'),
+        credit('Far Credit', 10, '2026-08-09'),
+        near,
+        far,
+      ],
+    );
+
+    expect(matches.get('Service A')?.merchant).toBe('Near Credit');
+  });
+
+  it('scales the offset when only some recent charges were credited', () => {
+    const matches = matchCreditsByPosting(
+      [series('Service A', 12)],
+      [
+        charge('Service A', 12, '2026-07-01'),
+        charge('Service A', 12, '2026-08-01'),
+        charge('Service A', 12, '2026-09-01'),
+        credit('Amex Streaming Credit', 12, '2026-07-02'),
+        credit('Amex Streaming Credit', 12, '2026-08-02'),
+        // Later activity shows the September credit window has closed.
+        charge('Other', 5, '2026-10-20'),
+      ],
+    );
+
+    // 2 of 3 recent charges covered
+    expect(matches.get('Service A')?.monthlyAmount).toBe(8);
+  });
+
+  it('does not penalise a latest charge whose credit window is still open', () => {
+    const matches = matchCreditsByPosting(
+      [series('Service A', 12)],
+      [
+        charge('Service A', 12, '2026-07-01'),
+        charge('Service A', 12, '2026-08-01'),
+        charge('Service A', 12, '2026-09-01'),
+        credit('Amex Streaming Credit', 12, '2026-07-02'),
+        credit('Amex Streaming Credit', 12, '2026-08-02'),
+      ],
+    );
+
+    expect(matches.get('Service A')?.monthlyAmount).toBe(12);
+  });
+
+  it('accepts credits at the window edges (1 day before, 10 days after)', () => {
+    const matches = matchCreditsByPosting(
+      [series('Service A', 10)],
+      [
+        charge('Service A', 10, '2026-08-05'),
+        charge('Service A', 10, '2026-09-05'),
+        credit('Amex Streaming Credit', 10, '2026-08-04'),
+        credit('Amex Streaming Credit', 10, '2026-09-15'),
+      ],
+    );
+
+    expect(matches.has('Service A')).toBe(true);
+  });
+
+  it('rejects credits just outside the window (2 days before, 11 days after)', () => {
+    const matches = matchCreditsByPosting(
+      [series('Service A', 10)],
+      [
+        charge('Service A', 10, '2026-08-05'),
+        charge('Service A', 10, '2026-09-05'),
+        credit('Amex Streaming Credit', 10, '2026-08-03'),
+        credit('Amex Streaming Credit', 10, '2026-09-16'),
+      ],
+    );
+
+    expect(matches.size).toBe(0);
+  });
+
+  it('accepts an amount exactly at the 5% tolerance and rejects just beyond it', () => {
+    const build = (creditAmount: number) =>
+      matchCreditsByPosting(
+        [series('Service A', 100)],
+        [
+          charge('Service A', 100, '2026-08-01'),
+          charge('Service A', 100, '2026-09-01'),
+          credit('Amex Streaming Credit', creditAmount, '2026-08-02'),
+          credit('Amex Streaming Credit', creditAmount, '2026-09-02'),
+        ],
+      );
+
+    expect(build(105).has('Service A')).toBe(true);
+    expect(build(105.01).size).toBe(0);
+  });
+
   it('only considers monthly series', () => {
     const yearly = series('Clear', 209, 'yearly');
     const matches = matchCreditsByPosting(
