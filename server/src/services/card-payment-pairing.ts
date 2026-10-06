@@ -42,14 +42,20 @@ const isLockedNonTransfer = (row: PairingRow): boolean =>
 const PAYMENT_WORDS = /\b(payment|pmt|autopay|auto[- ]?pay|thank\s*you)\b/i;
 const CARD_PAYMENT_PFC_PRIMARY = ['LOAN_PAYMENTS', 'TRANSFER_IN'];
 
+// Wording of a credit that is not a payment, even when it also says "payment" ("Payment
+// Protection Credit", "Reward Payment"). "Credit card" is a payment, so only a bare "credit" counts.
+const NOT_A_PAYMENT_WORDS =
+  /\b(refund|reversal|rewards?|cashback|bonus|adjustment|adj|protection|dispute)\b|\bstatement\s+credit\b|\bcredit\b(?!\s*card)/i;
+
 // Money arriving on a card is not necessarily a payment: refunds and statement credits also
 // look like that. It counts as a payment only with positive evidence (already a transfer, Plaid
-// calls it a payment, or the text says so), and never when Plaid gives it a spending category,
-// which marks a merchant refund. A hand typed transfer settles it either way.
+// calls it a payment, or the text says so), and never when Plaid gives it a spending category
+// (a merchant refund) or the text says it is a credit. A hand typed transfer settles it either way.
 const isPaymentLeg = (card: PairingRow): boolean => {
   if (isLockedNonTransfer(card)) return false;
   if (card.type_manually_set) return true;
   if (card.plaid_primary && SPENDING_PFC_PRIMARY.includes(card.plaid_primary)) return false;
+  if (NOT_A_PAYMENT_WORDS.test(card.description ?? '')) return false;
   return (
     card.transaction_type === 'transfer' ||
     Boolean(card.plaid_primary && CARD_PAYMENT_PFC_PRIMARY.includes(card.plaid_primary)) ||
@@ -59,14 +65,17 @@ const isPaymentLeg = (card: PairingRow): boolean => {
 
 // ── Bank leg ─────────────────────────────────────────────────────────────
 
-const BANK_PAYMENT_PFC_PRIMARY = ['TRANSFER_OUT', 'LOAN_PAYMENTS'];
+// Only Plaid's loan payment category counts. A generic TRANSFER_OUT also covers ATM withdrawals
+// and Venmo sends, so it proves nothing about a card.
+const BANK_PAYMENT_PFC_PRIMARY = ['LOAN_PAYMENTS'];
 
-// Words that appear on every card payment or card, so sharing one proves nothing.
+// Words that appear on many card payments or cards, so sharing one proves nothing.
 const GENERIC_WORDS = new Set([
-  'account', 'amex', 'autopay', 'bank', 'card', 'cards', 'cash', 'checking', 'credit', 'deposit',
-  'elite', 'gold', 'individual', 'mastercard', 'mobile', 'online', 'payment', 'payments', 'platinum',
-  'preferred', 'rewards', 'reward', 'savings', 'signature', 'thank', 'visa', 'web', 'withdrawal',
-  'world',
+  'account', 'amex', 'autopay', 'automatic', 'bank', 'bill', 'billpay', 'card', 'cards', 'cash',
+  'checking', 'credit', 'debit', 'deposit', 'ending', 'elite', 'from', 'funds', 'gold', 'individual',
+  'mastercard', 'mobile', 'monthly', 'online', 'payment', 'payments', 'platinum', 'preferred',
+  'purchase', 'pymt', 'recurring', 'reward', 'rewards', 'savings', 'signature', 'thank', 'transfer',
+  'visa', 'web', 'with', 'withdrawal', 'world',
 ]);
 
 const distinctiveWords = (text?: string | null): Set<string> =>

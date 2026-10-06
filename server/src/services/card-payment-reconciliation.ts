@@ -1,6 +1,7 @@
 import { supabase } from '../db/supabase.js';
 import { findCardPaymentCounterparts, type PairingRow } from './card-payment-pairing.js';
 import type { PlaidPFC } from './categorizer.js';
+import { loadMerchantMappings } from './merchant-mappings.js';
 import { detectTransactionType, isCashAccount, isCreditCardAccount, type TransactionType } from './transaction-type.js';
 
 const PAGE_SIZE = 1000;
@@ -141,10 +142,12 @@ export const reconcileCardPayments = async ({
 export const retypeInvestmentsReadingAsCardBills = async ({
   apply = true,
 }: Pick<ReconcileOptions, 'apply'> = {}): Promise<PairedTransaction[]> => {
-  const investments = await loadTransactions(null, 'investment');
+  const [investments, mappings] = await Promise.all([loadTransactions(null, 'investment'), loadMerchantMappings()]);
   const cardBills = investments.filter(
     t =>
       !t.type_manually_set &&
+      // A merchant rule that sets the type is the user's decision, so it wins over detection.
+      !mappings.find(t.merchant_name)?.default_transaction_type &&
       detectTransactionType(t.amount, [t.merchant_name ?? '', t.original_description ?? ''], t.plaid_category as PlaidPFC | null) ===
         'transfer',
   );

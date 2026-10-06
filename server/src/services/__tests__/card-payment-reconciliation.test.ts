@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const state = {
   accounts: [] as unknown[],
   transactions: [] as unknown[],
+  mappings: [] as unknown[],
   failTransactions: false,
   updates: [] as { values: unknown; ids: string[]; guards: unknown[][] }[],
   gteCalls: [] as unknown[][],
@@ -52,7 +53,8 @@ const builderFor = (table: string) => {
       if (table === 'transactions' && state.failTransactions) {
         return resolve({ data: null, error: { message: 'db down' } });
       }
-      return resolve({ data: table === 'accounts' ? state.accounts : state.transactions, error: null });
+      const data = table === 'accounts' ? state.accounts : table === 'merchant_mappings' ? state.mappings : state.transactions;
+      return resolve({ data, error: null });
     },
   });
   return builder;
@@ -208,6 +210,7 @@ describe('retypeInvestmentsReadingAsCardBills', () => {
     state.updates = [];
     state.eqCalls = [];
     state.transactions = [];
+    state.mappings = [];
     state.failTransactions = false;
   });
 
@@ -238,6 +241,16 @@ describe('retypeInvestmentsReadingAsCardBills', () => {
       ['or', 'type_manually_set.is.null,type_manually_set.eq.false'],
       ['eq', 'transaction_type', 'investment'],
     ]);
+  });
+
+  it('leaves a row alone when the user has a merchant rule that sets its type', async () => {
+    state.mappings = [{ id: 'm1', original_name: 'Acme', display_name: 'Acme', default_category_id: null, default_transaction_type: 'investment' }];
+    state.transactions = [
+      investment({ id: 'ruled', amount: 10, merchant_name: 'Acme', original_description: 'Acme Ccb - Payment' }),
+    ];
+
+    expect(await retypeInvestmentsReadingAsCardBills()).toEqual([]);
+    expect(state.updates).toEqual([]);
   });
 
   it('never retypes a row the user typed by hand', async () => {

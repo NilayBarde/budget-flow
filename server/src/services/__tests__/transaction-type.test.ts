@@ -349,6 +349,12 @@ describe('detectTransactionType', () => {
       expect(detectTransactionType(540, ['Robinhood', 'Robinhood - Debits Withdrawal WITHDRAWAL'], { primary: 'TRANSFER_OUT' })).toBe('investment');
     });
 
+    it('does not match card payment inside a longer word', () => {
+      for (const text of ['Discard Payment Center', 'Scorecard Payment Plan']) {
+        expect(detectTransactionType(40, [text], { primary: 'GENERAL_SERVICES' })).toBe('expense');
+      }
+    });
+
     it('does not mistake words that merely contain ccb for a card bill', () => {
       expect(detectTransactionType(40, ['Accbury Cafe'], { primary: 'FOOD_AND_DRINK' })).toBe('expense');
     });

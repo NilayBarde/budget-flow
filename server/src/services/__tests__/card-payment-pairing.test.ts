@@ -104,11 +104,35 @@ describe('findCardPaymentCounterparts', () => {
       expect(findCardPaymentCounterparts([card, atm])).toEqual([]);
     });
 
-    it('accepts a bank row Plaid calls a transfer out or loan payment', () => {
-      for (const plaid_primary of ['TRANSFER_OUT', 'LOAN_PAYMENTS']) {
-        const bank = bankOutflow({ description: 'ACH 3321', plaid_primary });
-        expect(findCardPaymentCounterparts([cardInflow(), bank])).toEqual([bank.id]);
+    it('accepts a bank row Plaid calls a loan payment', () => {
+      const bank = bankOutflow({ description: 'ACH 3321', plaid_primary: 'LOAN_PAYMENTS' });
+      expect(findCardPaymentCounterparts([cardInflow(), bank])).toEqual([bank.id]);
+    });
+
+    it('does not accept a generic Plaid transfer out, which also covers ATM withdrawals and Venmo sends', () => {
+      const atm = bankOutflow({ description: 'ATM WITHDRAWAL', plaid_primary: 'TRANSFER_OUT' });
+      expect(findCardPaymentCounterparts([cardInflow(), atm])).toEqual([]);
+    });
+
+    it('does not let a refund worded like a payment ride on an unrelated bank transfer', () => {
+      for (const description of ['Payment Protection Credit', 'Payment Refund', 'Reward Payment', 'Statement Credit - Payment Adj']) {
+        const credit = cardInflow({ transaction_type: 'return', plaid_primary: 'OTHER', description, amount: -15.99 });
+        const zelle = bankOutflow({ transaction_type: 'transfer', amount: 15.99, description: 'Zelle to Sam' });
+        expect(findCardPaymentCounterparts([credit, zelle])).toEqual([]);
       }
+    });
+
+    it('still accepts credit card wording that contains the word credit', () => {
+      const card = cardInflow({ transaction_type: 'return', description: 'CREDIT CARD AUTOPAY Acme' });
+      const bank = bankOutflow();
+      expect(sorted(findCardPaymentCounterparts([card, bank]))).toEqual(sorted([bank.id, card.id]));
+    });
+
+    it('does not count words common to many payments as a shared name', () => {
+      // Both say AUTOMATIC PAYMENT, which proves nothing about the card.
+      const card = cardInflow({ transaction_type: 'return', description: 'AUTOMATIC PAYMENT THANK YOU', account_label: 'Some Credit Card' });
+      const insurance = bankOutflow({ description: 'GEICO AUTOMATIC PAYMENT' });
+      expect(findCardPaymentCounterparts([card, insurance])).toEqual([]);
     });
 
     it('accepts a bank row that is already a transfer, which only completes the card side', () => {

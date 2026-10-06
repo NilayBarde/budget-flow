@@ -31,7 +31,7 @@ export const TRANSFER_PATTERNS = [
   // "Card Payment", "Card-Payment" and "Card - Payment" (banks use all three), plus the
   // abbreviation CCB (credit card bill). Plaid shortens these to the issuer's name, so a card
   // bill from a brokerage like Robinhood otherwise looks like a contribution.
-  /card[\s\-–—]*(payment|pmt)/i,
+  /\bcard[\s\-–—]*(payment|pmt)/i,
   /\bccb\b/i,
   /payment.*thank\s*you/i,
   /autopay/i,
