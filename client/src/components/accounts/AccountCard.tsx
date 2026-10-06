@@ -6,6 +6,7 @@ import type { Account } from '../../types';
 import { formatDate } from '../../utils/formatters';
 import { isManualAccount } from '../../utils/account-types';
 import { ReconnectNotice } from './ReconnectNotice';
+import { SyncErrorNotice } from './SyncErrorNotice';
 import { useSyncAccount, useDeleteAccount, useRefreshAccounts, useCreatePlaidUpdateLinkToken, useToggleAccountInvestmentExclusion } from '../../hooks';
 
 
@@ -261,6 +262,11 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: Acc
         {/* The bank login expired: offer the reconnect flow right on the card */}
         {account.needs_reauth && !isManual && (
           <ReconnectNotice onReconnect={handleOpenUpdateLink} isLoading={createUpdateLinkToken.isPending} />
+        )}
+
+        {/* The last sync failed for another reason: show it. Reconnect covers the expired login. */}
+        {account.last_sync_error && !account.needs_reauth && !isManual && (
+          <SyncErrorNotice message={account.last_sync_error} failedAt={account.last_sync_error_at} />
         )}
 
         {/* Refresh accounts result message */}

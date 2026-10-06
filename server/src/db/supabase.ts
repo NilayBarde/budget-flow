@@ -26,6 +26,8 @@ export type Database = {
     needs_reauth: boolean;
     reauth_detected_at: string | null;
     last_synced_at: string | null;
+    last_sync_error: string | null;
+    last_sync_error_at: string | null;
   };
   transactions: {
     id: string;

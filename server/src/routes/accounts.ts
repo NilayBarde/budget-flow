@@ -8,6 +8,7 @@ import { getCategoryIdForType } from '../services/category-lookup.js';
 import { buildAccountResolver } from '../services/sync-attribution.js';
 import { applySyncResult } from '../services/sync-transactions.js';
 import { getPlaidErrorCode, needsReconnect, redactError } from '../services/plaid-errors.js';
+import { recordSyncFailure } from '../services/sync-error.js';
 import { classifySyncHealth, DEFAULT_STALE_DAYS, INVESTMENT_STALE_DAYS, parseStaleDaysOverride } from '../services/sync-health.js';
 import { isHoldingsAccountType } from '../services/account-types.js';
 import { toPublicAccount } from '../services/account-redaction.js';
@@ -67,19 +68,21 @@ router.get('/sync-health', async (req, res) => {
 
     const { data: accounts, error } = await supabase
       .from('accounts')
-      .select('id, institution_name, account_name, account_type, needs_reauth, reauth_detected_at, last_synced_at')
+      .select('id, institution_name, account_name, account_type, needs_reauth, reauth_detected_at, last_synced_at, last_sync_error, last_sync_error_at')
       .neq('plaid_access_token', 'manual');
 
     if (error) throw error;
 
     // Stale = never synced, or last successful sync older than the window for its account type.
-    const { needsReauth, stale } = classifySyncHealth(accounts || [], Date.now(), staleDaysOverride);
+    // Failing = the last sync errored for a reason other than needing a reconnect.
+    const { needsReauth, failing, stale } = classifySyncHealth(accounts || [], Date.now(), staleDaysOverride);
 
     res.json({
-      healthy: needsReauth.length === 0 && stale.length === 0,
+      healthy: needsReauth.length === 0 && failing.length === 0 && stale.length === 0,
       staleDays: staleDaysOverride ?? DEFAULT_STALE_DAYS,
       investmentStaleDays: staleDaysOverride ?? INVESTMENT_STALE_DAYS,
       needs_reauth: needsReauth,
+      failing,
       stale,
     });
   } catch (error) {
@@ -216,6 +219,7 @@ router.post('/:id/sync', async (req, res) => {
       );
     } catch (syncError) {
       console.error(`Transaction sync failed for account ${id}:`, redactError(syncError));
+      await recordSyncFailure(account.plaid_item_id, syncError);
       // If balance was updated, we can still return success for the balance part
       if (latestBalance !== account.current_balance) {
         await supabase.from('accounts').update({ current_balance: latestBalance }).eq('id', id);
@@ -272,14 +276,18 @@ router.post('/:id/sync', async (req, res) => {
     // redactError, not the raw error: an axios error carries the request headers, including the Plaid secret.
     console.error('Error syncing account:', redactError(error));
 
+    // Save the reason on the item so the app can show it. Errors from the transaction fetch were
+    // already saved above and are saved again here with the same text, which is harmless.
+    const { data: failedAccount } = await supabase
+      .from('accounts')
+      .select('plaid_item_id')
+      .eq('id', req.params.id)
+      .single();
+    await recordSyncFailure(failedAccount?.plaid_item_id, error);
+
     if (needsReconnect(plaidErrorCode)) {
       // Webhooks are the only other place that flags this, and they can be missed. Flag every
       // account on the item so the dashboard offers Reconnect instead of a vague stale warning.
-      const { data: failedAccount } = await supabase
-        .from('accounts')
-        .select('plaid_item_id')
-        .eq('id', req.params.id)
-        .single();
       if (failedAccount) {
         await supabase
           .from('accounts')

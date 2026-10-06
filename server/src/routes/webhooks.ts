@@ -4,6 +4,7 @@ import * as plaidService from '../services/plaid.js';
 import { buildAccountResolver } from '../services/sync-attribution.js';
 import { applySyncResult } from '../services/sync-transactions.js';
 import { redactError } from '../services/plaid-errors.js';
+import { recordSyncFailure } from '../services/sync-error.js';
 
 const router = Router();
 
@@ -29,16 +30,22 @@ interface ItemAccount {
 // row drives per card attribution of the transactions.
 const syncItem = async (itemAccounts: ItemAccount[], historicalComplete = false) => {
   const account = itemAccounts[0];
-  const syncResult = await plaidService.syncTransactions(account.plaid_access_token, account.plaid_cursor);
+  try {
+    const syncResult = await plaidService.syncTransactions(account.plaid_access_token, account.plaid_cursor);
 
-  const resolveAccountId = buildAccountResolver(itemAccounts, account.id);
-  return applySyncResult({
-    plaidItemId: account.plaid_item_id,
-    syncResult,
-    resolveAccountId,
-    accountTypeById: new Map(itemAccounts.map(a => [a.id, a.account_type])),
-    historicalComplete,
-  });
+    const resolveAccountId = buildAccountResolver(itemAccounts, account.id);
+    return await applySyncResult({
+      plaidItemId: account.plaid_item_id,
+      syncResult,
+      resolveAccountId,
+      accountTypeById: new Map(itemAccounts.map(a => [a.id, a.account_type])),
+      historicalComplete,
+    });
+  } catch (error) {
+    // The webhook always answers 200, so without this a failed sync leaves no trace in the app.
+    await recordSyncFailure(account.plaid_item_id, error);
+    throw error;
+  }
 };
 
 // Plaid webhook endpoint

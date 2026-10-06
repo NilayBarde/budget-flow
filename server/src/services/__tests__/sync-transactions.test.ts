@@ -412,6 +412,13 @@ describe('applySyncResult', () => {
       expect(Date.parse((write.payload as { last_synced_at: string }).last_synced_at)).not.toBeNaN();
     });
 
+    it('clears the last failure, since this sync proved the item works', async () => {
+      await apply(emptySync());
+
+      const [write] = stateWrites();
+      expect(write.payload).toMatchObject({ last_sync_error: null, last_sync_error_at: null });
+    });
+
     it('marks the history complete only when told, and never writes false', async () => {
       await apply(emptySync());
       expect(stateWrites()).toHaveLength(1);
