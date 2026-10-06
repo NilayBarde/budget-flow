@@ -136,6 +136,16 @@ describe('detectTransactionType', () => {
       ).toBe('investment');
     });
 
+    it('does not treat BANK_FEES as a transfer', () => {
+      expect(detectTransactionType(12, ['Monthly Service Fee'], { primary: 'BANK_FEES' })).toBe('expense');
+    });
+
+    it('still types an INVESTMENT detailed category as investment when the primary is INCOME', () => {
+      expect(
+        detectTransactionType(-40, ['Brokerage'], { primary: 'INCOME', detailed: 'INCOME_INVESTMENT_GAIN' }),
+      ).toBe('investment');
+    });
+
     it('treats pension income as income, not as a retirement investment', () => {
       // The detailed category contains RETIREMENT, but the primary says money is coming in as income.
       expect(

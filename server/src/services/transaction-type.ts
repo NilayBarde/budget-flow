@@ -57,7 +57,7 @@ export const TRANSFER_PATTERNS = [
 
 // Plaid personal_finance_category primaries that mean money moving between accounts
 // (TRANSFER_IN, TRANSFER_OUT, LOAN_PAYMENTS).
-const TRANSFER_PFC_PRIMARY = /^(TRANSFER|LOAN)/;
+const TRANSFER_PFC_PRIMARY_PATTERN = /^(TRANSFER|LOAN)/;
 
 // Plaid PFC primaries that unambiguously describe spending. When Plaid reports one of
 // these, bill-pay wording must not reclassify the row (e.g. "CONED BILL PAYMENT" is a
@@ -135,7 +135,7 @@ export const detectTransactionType = (
     return 'investment';
   }
 
-  if (pfcPrimary && TRANSFER_PFC_PRIMARY.test(pfcPrimary)) return 'transfer';
+  if (pfcPrimary && TRANSFER_PFC_PRIMARY_PATTERN.test(pfcPrimary)) return 'transfer';
 
   if (pfcPrimary === 'INCOME') {
     // A credit card never receives income. Money arriving on one is the bank paying the
