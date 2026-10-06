@@ -133,7 +133,7 @@ export const SubscriptionOverview = () => {
                         <button
                           onClick={() => handleDelete(charge.id, charge.merchant)}
                           disabled={deleteRecurring.isPending && deleteRecurring.variables === charge.id}
-                          className="p-2 text-slate-500 hover:text-red-400 active:bg-red-500/10 rounded-lg transition-colors flex-shrink-0 touch-target disabled:opacity-50"
+                          className="p-2 text-slate-500 hover:text-rose-400 active:bg-rose-500/10 rounded-lg transition-colors flex-shrink-0 touch-target disabled:opacity-50"
                           title="Delete this recurring charge"
                           aria-label="Delete recurring charge"
                         >

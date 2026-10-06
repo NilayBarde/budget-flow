@@ -87,7 +87,8 @@ const runDetection = (txns: WindowTxn[], today: string, deletedMerchants: Readon
 };
 
 // Reconcile the recurring_transactions table with what detection found.
-// user_hidden is never touched; manual rows keep their source.
+// Rows marked user_hidden (deleted by the user) are never upserted, revived or
+// otherwise touched here; manual rows keep their source.
 const refreshRecurringTable = async (today: string): Promise<RefreshResult> => {
   const txns = await fetchWindowTransactions();
 
@@ -278,6 +279,8 @@ router.get(
   }),
 );
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // Delete a recurring series. Its transactions stop being flagged recurring,
 // and the row is kept as a hidden, inactive marker so the next detection
 // refresh does not re-create the series (detection never touches
@@ -286,6 +289,12 @@ router.delete(
   '/:id',
   asyncHandler(async (req, res) => {
     const { id } = req.params;
+    // A malformed id can never match a row; answer 404 instead of letting
+    // Postgres reject the uuid cast with a 500.
+    if (!UUID_PATTERN.test(id)) {
+      res.status(404).json({ message: 'Recurring charge not found' });
+      return;
+    }
 
     const { data: series, error: findError } = await supabase
       .from('recurring_transactions')
