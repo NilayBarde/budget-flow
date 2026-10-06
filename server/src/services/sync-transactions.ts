@@ -13,6 +13,10 @@ import type { SyncResult } from './plaid.js';
 
 export type PlaidTransaction = SyncResult['added'][number];
 
+// PostgREST error codes this file reacts to.
+const NO_ROWS_ERROR = 'PGRST116'; // .single() found nothing, which is how "not stored yet" shows up
+const UNIQUE_VIOLATION = '23505'; // the row already exists (plaid_transaction_id is unique)
+
 interface NewRowContext {
   accountId: string;
   accountType?: string | null;
@@ -180,9 +184,11 @@ export const applySyncResult = async ({
 
   const counts: SyncCounts = { added: 0, modified: 0, removed: 0, reattributed: 0, reconciled: 0, skipped: 0 };
   let failures = 0;
-  const fail = (what: string, error: unknown) => {
+  // Names the transaction and logs only the error code and message, never the row, so a row that
+  // keeps failing can be found without writing financial data to the log.
+  const fail = (what: string, transactionId: string, error: unknown) => {
     failures++;
-    console.error(`Sync could not ${what}:`, redactError(error));
+    console.error(`Sync could not ${what} (${transactionId}):`, redactError(error));
   };
 
   for (const tx of syncResult.added) {
@@ -193,19 +199,37 @@ export const applySyncResult = async ({
       continue;
     }
 
-    const { data: existing } = await supabase
+    const { data: existing, error: lookupError } = await supabase
       .from('transactions')
       .select('id, account_id')
       .eq('plaid_transaction_id', tx.transaction_id)
       .single();
+
+    // .single() reports "no rows" as an error, which is the normal case for a new transaction.
+    // Any other error means we could not tell whether the row exists, so inserting could duplicate it.
+    if (lookupError && lookupError.code !== NO_ROWS_ERROR) {
+      fail('look up a stored transaction', tx.transaction_id, lookupError);
+      continue;
+    }
 
     if (existing) {
       // Already stored. If a prior sync filed it under the wrong card, move it, which keeps every
       // user edit (splits, category, notes, display name).
       if (existing.account_id !== accountId) {
         const { error } = await supabase.from('transactions').update({ account_id: accountId }).eq('id', existing.id);
-        if (error) fail('move a transaction to the right account', error);
+        if (error) fail('move a transaction to the right account', tx.transaction_id, error);
         else counts.reattributed++;
+      }
+
+      // An earlier attempt may have stored this row and then stopped before it replaced the pending
+      // authorization, which would leave the pending row counting twice. The reconciliation does
+      // nothing once the pending row is gone, so running it again is safe.
+      if (tx.pending_transaction_id) {
+        try {
+          if (await reconcilePendingTransaction(existing.id, tx.amount, tx.pending_transaction_id)) counts.reconciled++;
+        } catch (error) {
+          fail('replace a pending transaction', tx.transaction_id, error);
+        }
       }
       continue;
     }
@@ -220,15 +244,23 @@ export const applySyncResult = async ({
       }),
     };
     const { error } = await supabase.from('transactions').insert(row);
+    // A duplicate key means another sync (a webhook racing a manual sync) stored this transaction
+    // between our check and our insert. It is stored, which is all that matters, and that sync owns
+    // the reconciliation, so this is neither a failure nor an addition of ours.
+    if (error?.code === UNIQUE_VIOLATION) continue;
     if (error) {
-      fail('save a new transaction', error);
+      fail('save a new transaction', tx.transaction_id, error);
       continue;
     }
     counts.added++;
 
     // A posted transaction can supersede a pending authorization: carry the pending row's edits
     // and splits over and drop it, so a tip adjustment is not counted twice.
-    if (await reconcilePendingTransaction(row.id, tx.amount, tx.pending_transaction_id)) counts.reconciled++;
+    try {
+      if (await reconcilePendingTransaction(row.id, tx.amount, tx.pending_transaction_id)) counts.reconciled++;
+    } catch (reconcileError) {
+      fail('replace a pending transaction', tx.transaction_id, reconcileError);
+    }
   }
 
   // Look up the hand typed flags once, not per transaction.
@@ -241,11 +273,18 @@ export const applySyncResult = async ({
       continue;
     }
 
-    const { data: existing } = await supabase
+    const { data: existing, error: lookupError } = await supabase
       .from('transactions')
       .select('merchant_name, merchant_display_name')
       .eq('plaid_transaction_id', tx.transaction_id)
       .single();
+
+    // Without the stored row we cannot tell whether the user customized its display name, and
+    // refreshing it blind would overwrite their edit. "No rows" is fine: nothing to preserve.
+    if (lookupError && lookupError.code !== NO_ROWS_ERROR) {
+      fail('look up a stored transaction', tx.transaction_id, lookupError);
+      continue;
+    }
 
     const update = buildTransactionUpdate(tx, {
       accountId,
@@ -255,13 +294,13 @@ export const applySyncResult = async ({
       existing,
     });
     const { error } = await supabase.from('transactions').update(update).eq('plaid_transaction_id', tx.transaction_id);
-    if (error) fail('update a modified transaction', error);
+    if (error) fail('update a modified transaction', tx.transaction_id, error);
     else counts.modified++;
   }
 
   for (const tx of syncResult.removed) {
     const { error } = await supabase.from('transactions').delete().eq('plaid_transaction_id', tx.transaction_id);
-    if (error) fail('remove a deleted transaction', error);
+    if (error) fail('remove a deleted transaction', tx.transaction_id, error);
     else counts.removed++;
   }
 

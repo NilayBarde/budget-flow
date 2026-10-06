@@ -238,6 +238,13 @@ router.post('/:id/sync', async (req, res) => {
       .select('id, plaid_account_id, account_type')
       .eq('plaid_item_id', account.plaid_item_id);
 
+    // Balance is per account, unlike the cursor, so it is saved here. It goes first: it is already
+    // fetched and correct, and saving the transactions can throw, which must not throw it away.
+    await supabase
+      .from('accounts')
+      .update({ current_balance: latestBalance })
+      .eq('id', id);
+
     const historicalComplete = syncResult.transactionsUpdateStatus === 'HISTORICAL_UPDATE_COMPLETE';
     const counts = await applySyncResult({
       plaidItemId: account.plaid_item_id,
@@ -246,12 +253,6 @@ router.post('/:id/sync', async (req, res) => {
       accountTypeById: new Map((itemAccounts || []).map(a => [a.id, a.account_type])),
       historicalComplete,
     });
-
-    // Balance is per account, unlike the cursor, so it stays here.
-    await supabase
-      .from('accounts')
-      .update({ current_balance: latestBalance })
-      .eq('id', id);
 
     console.log(`Sync complete: +${counts.added} added, ~${counts.modified} modified, -${counts.removed} removed, ⇄${counts.reattributed} re-attributed, ⤳${counts.reconciled} pending-reconciled`);
     console.log(`Historical sync status: ${syncResult.transactionsUpdateStatus || 'unknown'}`);

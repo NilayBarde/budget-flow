@@ -57,9 +57,15 @@ export async function reconcilePendingTransaction(
     await supabase.from('transactions').update(updates).eq('id', postedLocalId);
   }
 
-  // 2) Recreate splits (scaled to the posted total) on the posted row.
+  // 2) Recreate splits (scaled to the posted total) on the posted row. A sync that was interrupted
+  // after this step but before the pending row was deleted is retried, so skip the copy when the
+  // posted row already has splits; otherwise the retry would double them.
   const splits = p.splits || [];
-  if (p.is_split && splits.length) {
+  const { count: existingSplitCount } = await supabase
+    .from('transaction_splits')
+    .select('id', { count: 'exact', head: true })
+    .eq('parent_transaction_id', postedLocalId);
+  if (p.is_split && splits.length && !existingSplitCount) {
     const scaled = scaleSplits(splits, postedAmount);
     await supabase.from('transactions').update({ is_split: true }).eq('id', postedLocalId);
     await supabase.from('transaction_splits').insert(

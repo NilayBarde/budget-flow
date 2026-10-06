@@ -15,16 +15,28 @@ const db = {
   categories: [{ id: 'cat-dining', name: 'Dining' }, { id: 'cat-income', name: 'Income' }, { id: 'cat-invest', name: 'Investment' }],
   existingByPlaidId: new Map<string, { id: string; account_id: string; merchant_name?: string; merchant_display_name?: string }>(),
   failInsertFor: new Set<string>(),
+  /** Inserts that hit the unique constraint, because another sync stored the row first. */
+  duplicateInsertFor: new Set<string>(),
+  failUpdateFor: new Set<string>(),
+  failDeleteFor: new Set<string>(),
+  /** Make every row lookup fail like a dropped connection, instead of "no rows". */
+  lookupFails: false,
 };
 
 const makeBuilder = (table: string) => {
   const entry: Op = { table, op: 'select', filters: [] };
+  const plaidIdOfEntry = () =>
+    (entry.payload as { plaid_transaction_id?: string } | undefined)?.plaid_transaction_id ??
+    (entry.filters.find(([column]) => column === 'plaid_transaction_id')?.[1] as string | undefined);
   const result = () => {
     if (entry.op === 'select' && table === 'categories') return { data: db.categories, error: null };
+    const plaidId = plaidIdOfEntry() ?? '';
     if (entry.op === 'insert') {
-      const plaidId = (entry.payload as { plaid_transaction_id: string }).plaid_transaction_id;
-      return { data: null, error: db.failInsertFor.has(plaidId) ? { message: 'insert failed' } : null };
+      if (db.duplicateInsertFor.has(plaidId)) return { data: null, error: { code: '23505', message: 'duplicate key value' } };
+      return { data: null, error: db.failInsertFor.has(plaidId) ? { code: 'P0001', message: 'insert failed' } : null };
     }
+    if (entry.op === 'update' && db.failUpdateFor.has(plaidId)) return { data: null, error: { code: 'P0001', message: 'update failed' } };
+    if (entry.op === 'delete' && db.failDeleteFor.has(plaidId)) return { data: null, error: { code: 'P0001', message: 'delete failed' } };
     return { data: null, error: null };
   };
   const builder: Record<string, unknown> = {
@@ -52,8 +64,11 @@ const makeBuilder = (table: string) => {
     },
     single: async () => {
       db.ops.push(entry);
+      if (db.lookupFails) return { data: null, error: { code: '08006', message: 'connection failure' } };
       const plaidId = entry.filters.find(([column]) => column === 'plaid_transaction_id')?.[1] as string;
-      return { data: db.existingByPlaidId.get(plaidId) ?? null, error: null };
+      const found = db.existingByPlaidId.get(plaidId);
+      // PostgREST reports "no rows" from .single() as an error with this code.
+      return found ? { data: found, error: null } : { data: null, error: { code: 'PGRST116', message: 'no rows' } };
     },
     then: (resolve: (value: unknown) => unknown) => {
       if (entry.op === 'select' && !db.ops.includes(entry)) db.ops.push(entry);
@@ -304,6 +319,10 @@ describe('applySyncResult', () => {
     db.ops = [];
     db.existingByPlaidId = new Map();
     db.failInsertFor = new Set();
+    db.duplicateInsertFor = new Set();
+    db.failUpdateFor = new Set();
+    db.failDeleteFor = new Set();
+    db.lookupFails = false;
     rules.list = [];
     rules.lockedIds = new Set();
     reconcilePending.mockReset().mockResolvedValue(false);
@@ -418,10 +437,20 @@ describe('applySyncResult', () => {
     });
   });
 
+  it('passes no look back by default, so the pairing uses its own short window', async () => {
+    await apply(emptySync());
+
+    expect(reconcileCardPayments).toHaveBeenCalledWith({});
+  });
+
   describe('when a save fails', () => {
+    let error: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+      error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    });
+
     it('finishes the rest of the batch, then throws without advancing the cursor', async () => {
       db.failInsertFor = new Set(['bad']);
-      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
 
       await expect(
         apply(emptySync({ added: [tx({ transaction_id: 'bad' }), tx({ transaction_id: 'good' })] })),
@@ -431,7 +460,109 @@ describe('applySyncResult', () => {
       expect(opsOf('transactions', 'insert')).toHaveLength(2);
       expect(opsOf('accounts', 'update')).toHaveLength(0);
       expect(reconcileCardPayments).not.toHaveBeenCalled();
-      error.mockRestore();
+    });
+
+    it('does not reconcile a pending row for a transaction that failed to save', async () => {
+      db.failInsertFor = new Set(['bad']);
+
+      await expect(apply(emptySync({ added: [tx({ transaction_id: 'bad', pending_transaction_id: 'p1' })] }))).rejects.toThrow();
+
+      expect(reconcilePending).not.toHaveBeenCalled();
+    });
+
+    it('logs which transaction failed and the error code, so a stuck row can be found', async () => {
+      db.failInsertFor = new Set(['bad']);
+
+      await expect(apply(emptySync({ added: [tx({ transaction_id: 'bad' })] }))).rejects.toThrow();
+
+      const logged = JSON.stringify(error.mock.calls);
+      expect(logged).toContain('bad');
+      expect(logged).toContain('insert failed');
+    });
+
+    it('does not advance the cursor when a modified row or a removed row fails either', async () => {
+      db.failUpdateFor = new Set(['m1']);
+      await expect(apply(emptySync({ modified: [tx({ transaction_id: 'm1' })] }))).rejects.toThrow(/1 transaction/);
+      expect(opsOf('accounts', 'update')).toHaveLength(0);
+
+      db.ops = [];
+      db.failDeleteFor = new Set(['r1']);
+      await expect(apply(emptySync({ removed: [{ transaction_id: 'r1' }] }))).rejects.toThrow(/1 transaction/);
+      expect(opsOf('accounts', 'update')).toHaveLength(0);
+    });
+
+    it('counts only the rows that really saved', async () => {
+      db.failDeleteFor = new Set(['r1']);
+
+      await expect(apply(emptySync({ removed: [{ transaction_id: 'r1' }, { transaction_id: 'r2' }] }))).rejects.toThrow();
+
+      // Both deletes were attempted; the second one went through.
+      expect(opsOf('transactions', 'delete')).toHaveLength(2);
+    });
+  });
+
+  describe('when two syncs race on the same transaction', () => {
+    it('treats a duplicate key error as already stored, not a failure', async () => {
+      // Another sync (a webhook, or a manual one) inserted this row between our check and our insert.
+      db.duplicateInsertFor = new Set(['raced']);
+
+      const counts = await apply(emptySync({ added: [tx({ transaction_id: 'raced', pending_transaction_id: 'p1' }), tx({ transaction_id: 'other' })] }));
+
+      expect(counts.added).toBe(1);
+      // The sync still succeeds and records its cursor.
+      expect(opsOf('accounts', 'update')).toHaveLength(1);
+      // The other sync owns that row, so this one does not reconcile its pending predecessor.
+      expect(reconcilePending).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('when a lookup of a stored row fails', () => {
+    beforeEach(() => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+    });
+
+    it('does not treat a database error as "not stored" and insert, since the row may exist', async () => {
+      db.lookupFails = true;
+
+      await expect(apply(emptySync({ added: [tx({ transaction_id: 'a' })] }))).rejects.toThrow(/1 transaction/);
+
+      expect(opsOf('transactions', 'insert')).toHaveLength(0);
+      expect(opsOf('accounts', 'update')).toHaveLength(0);
+    });
+
+    it('does not overwrite a customized display name when the stored row could not be read', async () => {
+      db.lookupFails = true;
+
+      await expect(apply(emptySync({ modified: [tx({ transaction_id: 'm1' })] }))).rejects.toThrow(/1 transaction/);
+
+      expect(opsOf('transactions', 'update')).toHaveLength(0);
+    });
+
+    it('still inserts when the lookup simply finds no rows', async () => {
+      // The fake reports PGRST116, the error PostgREST uses for "no rows".
+      await apply(emptySync({ added: [tx({ transaction_id: 'new' })] }));
+
+      expect(opsOf('transactions', 'insert')).toHaveLength(1);
+    });
+  });
+
+  describe('when a retry meets a row that is already stored', () => {
+    it('still reconciles its pending predecessor, which an interrupted earlier attempt may have left behind', async () => {
+      db.existingByPlaidId.set('posted', { id: 'row-9', account_id: 'acct-1' });
+
+      const counts = await apply(emptySync({ added: [tx({ transaction_id: 'posted', pending_transaction_id: 'p9' })] }));
+
+      expect(opsOf('transactions', 'insert')).toHaveLength(0);
+      expect(reconcilePending).toHaveBeenCalledWith('row-9', 12.5, 'p9');
+      expect(counts.added).toBe(0);
+    });
+
+    it('does not look for a pending predecessor when the stored row has none', async () => {
+      db.existingByPlaidId.set('posted', { id: 'row-9', account_id: 'acct-1' });
+
+      await apply(emptySync({ added: [tx({ transaction_id: 'posted' })] }));
+
+      expect(reconcilePending).not.toHaveBeenCalled();
     });
   });
 });

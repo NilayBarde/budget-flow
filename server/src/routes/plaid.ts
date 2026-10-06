@@ -254,6 +254,10 @@ router.post('/exchange-token', async (req, res) => {
       });
 
       console.log(`Auto-synced ${counts.added} transactions across ${createdAccounts.length} accounts`);
+      if (counts.skipped > 0) {
+        // These belong to an account that failed to link, and the cursor has moved past them.
+        console.warn(`Skipped ${counts.skipped} transaction(s) for accounts that could not be linked`);
+      }
     } catch (syncError) {
       console.error('Auto-sync failed (accounts created, but transactions need manual sync):', redactError(syncError));
     }

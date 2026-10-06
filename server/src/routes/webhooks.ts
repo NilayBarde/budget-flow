@@ -97,7 +97,15 @@ router.post('/plaid', async (req, res) => {
           // Record sync timestamp
           lastWebhookSyncByItem.set(item_id, Date.now());
 
-          const counts = await syncItem(itemAccounts, Boolean(historical_update_complete));
+          let counts;
+          try {
+            counts = await syncItem(itemAccounts, Boolean(historical_update_complete));
+          } catch (syncError) {
+            // The sync did not complete and the cursor stayed put. Without this the cooldown would
+            // block the next webhook for 5 minutes, which is exactly the retry that fixes it.
+            lastWebhookSyncByItem.delete(item_id);
+            throw syncError;
+          }
           console.log(`Processed: +${counts.added} added, ~${counts.modified} modified, -${counts.removed} removed, ⇄${counts.reattributed} re-attributed, ⤳${counts.reconciled} pending-reconciled`);
           console.log(`Cursor updated for item ${item_id} (${itemAccounts.length} account(s))`);
         }
