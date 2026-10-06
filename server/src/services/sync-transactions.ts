@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { supabase } from '../db/supabase.js';
-import { categorizeWithPlaid, cleanMerchantName, type PlaidPFC } from './categorizer.js';
+import { categorizeWithPlaid, cleanMerchantName, resolveCategoryId, type PlaidPFC } from './categorizer.js';
 import { detectTransactionType, type TransactionType } from './transaction-type.js';
 import { loadManuallyTypedIds, loadMerchantMappings, resolveTransactionType, type MerchantMapping } from './merchant-mappings.js';
 import { reconcilePendingTransaction } from './pending-reconciliation.js';
@@ -43,7 +43,7 @@ export const buildNewTransactionRow = (tx: PlaidTransaction, { accountId, accoun
       categoryId = mapping.default_category_id;
     } else {
       const result = categorizeWithPlaid(tx.merchant_name || tx.name, tx.original_description || tx.name, plaidPFC);
-      categoryId = (result.categoryName && categoryMap.get(result.categoryName)) || null;
+      categoryId = resolveCategoryId(result.categoryName, categoryMap);
       needsReview = result.needsReview;
     }
   } else if (transactionType === 'income') {
