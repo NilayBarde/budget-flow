@@ -89,6 +89,7 @@ interface UpdateContext {
     merchant_name: string;
     merchant_display_name: string | null;
     transaction_type?: string | null;
+    original_description?: string | null;
     category_id?: string | null;
     plaid_category?: PlaidPFC | null;
   } | null;
@@ -131,15 +132,23 @@ export const buildTransactionUpdate = (tx: PlaidTransaction, { accountId, accoun
 
     const effectiveType = (update.transaction_type as string | undefined) ?? existing?.transaction_type;
     const isSpending = effectiveType === 'expense' || effectiveType === 'return';
-    if (existing && existing.category_id !== undefined && isSpending && !mapping?.default_category_id) {
+    const hasStoredCategoryData = existing && existing.category_id !== undefined && existing.plaid_category !== undefined;
+    if (hasStoredCategoryData && isSpending && !mapping?.default_category_id) {
       // The category is untouched when it is still what Plaid's previous data gave. That is the only record
-      // of whether the user changed it, so it errs toward leaving the category alone: a row stored under an
-      // older version of the category map no longer matches and keeps what it has.
-      const before = categorizeForSpending(existing.merchant_name, null, existing.plaid_category, categoryMap);
+      // of whether the user changed it, and it has two blind spots, both on purpose:
+      //   - a user pick that happens to equal what Plaid's old data gave looks untouched, so a later Plaid
+      //     change overwrites it (a merchant rule, which does protect it, is checked above);
+      //   - a row whose category came from anywhere else (an older version of the map, the backfill, a
+      //     pending row carried over, an income row that is now spending) does not match and is left alone.
+      // So it leans toward leaving the category as it is.
+      const before = categorizeForSpending(existing.merchant_name, existing.original_description, existing.plaid_category, categoryMap);
       if (existing.category_id === before.categoryId) {
         const after = categorizeForSpending(merchantName, tx.original_description || tx.name, plaidPFC, categoryMap);
-        update.category_id = after.categoryId;
-        update.needs_review = after.needsReview;
+        // A blank row the user already dismissed, that Plaid still cannot place, stays dismissed.
+        if (after.categoryId !== null || existing.category_id !== null) {
+          update.category_id = after.categoryId;
+          update.needs_review = after.needsReview;
+        }
       }
     }
   }
@@ -310,7 +319,7 @@ export const applySyncResult = async ({
 
     const { data: existing, error: lookupError } = await supabase
       .from('transactions')
-      .select('merchant_name, merchant_display_name, transaction_type, category_id, plaid_category')
+      .select('merchant_name, merchant_display_name, transaction_type, original_description, category_id, plaid_category')
       .eq('plaid_transaction_id', tx.transaction_id)
       .single();
 
@@ -324,7 +333,9 @@ export const applySyncResult = async ({
     const update = buildTransactionUpdate(tx, {
       accountId,
       accountType: accountTypeById.get(accountId),
-      mapping: mappings.find(tx.merchant_name, tx.name),
+      // A rule is learned under the name stored when the user made it, so look for that too: Plaid can
+      // rename a merchant in the same change that modifies the transaction.
+      mapping: mappings.find(tx.merchant_name, tx.name, existing?.merchant_name),
       typeLocked: manuallyTypedIds.has(tx.transaction_id),
       categoryMap,
       existing,

@@ -12,8 +12,13 @@ interface Op {
 }
 const db = {
   ops: [] as Op[],
-  categories: [{ id: 'cat-dining', name: 'Dining' }, { id: 'cat-income', name: 'Income' }, { id: 'cat-invest', name: 'Investment' }],
-  existingByPlaidId: new Map<string, { id: string; account_id: string; merchant_name?: string; merchant_display_name?: string }>(),
+  categories: [
+    { id: 'cat-dining', name: 'Dining' },
+    { id: 'cat-groceries', name: 'Groceries' },
+    { id: 'cat-income', name: 'Income' },
+    { id: 'cat-invest', name: 'Investment' },
+  ],
+  existingByPlaidId: new Map<string, { id: string; account_id: string; merchant_name?: string; merchant_display_name?: string } & Record<string, unknown>>(),
   failInsertFor: new Set<string>(),
   /** Inserts that hit the unique constraint, because another sync stored the row first. */
   duplicateInsertFor: new Set<string>(),
@@ -416,6 +421,58 @@ describe('refreshing the category of a modified transaction', () => {
     expect(result.needs_review).toBe(true);
   });
 
+  it('compares with what Plaid\'s OLD data gave, not its new data', () => {
+    // Stored Groceries, old data said restaurant (so Dining was the automatic choice), new data says groceries.
+    // The stored value was not the automatic one, so someone chose it and it stays, even though it equals the new one.
+    const result = refresh(modify(), stored({ category_id: 'cat-groceries' }));
+
+    expect(result).not.toHaveProperty('category_id');
+  });
+
+  it('still refreshes the category of a row whose type the user fixed, and of a return', () => {
+    const lockedExpense = refresh(modify(), stored({ transaction_type: 'expense' }), { typeLocked: true });
+    const lockedReturn = refresh(modify({ amount: -20 }), stored({ transaction_type: 'return' }), { typeLocked: true });
+
+    expect(lockedExpense.category_id).toBe('cat-groceries');
+    expect(lockedExpense).not.toHaveProperty('transaction_type');
+    expect(lockedReturn.category_id).toBe('cat-groceries');
+  });
+
+  it('leaves a type locked row alone when its stored type is not known to be spending', () => {
+    expect(refresh(modify(), stored(), { typeLocked: true })).not.toHaveProperty('category_id');
+    expect(refresh(modify(), stored({ transaction_type: 'transfer' }), { typeLocked: true })).not.toHaveProperty('category_id');
+  });
+
+  it('treats a rule with no category like no rule at all', () => {
+    expect(refresh(modify(), stored(), { mapping: mapping({ default_category_id: null }) }).category_id).toBe('cat-groceries');
+  });
+
+  it('does not put a row the user dismissed without a category back in the review queue', () => {
+    // The user cleared the review flag on a blank row, and Plaid still has nothing to say about it.
+    const other = { primary: 'OTHER', detailed: 'OTHER_OTHER' };
+    const result = refresh(modify({ personal_finance_category: other }), stored({ category_id: null, needs_review: false, plaid_category: other }));
+
+    expect(result).not.toHaveProperty('category_id');
+    expect(result).not.toHaveProperty('needs_review');
+  });
+
+  it('recognizes an untouched row filed by the betting site rule, which depends on the original description', () => {
+    const map = new Map([...richMap, ['Entertainment', 'cat-entertainment']]);
+    // The merchant name alone (a payment processor) says nothing; only the description names the site.
+    const existing = stored({
+      merchant_name: 'Nuvei',
+      original_description: 'Fliff Credit via Nuv',
+      category_id: 'cat-entertainment',
+      plaid_category: { primary: 'INCOME', detailed: 'INCOME_CONTRACTOR' },
+    });
+
+    const result = refresh(modify({ merchant_name: 'Nuvei', name: 'Nuvei', original_description: 'Fliff Credit via Nuv' }), existing, { categoryMap: map });
+
+    // Compared without the description, the old data would read as Income, not match, and the row would freeze.
+    expect(result.category_id).toBe('cat-entertainment');
+    expect(result.needs_review).toBe(false);
+  });
+
   it('does nothing about the category when the stored row has no category fields to compare', () => {
     const result = refresh(modify(), { merchant_name: 'Whole Foods', merchant_display_name: 'Whole Foods' });
 
@@ -528,6 +585,51 @@ describe('applySyncResult', () => {
 
     expect(opsOf('transactions', 'delete').map(o => filterValue(o, 'plaid_transaction_id'))).toEqual(['gone-1', 'gone-2']);
     expect(counts.removed).toBe(2);
+  });
+
+  describe('refreshing the category of a modified transaction', () => {
+    const restaurant = { primary: 'FOOD_AND_DRINK', detailed: 'FOOD_AND_DRINK_RESTAURANT' };
+    const groceries = { primary: 'FOOD_AND_DRINK', detailed: 'FOOD_AND_DRINK_GROCERIES' };
+    const storedRow = (overrides: Record<string, unknown> = {}) => ({
+      id: 'row-1',
+      account_id: 'acct-1',
+      merchant_name: 'Whole Foods',
+      merchant_display_name: 'Whole Foods',
+      transaction_type: 'expense',
+      category_id: 'cat-dining',
+      plaid_category: restaurant,
+      ...overrides,
+    });
+    const modified = (overrides: Partial<PlaidTx> = {}) =>
+      tx({ transaction_id: 'm1', merchant_name: 'Whole Foods', name: 'WHOLE FOODS', personal_finance_category: groceries, ...overrides });
+    const saved = () => opsOf('transactions', 'update').find(o => filterValue(o, 'plaid_transaction_id') === 'm1')!.payload as Record<string, unknown>;
+
+    it('saves Plaid\'s improved category on an untouched row, going through the real sync', async () => {
+      db.existingByPlaidId.set('m1', storedRow());
+
+      await apply(emptySync({ modified: [modified()] }));
+
+      expect(saved()).toMatchObject({ category_id: 'cat-groceries', needs_review: false, plaid_category: groceries });
+    });
+
+    it('leaves a category the user chose, while keeping the newer Plaid data', async () => {
+      db.existingByPlaidId.set('m1', storedRow({ category_id: 'cat-income' }));
+
+      await apply(emptySync({ modified: [modified()] }));
+
+      expect(saved()).not.toHaveProperty('category_id');
+      expect(saved().plaid_category).toEqual(groceries);
+    });
+
+    it('finds the user\'s rule by the name stored, even when Plaid renames the merchant in the same change', async () => {
+      // The rule was learned under the stored name; Plaid now calls the merchant something else.
+      rules.list = [{ id: 'm9', original_name: 'Whole Foods', display_name: 'Whole Foods', default_category_id: 'cat-dining', default_transaction_type: null }];
+      db.existingByPlaidId.set('m1', storedRow());
+
+      await apply(emptySync({ modified: [modified({ merchant_name: 'Whole Foods Market', name: 'WHOLE FOODS MARKET' })] }));
+
+      expect(saved()).not.toHaveProperty('category_id');
+    });
   });
 
   describe('recording a successful sync', () => {
