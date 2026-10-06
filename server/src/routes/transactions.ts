@@ -6,6 +6,7 @@ import { getCategoryIdForType } from '../services/category-lookup.js';
 import { getMyShareAmount, type SplitShare } from '../services/category-spend.js';
 import { filterByTag } from '../services/transaction-filters.js';
 import type { TransactionType } from '../services/transaction-type.js';
+import { recurringUnmarkUpdate } from '../services/recurring-unmark.js';
 
 const router = Router();
 
@@ -492,12 +493,17 @@ router.patch('/:id', async (req, res) => {
           .neq('id', id); // exclude the current one being unmarked
 
         if (!count || count === 0) {
-          // No more recurring transactions for this merchant: deactivate and
-          // mark it deleted (same marker as the subscriptions tab) so the next
-          // detection refresh does not bring the series back.
+          // No more recurring transactions for this merchant. Detected series
+          // are only deactivated (so detection can still find the real
+          // series); manual ones are also hidden so they are not resurrected.
+          const { data: row } = await supabase
+            .from('recurring_transactions')
+            .select('source')
+            .eq('merchant_display_name', merchantName)
+            .maybeSingle();
           await supabase
             .from('recurring_transactions')
-            .update({ is_active: false, user_hidden: true })
+            .update(recurringUnmarkUpdate(row?.source))
             .eq('merchant_display_name', merchantName);
         }
       }
