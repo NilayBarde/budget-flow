@@ -40,10 +40,10 @@ export const Insights = () => {
   }, [yearlyStats]);
 
   // Max spend values for relative bar widths
+  const topMerchants = useMemo(() => yearlyStats?.top_merchants ?? [], [yearlyStats]);
   const maxMerchantSpend = useMemo(() => {
-    const merchants = insights?.topMerchants || [];
-    return merchants.length > 0 ? merchants[0].totalSpent : 1;
-  }, [insights?.topMerchants]);
+    return topMerchants.length > 0 ? topMerchants[0].totalSpent : 1;
+  }, [topMerchants]);
 
   // Use yearlyStats for categories to ensure it matches the selected year
   const yearlyCategories = useMemo(() => {
@@ -90,8 +90,6 @@ export const Insights = () => {
       />
     );
   }
-
-  const { topMerchants } = insights;
 
   return (
     <div className="space-y-4 md:space-y-6 animate-in fade-in duration-500">
@@ -236,7 +234,7 @@ export const Insights = () => {
 
         {/* Top Merchants */}
         <Card padding="sm">
-          <CardHeader title="Top Merchants" subtitle="Based on last 6 months" />
+          <CardHeader title="Top Merchants" subtitle={`Spending in ${year}`} />
           {topMerchants.length > 0 ? (
             <div className="space-y-3">
               {topMerchants.map((merchant, index) => {
