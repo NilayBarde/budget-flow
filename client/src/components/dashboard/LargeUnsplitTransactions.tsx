@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Scissors } from 'lucide-react';
-import { Card, Button } from '../ui';
+import { Card, Button, Spinner } from '../ui';
 import { useTransactions, useUpdateTransaction, useModalState } from '../../hooks';
 import { SplitTransactionModal } from '../transactions/SplitTransactionModal';
 import { formatCurrency, formatDate } from '../../utils/formatters';
@@ -16,7 +16,7 @@ interface LargeUnsplitTransactionsProps {
 const MAX_ROWS = 5;
 
 export const LargeUnsplitTransactions = ({ month, year }: LargeUnsplitTransactionsProps) => {
-    const { data: transactions } = useTransactions({ month, year, transaction_type: 'expense' });
+    const { data: transactions, isLoading, isError } = useTransactions({ month, year, transaction_type: 'expense' });
     const splitModal = useModalState<Transaction>();
     const updateTransaction = useUpdateTransaction();
     const [saveFailed, setSaveFailed] = useState(false);
@@ -27,8 +27,6 @@ export const LargeUnsplitTransactions = ({ month, year }: LargeUnsplitTransactio
     };
 
     const candidates = findMissedSplitCandidates(transactions || [], LARGE_UNSPLIT_THRESHOLD);
-
-    if (candidates.length === 0) return null;
 
     const shown = candidates.slice(0, MAX_ROWS);
     const hiddenCount = candidates.length - shown.length;
@@ -44,6 +42,19 @@ export const LargeUnsplitTransactions = ({ month, year }: LargeUnsplitTransactio
                     <p className="text-xs text-slate-400">
                         Large expenses ({formatCurrency(LARGE_UNSPLIT_THRESHOLD)}+) that haven't been split.
                     </p>
+                    {/* The card stays put so it does not appear and vanish as the month changes. Nothing is
+                        claimed while loading or after a failed load: "no possible splits" must mean none. */}
+                    {isLoading && (
+                        <div className="flex justify-center py-2">
+                            <Spinner />
+                        </div>
+                    )}
+                    {!isLoading && isError && (
+                        <p className="text-sm text-rose-400">Could not load this month's transactions.</p>
+                    )}
+                    {!isLoading && !isError && candidates.length === 0 && (
+                        <p className="text-sm text-slate-400">No possible splits</p>
+                    )}
                     {shown.map(t => (
                         <div key={t.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-sm">
                             <div className="min-w-0 flex-1 basis-32">
