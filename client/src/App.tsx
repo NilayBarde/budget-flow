@@ -6,6 +6,7 @@ import { TabbedSection } from './components/layout/TabbedSection';
 import { legacyRedirectRoutes } from './routes/legacyRedirects';
 import { NET_WORTH_TABS, INSIGHTS_TABS, SETTINGS_TABS } from './utils/navigation';
 import { Spinner } from './components/ui';
+import { MonthProvider } from './hooks';
 
 // Eagerly prefetch the Dashboard chunk since it's the landing page — avoids a
 // network waterfall (main bundle → React render → lazy import → Dashboard fetch).
@@ -64,9 +65,11 @@ export const AppRoutes = () => (
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <AppRoutes />
-      </BrowserRouter>
+      <MonthProvider>
+        <BrowserRouter>
+          <AppRoutes />
+        </BrowserRouter>
+      </MonthProvider>
     </QueryClientProvider>
   );
 }

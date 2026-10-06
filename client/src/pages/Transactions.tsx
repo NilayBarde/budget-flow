@@ -3,9 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import { CheckSquare, X, Copy } from 'lucide-react';
 import { TransactionList, TransactionFilters, EditTransactionModal, SplitTransactionModal, BulkSplitModal, BulkActionBar, DuplicateReviewModal } from '../components/transactions';
 import { Button, ErrorState } from '../components/ui';
-import { useTransactions, useAccounts, useCategories, useTags, useBulkAddTagToTransactions, useDeleteTransaction, useBulkDeleteTransactions, useExpectedIncome, useDebouncedValue, usePrefetchAdjacentMonths } from '../hooks';
+import { useTransactions, useAccounts, useCategories, useTags, useBulkAddTagToTransactions, useDeleteTransaction, useBulkDeleteTransactions, useExpectedIncome, useDebouncedValue, usePrefetchAdjacentMonths, useMonthNavigation } from '../hooks';
 import type { Transaction, TransactionFilters as Filters, TransactionType } from '../types';
-import { getMonthYear } from '../utils/formatters';
 import { computeTransactionTotals, filterByType } from '../utils/transactionTotals';
 import { sortTransactions, filterByAmountRange, type TransactionSortOption } from '../utils/transactionSort';
 
@@ -21,10 +20,12 @@ const TYPE_TABS: { id: TypeFilter; label: string }[] = [
 ];
 
 export const Transactions = () => {
-  const { month, year } = getMonthYear();
+  const { currentDate, setCurrentDate } = useMonthNavigation();
+  const { month, year } = currentDate;
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // Build initial filters from URL search params (e.g. ?date=2026-02-07)
+  // Build initial filters from URL search params (e.g. ?date=2026-02-07),
+  // falling back to the month selected on the other pages.
   const [filters, setFilters] = useState<Filters>(() => {
     const dateParam = searchParams.get('date');
     if (dateParam) {
@@ -41,6 +42,13 @@ export const Transactions = () => {
 
     return { month, year };
   });
+  // Keep the shared month in step with this page (month arrows, a picked date, or a
+  // ?date= link), so the other pages open on the month you were last looking at.
+  useEffect(() => {
+    if (!filters.month || !filters.year) return;
+    const { month: m, year: y } = filters;
+    setCurrentDate((prev) => (prev.month === m && prev.year === y ? prev : { month: m, year: y }));
+  }, [filters.month, filters.year, setCurrentDate]); // eslint-disable-line react-hooks/exhaustive-deps
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [sort, setSort] = useState<TransactionSortOption>('date_desc');
   // Amount range filter, kept as raw input strings so partial typing works
