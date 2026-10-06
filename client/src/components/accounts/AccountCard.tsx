@@ -4,6 +4,7 @@ import { RefreshCw, Trash2, Upload, History, MoreVertical, KeyRound, Users, Eye,
 import { Card, Button } from '../ui';
 import type { Account } from '../../types';
 import { formatDate } from '../../utils/formatters';
+import { isManualAccount } from '../../utils/account-types';
 import { useSyncAccount, useDeleteAccount, useRefreshAccounts, useCreatePlaidUpdateLinkToken, useToggleAccountInvestmentExclusion } from '../../hooks';
 
 
@@ -38,10 +39,6 @@ interface AccountCardProps {
   onViewHistory?: (account: Account) => void;
   onEdit?: (account: Account) => void;
 }
-
-// Check if account is a manual (non-Plaid) account
-const isManualAccount = (account: Account): boolean =>
-  account.plaid_access_token === 'manual' || account.plaid_item_id.startsWith('manual-');
 
 // Check if account is a credit card type
 const isCreditCardAccount = (accountType: string): boolean => {

@@ -5,6 +5,8 @@ import { categorizeWithPlaid, cleanMerchantName, PlaidPFC } from '../services/ca
 import { detectTransactionType } from '../services/transaction-type.js';
 import { loadMerchantMappings, resolveTransactionType } from '../services/merchant-mappings.js';
 import { reconcileCardPaymentsAfterSync } from '../services/card-payment-reconciliation.js';
+import { redactError } from '../services/plaid-errors.js';
+import { toPublicAccount } from '../services/account-redaction.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -38,10 +40,9 @@ router.post('/create-link-token', async (req, res) => {
       expiration: linkToken.expiration,
     });
   } catch (error: unknown) {
-    console.error('Error creating link token:', error);
+    console.error('Error creating link token:', redactError(error));
     const plaidError = error as { response?: { data?: unknown } };
     if (plaidError.response?.data) {
-      console.error('Plaid error details:', JSON.stringify(plaidError.response.data, null, 2));
       // Return more detailed error in development
       const isDevelopment = process.env.NODE_ENV !== 'production';
       if (isDevelopment) {
@@ -94,11 +95,7 @@ router.post('/create-update-link-token', async (req, res) => {
       expiration: linkToken.expiration,
     });
   } catch (error: unknown) {
-    console.error('Error creating update link token:', error);
-    const plaidError = error as { response?: { data?: unknown } };
-    if (plaidError.response?.data) {
-      console.error('Plaid error details:', JSON.stringify(plaidError.response.data, null, 2));
-    }
+    console.error('Error creating update link token:', redactError(error));
     res.status(500).json({ message: 'Failed to create update link token' });
   }
 });
@@ -192,7 +189,7 @@ router.post('/exchange-token', async (req, res) => {
           .eq('id', existingId);
 
         if (error) {
-          console.error(`Failed to update existing account ${plaidAccount.name}:`, error);
+          console.error(`Failed to update existing account ${plaidAccount.name}:`, redactError(error));
           continue;
         }
 
@@ -221,7 +218,7 @@ router.post('/exchange-token', async (req, res) => {
         const { error } = await supabase.from('accounts').insert(account).select().single();
 
         if (error) {
-          console.error(`Failed to create account ${plaidAccount.name}:`, error);
+          console.error(`Failed to create account ${plaidAccount.name}:`, redactError(error));
           continue;
         }
 
@@ -271,7 +268,7 @@ router.post('/exchange-token', async (req, res) => {
         // Check for existing merchant mapping (user's previous corrections)
         const mapping = merchantMappings.find(tx.merchant_name, tx.name);
 
-        const detectedType = detectTransactionType(tx.amount, texts, plaidPFC, null, accountTypeById.get(accountId));
+        const detectedType = detectTransactionType(tx.amount, texts, plaidPFC, accountTypeById.get(accountId));
         const transactionType = resolveTransactionType(detectedType, mapping);
 
         // Auto-assign category based on type and Plaid's categorization
@@ -330,7 +327,7 @@ router.post('/exchange-token', async (req, res) => {
 
       console.log(`Auto-synced ${syncedCount} transactions across ${createdAccounts.length} accounts`);
     } catch (syncError) {
-      console.error('Auto-sync failed (accounts created, but transactions need manual sync):', syncError);
+      console.error('Auto-sync failed (accounts created, but transactions need manual sync):', redactError(syncError));
     }
 
     // Return the first created account for backwards compatibility
@@ -340,18 +337,13 @@ router.post('/exchange-token', async (req, res) => {
       .eq('id', createdAccounts[0].id)
       .single();
 
-    res.json(firstAccount);
+    res.json(firstAccount && toPublicAccount(firstAccount));
   } catch (error) {
-    console.error('Error exchanging token:', error);
+    console.error('Error exchanging token:', redactError(error));
 
     // Extract Plaid error details if available
     const plaidError = error as { response?: { data?: { error_code?: string; error_message?: string; display_message?: string } } };
     const errorDetails = plaidError.response?.data;
-
-    // Log detailed error for debugging
-    if (errorDetails) {
-      console.error('Plaid error details:', JSON.stringify(errorDetails, null, 2));
-    }
 
     // Return more helpful error message
     const isDevelopment = process.env.NODE_ENV !== 'production';

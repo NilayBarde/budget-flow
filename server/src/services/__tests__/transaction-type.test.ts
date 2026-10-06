@@ -135,6 +135,26 @@ describe('detectTransactionType', () => {
         }),
       ).toBe('investment');
     });
+
+    it('does not treat BANK_FEES as a transfer', () => {
+      expect(detectTransactionType(12, ['Monthly Service Fee'], { primary: 'BANK_FEES' })).toBe('expense');
+    });
+
+    it('still types an INVESTMENT detailed category as investment when the primary is INCOME', () => {
+      expect(
+        detectTransactionType(-40, ['Brokerage'], { primary: 'INCOME', detailed: 'INCOME_INVESTMENT_GAIN' }),
+      ).toBe('investment');
+    });
+
+    it('treats pension income as income, not as a retirement investment', () => {
+      // The detailed category contains RETIREMENT, but the primary says money is coming in as income.
+      expect(
+        detectTransactionType(-1800, ['State Pension'], {
+          primary: 'INCOME',
+          detailed: 'INCOME_RETIREMENT_PENSION',
+        }),
+      ).toBe('income');
+    });
   });
 
   // ── Plaid spending category beats text patterns ───────────────────────
@@ -222,34 +242,6 @@ describe('detectTransactionType', () => {
     });
   });
 
-  // ── Legacy Plaid category detection ───────────────────────────────────
-
-  describe('legacy Plaid category detection', () => {
-    it('detects Transfer in legacy categories', () => {
-      expect(
-        detectTransactionType(50, ['Unknown'], null, ['Transfer', 'Debit']),
-      ).toBe('transfer');
-    });
-
-    it('detects Credit Card in legacy categories', () => {
-      expect(
-        detectTransactionType(50, ['Unknown'], null, ['Credit Card']),
-      ).toBe('transfer');
-    });
-
-    it('detects Loan Payments in legacy categories', () => {
-      expect(
-        detectTransactionType(500, ['Unknown'], null, ['Loan Payments']),
-      ).toBe('transfer');
-    });
-
-    it('detects Payment in legacy categories', () => {
-      expect(
-        detectTransactionType(50, ['Unknown'], null, ['Payment']),
-      ).toBe('transfer');
-    });
-  });
-
   // ── Amount sign logic ─────────────────────────────────────────────────
 
   describe('amount sign logic', () => {
@@ -284,7 +276,6 @@ describe('detectTransactionType', () => {
           -2497.49,
           ['Payment - Bilt Housing'],
           { primary: 'INCOME', detailed: 'INCOME_RENTAL' },
-          null,
           'credit card',
         ),
       ).toBe('transfer');
@@ -292,13 +283,13 @@ describe('detectTransactionType', () => {
 
     it('still treats income as income on a checking account', () => {
       expect(
-        detectTransactionType(-3000, ['Employer'], { primary: 'INCOME' }, null, 'checking'),
+        detectTransactionType(-3000, ['Employer'], { primary: 'INCOME' }, 'checking'),
       ).toBe('income');
     });
 
     it('still treats a refund on a credit card as a return', () => {
       expect(
-        detectTransactionType(-20, ['Amazon'], { primary: 'GENERAL_MERCHANDISE' }, null, 'credit card'),
+        detectTransactionType(-20, ['Amazon'], { primary: 'GENERAL_MERCHANDISE' }, 'credit card'),
       ).toBe('return');
     });
 
@@ -377,10 +368,6 @@ describe('detectTransactionType', () => {
 
     it('null PFC is treated the same as missing PFC', () => {
       expect(detectTransactionType(50, ['Target'], null)).toBe('expense');
-    });
-
-    it('null plaidCategories is treated the same as missing', () => {
-      expect(detectTransactionType(50, ['Target'], null, null)).toBe('expense');
     });
 
     it('zero amount defaults to expense', () => {

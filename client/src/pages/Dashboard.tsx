@@ -1,4 +1,3 @@
-import { useMemo } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { Card, CardHeader, Spinner, Button, MonthSelector, CategoryPieChart, ErrorState } from '../components/ui';
 import { DashboardHero } from '../components/dashboard/DashboardHero';
@@ -11,6 +10,7 @@ import { BudgetVariance } from '../components/dashboard/BudgetVariance';
 import { LargeUnsplitTransactions } from '../components/dashboard/LargeUnsplitTransactions';
 import { useMonthlyStats, useMonthNavigation, usePrefetchAdjacentMonths } from '../hooks';
 import { MONTHS } from '../utils/constants';
+import { isCurrentMonth } from '../utils/month';
 
 export const Dashboard = () => {
   const { currentDate, handlePrevMonth, handleNextMonth } = useMonthNavigation();
@@ -20,10 +20,7 @@ export const Dashboard = () => {
   usePrefetchAdjacentMonths(currentDate.month, currentDate.year);
 
   // Check if viewing current month for Spending Pace widget
-  const isCurrentMonth = useMemo(() => {
-    const now = new Date();
-    return currentDate.month === now.getMonth() + 1 && currentDate.year === now.getFullYear();
-  }, [currentDate]);
+  const viewingCurrentMonth = isCurrentMonth(currentDate.month, currentDate.year);
 
   // No page-level loading gate: every widget has its own loading state, so
   // mounting them immediately lets their queries fire in parallel instead of
@@ -83,7 +80,7 @@ export const Dashboard = () => {
             month={currentDate.month}
             year={currentDate.year}
           />
-          {isCurrentMonth && <SpendingPace />}
+          {viewingCurrentMonth && <SpendingPace />}
           <RecentActivity
             month={currentDate.month}
             year={currentDate.year}
