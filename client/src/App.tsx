@@ -2,6 +2,9 @@ import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout } from './components/layout';
+import { TabbedSection } from './components/layout/TabbedSection';
+import { legacyRedirectRoutes } from './routes/legacyRedirects';
+import { NET_WORTH_TABS, INSIGHTS_TABS, SETTINGS_TABS } from './utils/navigation';
 import { Spinner } from './components/ui';
 
 // Eagerly prefetch the Dashboard chunk since it's the landing page — avoids a
@@ -28,28 +31,41 @@ const queryClient = new QueryClient({
   },
 });
 
+// The routes without the providers or the router, so a test can mount them in a MemoryRouter.
+export const AppRoutes = () => (
+  <Suspense fallback={<Spinner className="py-12" />}>
+    <Routes>
+      <Route path="/" element={<Layout />}>
+        <Route index element={<Dashboard />} />
+        <Route path="transactions" element={<Transactions />} />
+        <Route path="plan" element={<FinancialPlan />} />
+        {/* Pages that used to be separate sidebar items are tabs inside their section. */}
+        <Route path="net-worth" element={<TabbedSection label="Net worth sections" tabs={NET_WORTH_TABS} />}>
+          <Route index element={<NetWorthPage />} />
+          <Route path="investments" element={<Investments />} />
+        </Route>
+        <Route path="insights" element={<TabbedSection label="Insights sections" tabs={INSIGHTS_TABS} />}>
+          <Route index element={<Insights />} />
+          <Route path="year" element={<YearOverview />} />
+        </Route>
+        <Route path="accounts" element={<Accounts />} />
+        <Route path="settings" element={<TabbedSection label="Settings sections" tabs={SETTINGS_TABS} />}>
+          <Route index element={<Settings />} />
+          <Route path="tags" element={<Tags />} />
+        </Route>
+        {/* The old addresses keep working and land on the page's new home. */}
+        {legacyRedirectRoutes}
+      </Route>
+      <Route path="/oauth-callback" element={<OAuthCallback />} />
+    </Routes>
+  </Suspense>
+);
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <Suspense fallback={<Spinner className="py-12" />}>
-          <Routes>
-            <Route path="/" element={<Layout />}>
-              <Route index element={<Dashboard />} />
-              <Route path="transactions" element={<Transactions />} />
-              <Route path="plan" element={<FinancialPlan />} />
-              <Route path="net-worth" element={<NetWorthPage />} />
-
-              <Route path="investments" element={<Investments />} />
-              <Route path="year" element={<YearOverview />} />
-              <Route path="insights" element={<Insights />} />
-              <Route path="accounts" element={<Accounts />} />
-              <Route path="tags" element={<Tags />} />
-              <Route path="settings" element={<Settings />} />
-            </Route>
-            <Route path="/oauth-callback" element={<OAuthCallback />} />
-          </Routes>
-        </Suspense>
+        <AppRoutes />
       </BrowserRouter>
     </QueryClientProvider>
   );

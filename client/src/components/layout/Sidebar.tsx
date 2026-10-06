@@ -1,38 +1,7 @@
 import { NavLink } from 'react-router-dom';
-import {
-  LayoutDashboard,
-  Receipt,
-  PiggyBank,
-  CreditCard,
-  Calendar,
-  BarChart3,
-  Tags,
-  Settings,
-  X,
-  TrendingUp,
-  Target,
-} from 'lucide-react';
+import { PiggyBank, X } from 'lucide-react';
 import clsx from 'clsx';
-
-const navItems = [
-  { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/transactions', icon: Receipt, label: 'Transactions' },
-  { to: '/plan', icon: Target, label: 'Plan' },
-  { to: '/net-worth', icon: TrendingUp, label: 'Net Worth' },
-  { to: '/investments', icon: BarChart3, label: 'Investments' },
-  { to: '/year', icon: Calendar, label: 'Year Overview' },
-  { to: '/insights', icon: BarChart3, label: 'Insights' },
-  { to: '/accounts', icon: CreditCard, label: 'Accounts' },
-  { to: '/tags', icon: Tags, label: 'Tags' },
-];
-
-// Bottom tab items (subset for mobile quick access)
-const bottomNavItems = [
-  { to: '/', icon: LayoutDashboard, label: 'Home' },
-  { to: '/transactions', icon: Receipt, label: 'Transactions' },
-  { to: '/investments', icon: TrendingUp, label: 'Investments' },
-  { to: '/accounts', icon: CreditCard, label: 'Accounts' },
-];
+import { NAV_ITEMS, SETTINGS_ITEM, MOBILE_NAV_ITEMS } from '../../utils/navigation';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -82,8 +51,8 @@ export const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-          {navItems.map(({ to, icon: Icon, label }) => (
+        <nav aria-label="Main" className="flex-1 p-4 space-y-1 overflow-y-auto">
+          {NAV_ITEMS.map(({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
               to={to}
@@ -105,7 +74,7 @@ export const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
         {/* Settings - bottom of sidebar */}
         <div className="p-4 border-t border-midnight-700">
           <NavLink
-            to="/settings"
+            to={SETTINGS_ITEM.to}
             onClick={onClose}
             className={({ isActive }) => clsx(
               'flex items-center gap-3 px-4 py-3 md:py-2.5 rounded-lg font-medium transition-colors',
@@ -115,16 +84,16 @@ export const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
                 : 'text-slate-400 hover:text-slate-200 hover:bg-midnight-800'
             )}
           >
-            <Settings className="h-5 w-5 flex-shrink-0" />
-            Settings
+            <SETTINGS_ITEM.icon className="h-5 w-5 flex-shrink-0" />
+            {SETTINGS_ITEM.label}
           </NavLink>
         </div>
       </aside>
 
       {/* Bottom Tab Navigation - Mobile Only */}
-      <nav className="fixed bottom-0 left-0 right-0 h-20 bg-midnight-900 border-t border-midnight-700 z-40 md:hidden safe-area-bottom">
+      <nav aria-label="Mobile" className="fixed bottom-0 left-0 right-0 h-20 bg-midnight-900 border-t border-midnight-700 z-40 md:hidden safe-area-bottom">
         <div className="flex items-center justify-around h-full px-2 pb-2">
-          {bottomNavItems.map(({ to, icon: Icon, label }) => (
+          {MOBILE_NAV_ITEMS.map(({ to, icon: Icon, label, mobileLabel }) => (
             <NavLink
               key={to}
               to={to}
@@ -137,7 +106,7 @@ export const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
               )}
             >
               <Icon className="h-5 w-5" />
-              <span className="text-xs font-medium">{label}</span>
+              <span className="text-xs font-medium">{mobileLabel ?? label}</span>
             </NavLink>
           ))}
         </div>
