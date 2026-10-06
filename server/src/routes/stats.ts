@@ -19,6 +19,8 @@ import {
 } from '../services/merchant-stats.js';
 import { percentChange } from '../services/mom-totals.js';
 import { getMyShareAmount, computeCategorySpend, type SpendRow } from '../services/category-spend.js';
+import { loadYearlyStats } from '../services/yearly-stats.js';
+import { fetchAllRows } from '../utils/paginate.js';
 import type { RecurringFrequency } from '../services/recurring-normalize.js';
 import type { CategoryData } from '../types/stats.js';
 
@@ -117,100 +119,8 @@ router.get('/yearly', asyncHandler(async (req, res) => {
       return res.status(400).json({ message: 'Year is required' });
     }
 
-    const startDate = `${year}-01-01`;
-    const endDate = `${year}-12-31`;
-
-    const { data: transactions, error } = await supabase
-      .from('transactions')
-      .select(`
-        amount,
-        date,
-        transaction_type,
-        is_split,
-        category:categories(id, name, color, icon),
-        splits:transaction_splits(amount, is_my_share)
-      `)
-      .gte('date', startDate)
-      .lte('date', endDate);
-
-    if (error) throw error;
-
-    // Initialize monthly totals
-    const monthlyTotals: { month: number; spent: number; income: number; invested: number }[] = [];
-    for (let i = 1; i <= 12; i++) {
-      monthlyTotals.push({ month: i, spent: 0, income: 0, invested: 0 });
-    }
-
-    let grossExpenses = 0;
-    let totalReturns = 0;
-    let totalIncome = 0;
-    let totalInvested = 0;
-    const categoryTotals = new Map<string, { category: CategoryData; amount: number }>();
-
-    // Two-pass approach: accumulate expenses first, then subtract returns
-    const returns: Array<{ amount: number; month: number; category: CategoryData | null }> = [];
-
-    // Pass 1: accumulate expenses, income, investments
-    transactions?.forEach(t => {
-      // Use string splitting to avoid timezone issues with new Date()
-      // t.date is YYYY-MM-DD
-      const month = parseInt(t.date.split('-')[1], 10) - 1; // 0-indexed
-      const transactionType = t.transaction_type || (t.amount > 0 ? 'expense' : 'income');
-
-      if (transactionType === 'transfer') return;
-
-      if (transactionType === 'investment') {
-        const amount = Math.abs(t.amount);
-        totalInvested += amount;
-        monthlyTotals[month].invested += amount;
-      } else if (transactionType === 'expense') {
-        const amountToCount = getMyShareAmount(t);
-        grossExpenses += amountToCount;
-        monthlyTotals[month].spent += amountToCount;
-
-        const category = t.category as unknown as CategoryData | null;
-        if (category && amountToCount > 0) {
-          const existing = categoryTotals.get(category.id);
-          if (existing) {
-            existing.amount += amountToCount;
-          } else {
-            categoryTotals.set(category.id, { category, amount: amountToCount });
-          }
-        }
-      } else if (transactionType === 'return') {
-        // Returns respect splits like everywhere else (only my share nets out)
-        const returnAmount = getMyShareAmount(t);
-        totalReturns += returnAmount;
-        returns.push({ amount: returnAmount, month, category: t.category as unknown as CategoryData | null });
-      } else if (transactionType === 'income') {
-        const incomeAmount = Math.abs(t.amount);
-        totalIncome += incomeAmount;
-        monthlyTotals[month].income += incomeAmount;
-      }
-    });
-
-    // Pass 2: subtract returns from their respective categories and monthly totals
-    for (const ret of returns) {
-      if (ret.category) {
-        const existing = categoryTotals.get(ret.category.id);
-        if (existing) {
-          existing.amount = Math.max(0, existing.amount - ret.amount);
-        }
-      }
-      monthlyTotals[ret.month].spent = Math.max(0, monthlyTotals[ret.month].spent - ret.amount);
-    }
-
-    // Total spent = gross expenses - returns (same formula as transactions page)
-    const totalSpent = Math.max(0, grossExpenses - totalReturns);
-
-    res.json({
-      year: Number(year),
-      monthly_totals: monthlyTotals,
-      category_totals: Array.from(categoryTotals.values()).sort((a, b) => b.amount - a.amount),
-      total_spent: totalSpent,
-      total_income: totalIncome,
-      total_invested: totalInvested,
-    });
+    // Paged read: a year has more transactions than one Supabase request returns.
+    res.json(await loadYearlyStats(Number(year)));
 }));
 
 // Get spending insights (trends, merchants, velocity, daily breakdown)
@@ -248,23 +158,30 @@ router.get('/insights', asyncHandler(async (req, res) => {
       (recurringCharges || []).map(r => r.merchant_display_name)
     );
 
-    // Single query for all 6 months of transactions
-    const { data: transactions, error } = await supabase
-      .from('transactions')
-      .select(`
-        amount,
-        date,
-        transaction_type,
-        is_split,
-        merchant_name,
-        merchant_display_name,
-        category:categories(id, name, color, icon),
-        splits:transaction_splits(amount, is_my_share)
-      `)
-      .gte('date', sixMonthsAgoStart)
-      .lte('date', currentMonthEnd);
-
-    if (error) throw error;
+    // All 6 months of transactions. That is more rows than one Supabase request returns (1000), so
+    // it is read in pages; a single request silently dropped the rest and skewed every number below.
+    const transactions = await fetchAllRows(
+      (from, to) =>
+        supabase
+          .from('transactions')
+          .select(`
+            id,
+            amount,
+            date,
+            transaction_type,
+            is_split,
+            merchant_name,
+            merchant_display_name,
+            category:categories(id, name, color, icon),
+            splits:transaction_splits(amount, is_my_share)
+          `)
+          .gte('date', sixMonthsAgoStart)
+          .lte('date', currentMonthEnd)
+          .order('date')
+          .order('id')
+          .range(from, to),
+      { keyOf: row => row.id },
+    );
 
     // ── Category Trends (per-category, per-month) ──────────────────────
     const categoryMonthMap = new Map<string, CategoryMonthEntry>();

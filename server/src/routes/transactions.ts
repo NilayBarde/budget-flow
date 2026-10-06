@@ -7,6 +7,7 @@ import { getMyShareAmount, type SplitShare } from '../services/category-spend.js
 import { filterByTag } from '../services/transaction-filters.js';
 import type { TransactionType } from '../services/transaction-type.js';
 import { recurringUnmarkUpdate } from '../services/recurring-unmark.js';
+import { fetchAllRows } from '../utils/paginate.js';
 
 const router = Router();
 
@@ -18,58 +19,65 @@ router.get('/', async (req, res) => {
     // Explicit embed columns: accounts(*) would ship plaid_access_token and
     // plaid_cursor to the browser. tags embeds through the transaction_tags
     // junction in the same query, replacing a second sequential fetch.
-    let query = supabase
-      .from('transactions')
-      .select(`
-        *,
-        account:accounts(id, institution_name, account_name),
-        category:categories(id, name, icon, color),
-        splits:transaction_splits(id, parent_transaction_id, amount, description, is_my_share, created_at),
-        tags:tags(id, name, color)
-      `)
-      .order('date', { ascending: false });
+    // Built fresh for each page of results below. Without a month or date filter this reads all
+    // history, which is more than the 1000 rows Supabase returns from one request.
+    const buildQuery = () => {
+      let query = supabase
+        .from('transactions')
+        .select(`
+          *,
+          account:accounts(id, institution_name, account_name),
+          category:categories(id, name, icon, color),
+          splits:transaction_splits(id, parent_transaction_id, amount, description, is_my_share, created_at),
+          tags:tags(id, name, color)
+        `);
 
-    // Filter by exact date (takes precedence over month/year)
-    if (date) {
-      query = query.eq('date', date);
-    } else if (month && year) {
-      // Filter by month and year
-      const startDate = new Date(Number(year), Number(month) - 1, 1).toISOString().split('T')[0];
-      const endDate = new Date(Number(year), Number(month), 0).toISOString().split('T')[0];
-      query = query.gte('date', startDate).lte('date', endDate);
-    }
+      // Filter by exact date (takes precedence over month/year)
+      if (date) {
+        query = query.eq('date', date);
+      } else if (month && year) {
+        // Filter by month and year
+        const startDate = new Date(Number(year), Number(month) - 1, 1).toISOString().split('T')[0];
+        const endDate = new Date(Number(year), Number(month), 0).toISOString().split('T')[0];
+        query = query.gte('date', startDate).lte('date', endDate);
+      }
 
-    if (account_id) {
-      query = query.eq('account_id', account_id);
-    }
+      if (account_id) {
+        query = query.eq('account_id', account_id);
+      }
 
-    if (category_id) {
-      query = query.eq('category_id', category_id);
-    }
+      if (category_id) {
+        query = query.eq('category_id', category_id);
+      }
 
-    if (is_recurring === 'true') {
-      query = query.eq('is_recurring', true);
-    }
+      if (is_recurring === 'true') {
+        query = query.eq('is_recurring', true);
+      }
 
-    // Filter by transaction type (income, expense, transfer)
-    if (transaction_type) {
-      query = query.eq('transaction_type', transaction_type);
-    }
+      // Filter by transaction type (income, expense, transfer)
+      if (transaction_type) {
+        query = query.eq('transaction_type', transaction_type);
+      }
 
-    // Filter by needs_review flag
-    if (needs_review === 'true') {
-      query = query.eq('needs_review', true);
-    }
+      // Filter by needs_review flag
+      if (needs_review === 'true') {
+        query = query.eq('needs_review', true);
+      }
 
-    if (search) {
-      query = query.or(`merchant_name.ilike.%${search}%,merchant_display_name.ilike.%${search}%`);
-    }
+      if (search) {
+        query = query.or(`merchant_name.ilike.%${search}%,merchant_display_name.ilike.%${search}%`);
+      }
 
-    const { data, error } = await query;
+      return query;
+    };
 
-    if (error) throw error;
+    // id breaks ties between rows on the same date, so paging never skips or repeats a row.
+    const data = await fetchAllRows((from, to) =>
+      buildQuery().order('date', { ascending: false }).order('id').range(from, to),
+      { keyOf: row => row.id },
+    );
 
-    res.json(filterByTag(data || [], typeof tag_id === 'string' ? tag_id : undefined));
+    res.json(filterByTag(data, typeof tag_id === 'string' ? tag_id : undefined));
   } catch (error) {
     console.error('Error fetching transactions:', error);
     res.status(500).json({ message: 'Failed to fetch transactions' });
@@ -131,25 +139,29 @@ router.get('/similar/:merchantName/count', async (req, res) => {
 // Matches on plaid_transaction_id or csv_reference
 router.get('/duplicates', async (req, res) => {
   try {
-    const { data: transactions, error } = await supabase
-      .from('transactions')
-      .select(`
-        id,
-        date,
-        amount,
-        merchant_name,
-        merchant_display_name,
-        transaction_type,
-        account_id,
-        import_id,
-        plaid_transaction_id,
-        csv_reference,
-        created_at,
-        account:accounts(institution_name)
-      `)
-      .order('date', { ascending: false });
-
-    if (error) throw error;
+    // All history, read in pages: one request returns at most 1000 rows, so older duplicates were missed.
+    const transactions = await fetchAllRows((from, to) =>
+      supabase
+        .from('transactions')
+        .select(`
+          id,
+          date,
+          amount,
+          merchant_name,
+          merchant_display_name,
+          transaction_type,
+          account_id,
+          import_id,
+          plaid_transaction_id,
+          csv_reference,
+          created_at,
+          account:accounts(institution_name)
+        `)
+        .order('date', { ascending: false })
+        .order('id')
+        .range(from, to),
+      { keyOf: row => row.id },
+    );
 
     // Helper: group transactions by a key field, returning groups with 2+ entries
     const groupByField = (
