@@ -32,6 +32,7 @@ export interface SyncHealthAccount {
 export interface SyncHealth {
   healthy: boolean;
   staleDays: number;
+  investmentStaleDays: number;
   needs_reauth: SyncHealthAccount[];
   stale: SyncHealthAccount[];
 }

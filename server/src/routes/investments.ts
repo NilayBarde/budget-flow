@@ -1,30 +1,9 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
+import { isInvestmentAccountType } from '../services/account-types.js';
 import { toPublicAccount } from '../services/account-redaction.js';
 
 const router = Router();
-
-// Investment account types
-const INVESTMENT_ACCOUNT_TYPES = [
-  'investment',
-  'brokerage',
-  '401k',
-  '401a',
-  '403b',
-  'ira',
-  'roth',
-  'roth 401k',
-  'pension',
-  'retirement',
-  'stock plan',
-  'crypto exchange',
-];
-
-// Helper to check if an account is an investment account
-const isInvestmentAccount = (accountType: string): boolean => {
-  const normalizedType = accountType.toLowerCase();
-  return INVESTMENT_ACCOUNT_TYPES.some(type => normalizedType.includes(type));
-};
 
 // Liability account types (balances represent what you OWE)
 const LIABILITY_ACCOUNT_TYPES = [
@@ -55,16 +34,16 @@ router.get('/summary', async (req, res) => {
 
     // Separate accounts by type
     const investmentAccounts = accounts?.filter(a =>
-      isInvestmentAccount(a.account_type)
+      isInvestmentAccountType(a.account_type)
     ) || [];
 
     const liabilityAccounts = accounts?.filter(a =>
-      !isInvestmentAccount(a.account_type) &&
+      !isInvestmentAccountType(a.account_type) &&
       isLiabilityAccount(a.account_type)
     ) || [];
 
     const cashAccounts = accounts?.filter(a =>
-      !isInvestmentAccount(a.account_type) &&
+      !isInvestmentAccountType(a.account_type) &&
       !isLiabilityAccount(a.account_type)
     ) || [];
 
@@ -104,7 +83,7 @@ router.get('/summary', async (req, res) => {
         name: `${a.institution_name} - ${a.account_name}`,
         type: a.account_type,
         balance: a.current_balance,
-        isInvestment: isInvestmentAccount(a.account_type),
+        isInvestment: isInvestmentAccountType(a.account_type),
         isLiability: isLiabilityAccount(a.account_type),
         excluded: a.exclude_from_investments,
       })) || [],

@@ -7,6 +7,8 @@ import { loadManuallyTypedIds, loadMerchantMappings, resolveTransactionType } fr
 import { getCategoryIdForType } from '../services/category-lookup.js';
 import { buildAccountResolver } from '../services/sync-attribution.js';
 import { getPlaidErrorCode, needsReconnect, redactError } from '../services/plaid-errors.js';
+import { classifySyncHealth, DEFAULT_STALE_DAYS, INVESTMENT_STALE_DAYS, parseStaleDaysOverride } from '../services/sync-health.js';
+import { isHoldingsAccountType } from '../services/account-types.js';
 import { toPublicAccount } from '../services/account-redaction.js';
 import { reconcilePendingTransaction } from '../services/pending-reconciliation.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -61,8 +63,7 @@ router.get('/', async (req, res) => {
 // they never sync via Plaid.
 router.get('/sync-health', async (req, res) => {
   try {
-    const staleDays = Number(req.query.staleDays) || 5;
-    const staleBefore = new Date(Date.now() - staleDays * 24 * 60 * 60 * 1000).toISOString();
+    const staleDaysOverride = parseStaleDaysOverride(req.query.staleDays);
 
     const { data: accounts, error } = await supabase
       .from('accounts')
@@ -71,16 +72,13 @@ router.get('/sync-health', async (req, res) => {
 
     if (error) throw error;
 
-    const needsReauth = (accounts || []).filter(a => a.needs_reauth);
-    // Stale = never synced, or last successful sync older than the threshold.
-    // Exclude accounts already flagged for re-auth to avoid double-listing.
-    const stale = (accounts || []).filter(a =>
-      !a.needs_reauth && (!a.last_synced_at || a.last_synced_at < staleBefore)
-    );
+    // Stale = never synced, or last successful sync older than the window for its account type.
+    const { needsReauth, stale } = classifySyncHealth(accounts || [], Date.now(), staleDaysOverride);
 
     res.json({
       healthy: needsReauth.length === 0 && stale.length === 0,
-      staleDays,
+      staleDays: staleDaysOverride ?? DEFAULT_STALE_DAYS,
+      investmentStaleDays: staleDaysOverride ?? INVESTMENT_STALE_DAYS,
       needs_reauth: needsReauth,
       stale,
     });
@@ -165,8 +163,7 @@ router.post('/:id/sync', async (req, res) => {
 
     // 1. Fetch Latest Balances (Concurrently if possible)
     let latestBalance: number | null = account.current_balance;
-    const investmentTypes = ['investment', 'brokerage', '401k', '401a', '403b', 'ira', 'roth', 'pension', 'retirement', 'stock plan', 'crypto exchange', 'hsa', '529'];
-    const isInvestment = investmentTypes.some(t => account.account_type.toLowerCase().includes(t));
+    const isInvestment = isHoldingsAccountType(account.account_type);
 
     try {
       if (isInvestment) {
