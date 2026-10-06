@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import { Scissors } from 'lucide-react';
 import { Card, Button } from '../ui';
-import { useTransactions, useModalState } from '../../hooks';
+import { useTransactions, useUpdateTransaction, useModalState } from '../../hooks';
 import { SplitTransactionModal } from '../transactions/SplitTransactionModal';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import { LARGE_UNSPLIT_THRESHOLD } from '../../utils/constants';
+import { findMissedSplitCandidates } from '../../utils/missed-splits';
 import type { Transaction } from '../../types';
 
 interface LargeUnsplitTransactionsProps {
@@ -16,10 +18,15 @@ const MAX_ROWS = 5;
 export const LargeUnsplitTransactions = ({ month, year }: LargeUnsplitTransactionsProps) => {
     const { data: transactions } = useTransactions({ month, year, transaction_type: 'expense' });
     const splitModal = useModalState<Transaction>();
+    const updateTransaction = useUpdateTransaction();
+    const [saveFailed, setSaveFailed] = useState(false);
 
-    const candidates = (transactions || [])
-        .filter(t => !t.is_split && Math.abs(t.amount) >= LARGE_UNSPLIT_THRESHOLD)
-        .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+    const keepWhole = (id: string) => {
+        setSaveFailed(false);
+        updateTransaction.mutate({ id, data: { split_dismissed: true } }, { onError: () => setSaveFailed(true) });
+    };
+
+    const candidates = findMissedSplitCandidates(transactions || [], LARGE_UNSPLIT_THRESHOLD);
 
     if (candidates.length === 0) return null;
 
@@ -38,8 +45,8 @@ export const LargeUnsplitTransactions = ({ month, year }: LargeUnsplitTransactio
                         Large expenses ({formatCurrency(LARGE_UNSPLIT_THRESHOLD)}+) that haven't been split.
                     </p>
                     {shown.map(t => (
-                        <div key={t.id} className="flex items-center justify-between gap-3 text-sm">
-                            <div className="min-w-0">
+                        <div key={t.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-sm">
+                            <div className="min-w-0 flex-1 basis-32">
                                 <p className="font-medium text-slate-200 truncate">
                                     {t.merchant_display_name || t.merchant_name}
                                 </p>
@@ -52,9 +59,23 @@ export const LargeUnsplitTransactions = ({ month, year }: LargeUnsplitTransactio
                                 <Button variant="ghost" size="sm" onClick={() => splitModal.edit(t)}>
                                     Split
                                 </Button>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    aria-label={`Don't split ${t.merchant_display_name || t.merchant_name}`}
+                                    disabled={updateTransaction.isPending}
+                                    onClick={() => keepWhole(t.id)}
+                                >
+                                    Don't split
+                                </Button>
                             </div>
                         </div>
                     ))}
+                    {saveFailed && (
+                        <p role="alert" className="text-xs text-rose-400">
+                            Could not save that change. Try again.
+                        </p>
+                    )}
                     {hiddenCount > 0 && (
                         <p className="text-xs text-slate-500">+{hiddenCount} more above the threshold</p>
                     )}

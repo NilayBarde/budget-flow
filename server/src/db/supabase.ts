@@ -42,6 +42,7 @@ export type Database = {
     category_id: string | null;
     transaction_type: 'income' | 'expense' | 'transfer' | 'investment' | 'return';
     is_split: boolean;
+    split_dismissed: boolean;
     parent_transaction_id: string | null;
     is_recurring: boolean;
     needs_review: boolean;

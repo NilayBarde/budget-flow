@@ -101,6 +101,24 @@ describe('reconcilePendingTransaction', () => {
     expect(opsOf('transactions', 'delete').map(o => o.filters)).toEqual([[['id', 'pending-row']]]);
   });
 
+  it('carries a "do not split" decision onto the posted row, so a dismissed charge does not come back when it posts', async () => {
+    db.pending = { ...splitPending, is_split: false, splits: null, category_id: null, split_dismissed: true };
+
+    await reconcilePendingTransaction('posted-row', 50, 'plaid-pending');
+
+    const [carry] = opsOf('transactions', 'update');
+    expect(carry.payload).toEqual({ split_dismissed: true });
+    expect(carry.filters).toEqual([['id', 'posted-row']]);
+  });
+
+  it('does not write a dismissal when the pending row had none', async () => {
+    db.pending = { ...splitPending, is_split: false, splits: null, category_id: null, split_dismissed: false };
+
+    await reconcilePendingTransaction('posted-row', 50, 'plaid-pending');
+
+    expect(opsOf('transactions', 'update')).toHaveLength(0);
+  });
+
   it('does not copy the splits a second time when an interrupted attempt already did', async () => {
     // The first attempt copied the splits and stopped before deleting the pending row. The retry
     // must finish the job without leaving the posted row with doubled splits.
