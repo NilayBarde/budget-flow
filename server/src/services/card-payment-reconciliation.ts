@@ -20,7 +20,7 @@ interface TransactionRow {
   original_description: string | null;
   transaction_type: TransactionType;
   type_manually_set: boolean | null;
-  plaid_category: { primary?: string | null } | null;
+  plaid_category: { primary?: string | null; detailed?: string | null } | null;
 }
 
 export interface PairedTransaction {
@@ -106,7 +106,7 @@ export const reconcileCardPayments = async ({
   if (accountsError) throw accountsError;
   const accountsById = new Map((accounts ?? []).map(a => [a.id, a]));
 
-  const transactions = await loadTransactions(sinceDate);
+  const [transactions, mappings] = await Promise.all([loadTransactions(sinceDate), loadMerchantMappings()]);
   const pairingRows: PairingRow[] = transactions.map(t => {
     const account = accountsById.get(t.account_id);
     return {
@@ -115,10 +115,12 @@ export const reconcileCardPayments = async ({
       amount: t.amount,
       date: t.date,
       transaction_type: t.transaction_type,
-      type_manually_set: t.type_manually_set,
+      // A merchant rule that sets the type is the user's decision, exactly like a hand typed row.
+      type_manually_set: Boolean(t.type_manually_set) || Boolean(mappings.find(t.merchant_name)?.default_transaction_type),
       is_credit_card: isCreditCardAccount(account?.account_type),
       is_cash_account: isCashAccount(account?.account_type),
       plaid_primary: t.plaid_category?.primary ?? null,
+      plaid_detailed: t.plaid_category?.detailed ?? null,
       description: [t.merchant_name, t.original_description].filter(Boolean).join(' '),
       account_label: [account?.institution_name, account?.account_name].filter(Boolean).join(' '),
     };

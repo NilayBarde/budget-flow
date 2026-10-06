@@ -19,6 +19,8 @@ export interface PairingRow {
   /** Checking, savings and similar. Only these can fund a card payment. */
   is_cash_account: boolean;
   plaid_primary?: string | null;
+  /** Plaid's detailed category, e.g. LOAN_PAYMENTS_CREDIT_CARD_PAYMENT. */
+  plaid_detailed?: string | null;
   /** Merchant name and bank description, joined. */
   description?: string | null;
   /** Institution and account name, e.g. "Bilt Rewards Bilt Blue Card". */
@@ -39,35 +41,41 @@ const isLockedNonTransfer = (row: PairingRow): boolean =>
 // ── Card leg ─────────────────────────────────────────────────────────────
 
 // How a card statement words a payment, whichever bank it came from.
-const PAYMENT_WORDS = /\b(payment|pmt|autopay|auto[- ]?pay|thank\s*you)\b/i;
-const CARD_PAYMENT_PFC_PRIMARY = ['LOAN_PAYMENTS', 'TRANSFER_IN'];
+const PAYMENT_WORDS = /\b(payment|pmt|pymt|epay(?:ment)?|autopay|auto[- ]?pay|thank\s*you)\b/i;
 
 // Wording of a credit that is not a payment, even when it also says "payment" ("Payment
-// Protection Credit", "Reward Payment"). "Credit card" is a payment, so only a bare "credit" counts.
+// Protection Credit", "Reward Payment"). A bare "credit" counts, but "credit card", "credit crd",
+// "credit union", "Credit One" and "credit payment" name the card or the payment itself, and an
+// issuer called "Rewards" is only a refund when it says reward payment, points or a redemption.
 const NOT_A_PAYMENT_WORDS =
-  /\b(refund|reversal|rewards?|cashback|bonus|adjustment|adj|protection|dispute)\b|\bstatement\s+credit\b|\bcredit\b(?!\s*card)/i;
+  /\b(refund|reversal|cashback|bonus|adjustment|adj|protection|dispute)\b|\breward(?:s)?\s+(?:payment|points|redemption|credit|statement)\b|\bstatement\s+credit\b|\bcredit\b(?!\s*-?\s*(?:card|crd|union|one|bank|payment|pmt|autopay)\b)/i;
 
 // Money arriving on a card is not necessarily a payment: refunds and statement credits also
-// look like that. It counts as a payment only with positive evidence (already a transfer, Plaid
-// calls it a payment, or the text says so), and never when Plaid gives it a spending category
-// (a merchant refund) or the text says it is a credit. A hand typed transfer settles it either way.
+// look like that. Plaid's loan payment category settles it in favor of a payment, and so does a
+// hand typed transfer. Otherwise it needs positive evidence (already a transfer, a Plaid transfer
+// in, or payment wording) and must not look like a refund: no spending category, no credit wording.
 const isPaymentLeg = (card: PairingRow): boolean => {
   if (isLockedNonTransfer(card)) return false;
   if (card.type_manually_set) return true;
   if (card.plaid_primary && SPENDING_PFC_PRIMARY.includes(card.plaid_primary)) return false;
+  if (card.plaid_primary === 'LOAN_PAYMENTS') return true;
   if (NOT_A_PAYMENT_WORDS.test(card.description ?? '')) return false;
   return (
     card.transaction_type === 'transfer' ||
-    Boolean(card.plaid_primary && CARD_PAYMENT_PFC_PRIMARY.includes(card.plaid_primary)) ||
+    card.plaid_primary === 'TRANSFER_IN' ||
     PAYMENT_WORDS.test(card.description ?? '')
   );
 };
 
 // ── Bank leg ─────────────────────────────────────────────────────────────
 
-// Only Plaid's loan payment category counts. A generic TRANSFER_OUT also covers ATM withdrawals
-// and Venmo sends, so it proves nothing about a card.
-const BANK_PAYMENT_PFC_PRIMARY = ['LOAN_PAYMENTS'];
+// Only Plaid's credit card payment category counts. A generic TRANSFER_OUT also covers ATM
+// withdrawals and Venmo sends, and LOAN_PAYMENTS also covers mortgages and student loans.
+const BANK_CARD_PAYMENT_PFC_DETAILED = 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT';
+
+// A mortgage, loan or insurance payment to the same bank is not a card payment, even if it
+// shares the bank's name with the card.
+const NOT_A_CARD_PAYMENT_WORDS = /\b(mortgage|loan|insurance|premium)\b/i;
 
 // Words that appear on many card payments or cards, so sharing one proves nothing.
 const GENERIC_WORDS = new Set([
@@ -91,7 +99,8 @@ const distinctiveWords = (text?: string | null): Set<string> =>
 // Without this, an unrelated purchase that happens to match an amount would be hidden.
 const looksLikeFundingForCard = (bank: PairingRow, card: PairingRow): boolean => {
   if (bank.transaction_type === 'transfer') return true;
-  if (bank.plaid_primary && BANK_PAYMENT_PFC_PRIMARY.includes(bank.plaid_primary)) return true;
+  if (bank.plaid_detailed === BANK_CARD_PAYMENT_PFC_DETAILED) return true;
+  if (NOT_A_CARD_PAYMENT_WORDS.test(bank.description ?? '')) return false;
 
   const bankWords = distinctiveWords(bank.description);
   if (bankWords.size === 0) return false;

@@ -93,6 +93,7 @@ describe('reconcileCardPayments', () => {
   beforeEach(() => {
     state.accounts = [];
     state.transactions = [];
+    state.mappings = [];
     state.failTransactions = false;
     state.updates = [];
     state.gteCalls = [];
@@ -122,6 +123,14 @@ describe('reconcileCardPayments', () => {
       ['neq', 'transaction_type', 'transfer'],
       ['neq', 'transaction_type', 'investment'],
     ]);
+  });
+
+  it('leaves a bank row alone when a merchant rule gives it a type', async () => {
+    withPaymentPair();
+    state.mappings = [{ id: 'm1', original_name: 'Acme Card - Rent Withdrawal', display_name: 'Rent', default_category_id: null, default_transaction_type: 'expense' }];
+
+    expect(await reconcileCardPayments()).toEqual([]);
+    expect(state.updates).toEqual([]);
   });
 
   it('reports what would change without writing when apply is false', async () => {

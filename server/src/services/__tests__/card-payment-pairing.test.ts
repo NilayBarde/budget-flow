@@ -39,6 +39,29 @@ const bankOutflow = (overrides: Partial<PairingRow> = {}) =>
 const sorted = (ids: string[]) => [...ids].sort();
 
 describe('findCardPaymentCounterparts', () => {
+  it('pairs the exact Bilt rent rows from real data, both the payment and the $2.49 fee', () => {
+    const label = 'Bilt Rewards Bilt Blue Card';
+    const rentCard = cardInflow({
+      amount: -2497.49, transaction_type: 'transfer', plaid_primary: 'INCOME', plaid_detailed: 'INCOME_RENTAL',
+      description: 'Payment - Bilt Housing Payment - Bilt Housing', account_label: label,
+    });
+    const rentBank = bankOutflow({
+      amount: 2497.49, plaid_primary: 'RENT_AND_UTILITIES', plaid_detailed: 'RENT_AND_UTILITIES_RENT',
+      description: 'Bilt Card - HOUSING Withdrawal WITHDRAWAL Bilt Card - HOUSING Withdrawal WITHDRAWAL',
+    });
+    // The $2.49 fee: the card credit was typed return, the bank row expense.
+    const feeCard = cardInflow({
+      amount: -2.49, transaction_type: 'return', plaid_primary: 'INCOME', plaid_detailed: 'INCOME_RENTAL',
+      description: 'Payment - Bilt Housing Payment - Bilt Housing', account_label: label,
+    });
+    const feeBank = bankOutflow({
+      amount: 2.49, plaid_primary: 'RENT_AND_UTILITIES', description: 'Bilt Card - HOUSING Withdrawal WITHDRAWAL',
+    });
+
+    expect(sorted(findCardPaymentCounterparts([rentCard, rentBank, feeCard, feeBank])))
+      .toEqual(sorted([rentBank.id, feeCard.id, feeBank.id]));
+  });
+
   it('retypes the bank leg when it matches a card payment already known to be a transfer', () => {
     // Real Bilt case: the rent payment lands on the card, and the bank withdrawal was typed as spending.
     const card = cardInflow({ amount: -2497.49 });
@@ -104,9 +127,16 @@ describe('findCardPaymentCounterparts', () => {
       expect(findCardPaymentCounterparts([card, atm])).toEqual([]);
     });
 
-    it('accepts a bank row Plaid calls a loan payment', () => {
-      const bank = bankOutflow({ description: 'ACH 3321', plaid_primary: 'LOAN_PAYMENTS' });
+    it('accepts a bank row Plaid calls a credit card payment', () => {
+      const bank = bankOutflow({ description: 'ACH 3321', plaid_primary: 'LOAN_PAYMENTS', plaid_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' });
       expect(findCardPaymentCounterparts([cardInflow(), bank])).toEqual([bank.id]);
+    });
+
+    it('does not accept a mortgage or student loan payment just because Plaid calls it a loan payment', () => {
+      for (const plaid_detailed of ['LOAN_PAYMENTS_MORTGAGE_PAYMENT', 'LOAN_PAYMENTS_STUDENT_LOAN_PAYMENT', 'LOAN_PAYMENTS_CAR_PAYMENT']) {
+        const bank = bankOutflow({ description: 'ACH 3321', plaid_primary: 'LOAN_PAYMENTS', plaid_detailed });
+        expect(findCardPaymentCounterparts([cardInflow(), bank])).toEqual([]);
+      }
     });
 
     it('does not accept a generic Plaid transfer out, which also covers ATM withdrawals and Venmo sends', () => {
@@ -122,10 +152,49 @@ describe('findCardPaymentCounterparts', () => {
       }
     });
 
-    it('still accepts credit card wording that contains the word credit', () => {
-      const card = cardInflow({ transaction_type: 'return', description: 'CREDIT CARD AUTOPAY Acme' });
+    it('still accepts real card payments whose wording contains credit, crd or an issuer name with reward', () => {
+      for (const description of [
+        'CREDIT CARD AUTOPAY Acme',
+        'CREDIT CRD AUTOPAY Acme',
+        'Credit-Card Payment Acme',
+        'Chase Credit Crd Epay Acme',
+        'Navy Federal Credit Union Payment Acme',
+        'Credit One Bank Payment Thank You Acme',
+        'Acme Credit Payment',
+        'Acme Rewards Visa Payment',
+        'Payment Thank You - Acme Rewards',
+      ]) {
+        const card = cardInflow({ transaction_type: 'return', plaid_primary: 'OTHER', description });
+        const bank = bankOutflow();
+        expect(sorted(findCardPaymentCounterparts([card, bank]))).toEqual(sorted([bank.id, card.id]));
+      }
+    });
+
+    it('recognizes PYMT as payment wording', () => {
+      const card = cardInflow({ transaction_type: 'return', plaid_primary: 'OTHER', description: 'ACME MOBILE PYMT' });
       const bank = bankOutflow();
       expect(sorted(findCardPaymentCounterparts([card, bank]))).toEqual(sorted([bank.id, card.id]));
+    });
+
+    it("trusts Plaid's loan payment category over an incidental word in the text", () => {
+      const card = cardInflow({ transaction_type: 'return', plaid_primary: 'LOAN_PAYMENTS', description: 'Reward Payment Acme' });
+      const bank = bankOutflow();
+      expect(sorted(findCardPaymentCounterparts([card, bank]))).toEqual(sorted([bank.id, card.id]));
+    });
+
+    it('still rejects a credit that shares a word with an unrelated bank row, so the credit wording is what blocks it', () => {
+      // The bank row shares "protection" with the credit, so bank evidence passes: only the card
+      // side check stops this pair.
+      const credit = cardInflow({ transaction_type: 'return', plaid_primary: 'OTHER', description: 'Payment Protection Credit', amount: -9.99 });
+      const plan = bankOutflow({ amount: 9.99, description: 'PROTECTION PLAN SUBSCRIPTION' });
+      expect(findCardPaymentCounterparts([credit, plan])).toEqual([]);
+    });
+
+    it('does not pair a mortgage, loan or insurance payment to the card issuer', () => {
+      // Same bank, same cents: a card payment with payment wording, and an unrelated mortgage payment.
+      const card = cardInflow({ amount: -412, description: 'PAYMENT THANK YOU', account_label: 'Wells Fargo Visa Signature' });
+      const mortgage = bankOutflow({ amount: 412, description: 'WELLS FARGO HOME MORTGAGE' });
+      expect(findCardPaymentCounterparts([card, mortgage])).toEqual([]);
     });
 
     it('does not count words common to many payments as a shared name', () => {
