@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 import { categorizeWithPlaid, cleanMerchantName } from '../services/categorizer.js';
 import { getCategoryIdForType } from '../services/category-lookup.js';
 import { getMyShareAmount, type SplitShare } from '../services/category-spend.js';
@@ -306,7 +306,7 @@ router.post('/', async (req, res) => {
     }
 
     const transaction = {
-      id: uuidv4(),
+      id: randomUUID(),
       account_id: null,
       plaid_transaction_id: null,
       amount,
@@ -393,7 +393,7 @@ router.patch('/:id', async (req, res) => {
       await supabase
         .from('merchant_mappings')
         .upsert({
-          id: existingMapping?.id || uuidv4(),
+          id: existingMapping?.id || randomUUID(),
           original_name: transaction.merchant_name,
           display_name: displayName,
           default_category_id: categoryId,
@@ -599,7 +599,7 @@ router.post('/bulk/splits', async (req, res) => {
       // Create splits
       const splitRecords = [
         {
-          id: uuidv4(),
+          id: randomUUID(),
           parent_transaction_id: tx.id,
           amount: myShare,
           description: 'Your portion',
@@ -607,7 +607,7 @@ router.post('/bulk/splits', async (req, res) => {
           created_at: new Date().toISOString(),
         },
         {
-          id: uuidv4(),
+          id: randomUUID(),
           parent_transaction_id: tx.id,
           amount: othersShare,
           description: 'Others',
@@ -654,7 +654,7 @@ router.post('/:id/splits', async (req, res) => {
       .eq('id', id);
 
     const splitRecords = splits.map((s: { amount: number; description: string; is_my_share?: boolean }) => ({
-      id: uuidv4(),
+      id: randomUUID(),
       parent_transaction_id: id,
       amount: s.amount,
       description: s.description,

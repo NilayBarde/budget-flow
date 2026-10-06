@@ -5,7 +5,7 @@ import { applySyncResult } from '../services/sync-transactions.js';
 import { redactError } from '../services/plaid-errors.js';
 import { recordSyncFailure } from '../services/sync-error.js';
 import { toPublicAccount } from '../services/account-redaction.js';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 
 const router = Router();
 
@@ -199,7 +199,7 @@ router.post('/exchange-token', async (req, res) => {
         });
       } else {
         // New account — create it
-        const accountId = uuidv4();
+        const accountId = randomUUID();
         const account = {
           id: accountId,
           user_id: DEFAULT_USER_ID,

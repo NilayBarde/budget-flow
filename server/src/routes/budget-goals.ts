@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { computeCategorySpend, type SpendRow } from '../services/category-spend.js';
 
@@ -92,7 +92,7 @@ router.post(
     const { data, error } = await supabase
       .from('budget_goals')
       .insert({
-        id: uuidv4(),
+        id: randomUUID(),
         category_id,
         month,
         year,
