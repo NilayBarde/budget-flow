@@ -38,6 +38,8 @@ export const SpendingPace = () => {
     const benchmark = hasBudget ? budgetTarget : spendingVelocity.lastMonthTotal;
     const pace = describePace({ projectedTotal: spendingVelocity.projectedTotal, budget: benchmark, hasBudget });
     const isOnPace = pace.onPace;
+    // The projected total takes its color from the same verdict as the status, so the two cannot disagree.
+    const projectedColor = !pace.onPace ? 'text-rose-400' : pace.withinGrace ? 'text-amber-400' : 'text-emerald-400';
 
     return (
         <Card padding="sm">
@@ -95,7 +97,7 @@ export const SpendingPace = () => {
                     </div>
                     <div>
                         <p className="text-xs text-slate-500">Projected Total</p>
-                        <p className={`text-sm font-medium ${spendingVelocity.projectedTotal > benchmark ? 'text-rose-400' : 'text-emerald-400'}`}>
+                        <p className={`text-sm font-medium ${projectedColor}`}>
                             {formatCurrency(spendingVelocity.projectedTotal)}
                         </p>
                         <p className="text-[10px] text-slate-500 mt-0.5">
@@ -117,7 +119,7 @@ export const SpendingPace = () => {
                         </p>
                         {pace.difference !== null && (
                             <p className="text-[10px] text-slate-500 mt-0.5">
-                                {formatCurrency(pace.difference)} {pace.direction} {pace.against}
+                                {formatCurrency(pace.difference)} {pace.direction} {pace.against}{pace.withinGrace ? ' (within 5%)' : ''}
                             </p>
                         )}
                     </div>

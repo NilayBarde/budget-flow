@@ -67,6 +67,34 @@ describe('SpendingPace', () => {
     expect(screen.getByText('$700.00 under budget')).toBeTruthy();
   });
 
+  it('does not call a projection inside the 5% grace a problem, in the words or the color', () => {
+    // $200 over a $5,500 budget is within the grace: the status stays On pace, says so, and is not red.
+    state.insights = insightsWith({ projectedTotal: 5700 });
+    render(<SpendingPace />);
+
+    expect(screen.getByText('On pace')).toBeTruthy();
+    expect(screen.getByText('$200.00 over budget (within 5%)')).toBeTruthy();
+    expect(screen.getByText('$5,700.00').className).not.toContain('text-rose-400');
+  });
+
+  it('shows the projected total in red only when the status is over pace', () => {
+    render(<SpendingPace />);
+    expect(screen.getByText('$6,766.71').className).toContain('text-rose-400');
+
+    state.insights = insightsWith({ projectedTotal: 4800 });
+    render(<SpendingPace />);
+    expect(screen.getByText('$4,800.00').className).toContain('text-emerald-400');
+  });
+
+  it('shows no comparison line when there is nothing to compare against', () => {
+    state.settings = undefined;
+    state.insights = insightsWith({ projectedTotal: 3000, lastMonthTotal: 0 });
+    render(<SpendingPace />);
+
+    expect(screen.getByText('On pace')).toBeTruthy();
+    expect(screen.queryByText(/over last month|under last month/)).toBeNull();
+  });
+
   it('compares with last month when there is no budget', () => {
     state.settings = undefined;
     state.insights = insightsWith({ projectedTotal: 3500 });

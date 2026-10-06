@@ -41,6 +41,27 @@ describe('describePace', () => {
     expect(pace.difference).toBe(1000);
   });
 
+  it('marks a projection that is over the budget but inside the grace, so it is not shown as a problem', () => {
+    const grace = describePace({ projectedTotal: 5700, budget: 5500, hasBudget: true });
+
+    expect(grace.withinGrace).toBe(true);
+    // Well over is not within the grace, and neither is a projection under the budget.
+    expect(describePace({ projectedTotal: 6766.71, budget: 5500, hasBudget: true }).withinGrace).toBe(false);
+    expect(describePace({ projectedTotal: 4800, budget: 5500, hasBudget: true }).withinGrace).toBe(false);
+  });
+
+  it('does not produce NaN from a missing projection or budget', () => {
+    for (const input of [
+      { projectedTotal: NaN, budget: 5500, hasBudget: true },
+      { projectedTotal: 5000, budget: NaN, hasBudget: true },
+      { projectedTotal: Infinity, budget: 5500, hasBudget: true },
+    ]) {
+      const pace = describePace(input);
+      expect(pace.difference).toBeNull();
+      expect(pace.onPace).toBe(true);
+    }
+  });
+
   it('has nothing to compare against when the benchmark is zero', () => {
     const pace = describePace({ projectedTotal: 3000, budget: 0, hasBudget: false });
 

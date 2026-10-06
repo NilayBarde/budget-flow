@@ -4,9 +4,11 @@ export const PACE_GRACE = 1.05;
 
 export interface PaceDescription {
   onPace: boolean;
-  /** How far the projection is from the benchmark, always positive; null when there is no benchmark. */
+  /** How far the projection is from the benchmark, always positive; null when there is no usable benchmark. */
   difference: number | null;
   direction: 'over' | 'under';
+  /** Over the benchmark but inside the grace: on pace, yet not under it. Lets the card say so plainly. */
+  withinGrace: boolean;
   /** What the projection is compared with, for display. */
   against: 'budget' | 'last month';
 }
@@ -20,13 +22,18 @@ interface PaceInput {
 
 export const describePace = ({ projectedTotal, budget, hasBudget }: PaceInput): PaceDescription => {
   const against = hasBudget ? 'budget' : 'last month';
-  if (budget <= 0) return { onPace: true, difference: null, direction: 'under', against };
+  // Nothing sensible to compare: no benchmark, or a number that is not a finite amount.
+  if (!Number.isFinite(projectedTotal) || !Number.isFinite(budget) || budget <= 0) {
+    return { onPace: true, difference: null, direction: 'under', withinGrace: false, against };
+  }
 
   const gap = projectedTotal - budget;
+  const onPace = projectedTotal <= budget * PACE_GRACE;
   return {
-    onPace: projectedTotal <= budget * PACE_GRACE,
+    onPace,
     difference: Math.abs(gap),
     direction: gap > 0 ? 'over' : 'under',
+    withinGrace: onPace && gap > 0,
     against,
   };
 };
