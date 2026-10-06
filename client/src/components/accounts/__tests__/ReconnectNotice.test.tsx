@@ -6,7 +6,8 @@ describe('ReconnectNotice', () => {
   it('tells the user the bank login expired and offers a Reconnect button', () => {
     render(<ReconnectNotice onReconnect={() => {}} />);
 
-    expect(screen.getByRole('alert').textContent).toContain('login expired');
+    // role=status, not alert: this is on screen at page load and would be announced once per card.
+    expect(screen.getByRole('status').textContent).toContain('login expired');
     expect(screen.getByRole('button', { name: 'Reconnect' })).toBeTruthy();
   });
 
