@@ -81,7 +81,7 @@ export const SPENDING_PFC_PRIMARY = [
   'HOME_IMPROVEMENT',
 ];
 
-const isCreditCardAccount = (accountType?: string | null): boolean =>
+export const isCreditCardAccount = (accountType?: string | null): boolean =>
   Boolean(accountType && /credit/i.test(accountType));
 
 /**

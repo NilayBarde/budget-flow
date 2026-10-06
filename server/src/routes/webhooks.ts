@@ -3,6 +3,7 @@ import { supabase } from '../db/supabase.js';
 import * as plaidService from '../services/plaid.js';
 import { categorizeWithPlaid, cleanMerchantName, PlaidPFC } from '../services/categorizer.js';
 import { buildAccountResolver } from '../services/sync-attribution.js';
+import { reconcileCardPaymentsAfterSync } from '../services/card-payment-reconciliation.js';
 import { reconcilePendingTransaction } from '../services/pending-reconciliation.js';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -187,6 +188,8 @@ const processSyncedTransactions = async (
       .eq('plaid_transaction_id', tx.transaction_id);
     removedCount++;
   }
+
+  await reconcileCardPaymentsAfterSync();
 
   return { addedCount, modifiedCount, removedCount, reattributedCount, reconciledCount };
 };

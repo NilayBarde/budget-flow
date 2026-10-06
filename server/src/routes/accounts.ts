@@ -6,6 +6,7 @@ import { detectTransactionType } from '../services/transaction-type.js';
 import { loadManuallyTypedIds, loadMerchantMappings, resolveTransactionType } from '../services/merchant-mappings.js';
 import { getCategoryIdForType } from '../services/category-lookup.js';
 import { buildAccountResolver } from '../services/sync-attribution.js';
+import { reconcileCardPaymentsAfterSync } from '../services/card-payment-reconciliation.js';
 import { getPlaidErrorCode, needsReconnect } from '../services/plaid-errors.js';
 import { reconcilePendingTransaction } from '../services/pending-reconciliation.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -435,6 +436,8 @@ router.post('/:id/sync', async (req, res) => {
       .from('accounts')
       .update({ current_balance: latestBalance })
       .eq('id', id);
+
+    await reconcileCardPaymentsAfterSync();
 
     console.log(`Sync complete: +${addedCount} added, ~${modifiedCount} modified, -${removedCount} removed, ⇄${reattributedCount} re-attributed, ⤳${reconciledCount} pending-reconciled`);
     console.log(`Historical sync status: ${syncResult.transactionsUpdateStatus || 'unknown'}`);

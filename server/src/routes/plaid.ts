@@ -4,6 +4,7 @@ import * as plaidService from '../services/plaid.js';
 import { categorizeWithPlaid, cleanMerchantName, PlaidPFC } from '../services/categorizer.js';
 import { detectTransactionType } from '../services/transaction-type.js';
 import { loadMerchantMappings, resolveTransactionType } from '../services/merchant-mappings.js';
+import { reconcileCardPaymentsAfterSync } from '../services/card-payment-reconciliation.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -323,6 +324,8 @@ router.post('/exchange-token', async (req, res) => {
         .from('accounts')
         .update({ plaid_cursor: syncResult.nextCursor })
         .eq('id', firstAccountId);
+
+      await reconcileCardPaymentsAfterSync();
 
       console.log(`Auto-synced ${syncedCount} transactions across ${createdAccounts.length} accounts`);
     } catch (syncError) {
