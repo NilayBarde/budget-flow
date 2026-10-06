@@ -158,6 +158,39 @@ describe('buildNewTransactionRow', () => {
     });
   });
 
+  it('files coffee and beer under the user\'s own Coffee and Bars categories when they have them', () => {
+    const withCustom = new Map([...categoryMap, ['Coffee', 'cat-coffee'], ['Bars', 'cat-bars']]);
+
+    expect(newRow(tx(), { categoryMap: withCustom }).category_id).toBe('cat-coffee');
+    expect(
+      newRow(
+        tx({ merchant_name: 'Wine Shop', name: 'WINE SHOP', personal_finance_category: { primary: 'FOOD_AND_DRINK', detailed: 'FOOD_AND_DRINK_BEER_WINE_AND_LIQUOR' } }),
+        { categoryMap: withCustom },
+      ).category_id,
+    ).toBe('cat-bars');
+  });
+
+  it('uses Dining for them when the user has no Coffee or Bars category, instead of leaving the row blank', () => {
+    const row = newRow(
+      tx({ personal_finance_category: { primary: 'FOOD_AND_DRINK', detailed: 'FOOD_AND_DRINK_BEER_WINE_AND_LIQUOR' } }),
+    );
+
+    expect(row.category_id).toBe('cat-dining');
+    expect(row.needs_review).toBe(false);
+  });
+
+  it('never files spending under Income or Investment, even when Plaid tags the row as income', () => {
+    // The user typed this merchant as an expense with a rule that has no category, while Plaid calls it income.
+    const row = newRow(
+      tx({ personal_finance_category: { primary: 'INCOME', detailed: 'INCOME_WAGES' } }),
+      { mapping: mapping({ default_transaction_type: 'expense' }) },
+    );
+
+    expect(row.transaction_type).toBe('expense');
+    expect(row.category_id).toBeNull();
+    expect(row.needs_review).toBe(true);
+  });
+
   it('lets a merchant rule set the category, display name and type, and locks the type', () => {
     const row = newRow(tx(), { mapping: mapping({ default_category_id: 'cat-custom', default_transaction_type: 'expense' }) });
 

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { supabase } from '../db/supabase.js';
-import { categorizeWithPlaid, cleanMerchantName, type PlaidPFC } from './categorizer.js';
+import { categorizeWithPlaid, cleanMerchantName, resolveCategoryId, type PlaidPFC } from './categorizer.js';
 import { detectTransactionType, type TransactionType } from './transaction-type.js';
 import { loadManuallyTypedIds, loadMerchantMappings, resolveTransactionType, type MerchantMapping } from './merchant-mappings.js';
 import { reconcilePendingTransaction } from './pending-reconciliation.js';
@@ -43,8 +43,14 @@ export const buildNewTransactionRow = (tx: PlaidTransaction, { accountId, accoun
       categoryId = mapping.default_category_id;
     } else {
       const result = categorizeWithPlaid(tx.merchant_name || tx.name, tx.original_description || tx.name, plaidPFC);
-      categoryId = (result.categoryName && categoryMap.get(result.categoryName)) || null;
+      categoryId = resolveCategoryId(result.categoryName, categoryMap);
       needsReview = result.needsReview;
+      // Income and Investment are for rows typed that way. Spending Plaid tags as income (a merchant the user
+      // typed as an expense, say) is left for the user rather than filed where it would count as earnings.
+      if (categoryId && (categoryId === categoryMap.get('Income') || categoryId === categoryMap.get('Investment'))) {
+        categoryId = null;
+        needsReview = true;
+      }
     }
   } else if (transactionType === 'income') {
     categoryId = categoryMap.get('Income') || null;
