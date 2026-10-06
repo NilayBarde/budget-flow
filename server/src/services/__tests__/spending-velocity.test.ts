@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildFixedCostSeries,
+  circularDayDistance,
   computeSpendingVelocity,
   findSupersededSeries,
   matchRenamedRecurringPayments,
@@ -468,6 +469,7 @@ describe('matchRenamedRecurringPayments', () => {
       new Map(),
       lastSeen,
       [{ day: 5, amount: 2497.49 }],
+      31,
     );
 
     expect(matches).toEqual([
@@ -481,6 +483,7 @@ describe('matchRenamedRecurringPayments', () => {
       new Map([['Landlord Co', 2400]]),
       lastSeen,
       [{ day: 5, amount: 2400 }],
+      31,
     );
 
     expect(matches).toEqual([]);
@@ -492,6 +495,7 @@ describe('matchRenamedRecurringPayments', () => {
       new Map(),
       lastSeen,
       [{ day: 4, amount: 1800 }],
+      31,
     );
 
     expect(matches).toEqual([]);
@@ -503,6 +507,7 @@ describe('matchRenamedRecurringPayments', () => {
       new Map(),
       lastSeen,
       [{ day: 20, amount: 2350 }],
+      31,
     );
 
     expect(matches).toEqual([]);
@@ -516,6 +521,7 @@ describe('matchRenamedRecurringPayments', () => {
       new Map(),
       new Map([['Gym', '2026-09-03']]),
       [{ day: 4, amount: 74 }],
+      31,
     );
 
     expect(matches).toEqual([]);
@@ -527,6 +533,7 @@ describe('matchRenamedRecurringPayments', () => {
       new Map(),
       new Map([['Landlord Co', '2026-09-03'], ['Annual', '2026-09-03']]),
       [{ day: 5, amount: 2400 }],
+      31,
     );
 
     expect(matches).toEqual([]);
@@ -540,6 +547,7 @@ describe('matchRenamedRecurringPayments', () => {
       new Map(),
       new Map([['Landlord Co', '2026-09-03'], ['Other Bill', '2026-09-03']]),
       [{ day: 4, amount: 2410 }],
+      31,
     );
 
     expect(matches).toEqual([
@@ -553,9 +561,38 @@ describe('matchRenamedRecurringPayments', () => {
       new Map(),
       new Map(),
       [{ day: 5, amount: 2400 }],
+      31,
     );
 
     expect(matches).toEqual([]);
+  });
+
+  describe('month boundary wraparound', () => {
+    const matchOn = (lastDate: string, day: number, daysInMonth: number) =>
+      matchRenamedRecurringPayments(
+        [rent],
+        new Map(),
+        new Map([['Landlord Co', lastDate]]),
+        [{ day, amount: 2400 }],
+        daysInMonth,
+      );
+
+    it('matches rent that last posted on the 31st and now posts on the 1st', () => {
+      expect(matchOn('2026-08-31', 1, 31)).toHaveLength(1);
+    });
+
+    it('matches rent that last posted on the 1st and now posts on the 31st', () => {
+      expect(matchOn('2026-09-01', 31, 31)).toHaveLength(1);
+    });
+
+    it.each([28, 29, 30, 31])('wraps correctly in a %i day month', daysInMonth => {
+      expect(matchOn(`2026-01-${daysInMonth}`, 2, daysInMonth)).toHaveLength(1);
+      expect(matchOn('2026-01-02', daysInMonth, daysInMonth)).toHaveLength(1);
+    });
+
+    it('still rejects days that are far apart even with wraparound', () => {
+      expect(matchOn('2026-09-10', 25, 30)).toHaveLength(0);
+    });
   });
 
   describe('regression: October 2026 rent posted under a new merchant name', () => {
@@ -577,7 +614,8 @@ describe('matchRenamedRecurringPayments', () => {
         new Map(),
         new Map([[biltRent.merchantDisplayName, '2026-09-03']]),
         unmatched,
-      );
+      31,
+    );
       expect(match).toBeDefined();
 
       const dailyVariableSpending = [...variableByDay];
@@ -618,13 +656,16 @@ describe('findSupersededSeries', () => {
       [oldRent, newRent],
       new Map([['New Rent Name', 2497.49]]),
       lastSeen,
+      31,
     );
 
     expect([...superseded]).toEqual(['Old Rent Name']);
   });
 
   it('keeps an unpaid series when no sibling has paid', () => {
-    expect(findSupersededSeries([oldRent, newRent], new Map(), lastSeen).size).toBe(0);
+    expect(findSupersededSeries([oldRent, newRent], new Map(), lastSeen,
+      31,
+    ).size).toBe(0);
   });
 
   it('keeps a series that has itself paid this month', () => {
@@ -632,6 +673,7 @@ describe('findSupersededSeries', () => {
       [oldRent, newRent],
       new Map([['Old Rent Name', 2404.99], ['New Rent Name', 2497.49]]),
       lastSeen,
+      31,
     );
 
     expect(superseded.size).toBe(0);
@@ -642,6 +684,7 @@ describe('findSupersededSeries', () => {
       [monthly('Old Rent Name', 1500), newRent],
       new Map([['New Rent Name', 2497.49]]),
       lastSeen,
+      31,
     );
 
     expect(superseded.size).toBe(0);
@@ -652,6 +695,7 @@ describe('findSupersededSeries', () => {
       [oldRent, newRent],
       new Map([['New Rent Name', 2497.49]]),
       new Map([['Old Rent Name', '2026-09-22'], ['New Rent Name', '2026-10-05']]),
+      31,
     );
 
     expect(superseded.size).toBe(0);
@@ -662,6 +706,7 @@ describe('findSupersededSeries', () => {
       [monthly('Gym A', 75), monthly('Gym B', 76)],
       new Map([['Gym B', 76]]),
       new Map([['Gym A', '2026-09-03'], ['Gym B', '2026-10-03']]),
+      31,
     );
 
     expect(superseded.size).toBe(0);
@@ -672,6 +717,7 @@ describe('findSupersededSeries', () => {
       [{ ...oldRent, frequency: 'yearly' as const }, newRent],
       new Map([['New Rent Name', 2497.49]]),
       lastSeen,
+      31,
     );
 
     expect(superseded.size).toBe(0);
@@ -681,7 +727,9 @@ describe('findSupersededSeries', () => {
     it('counts rent once in fixed costs once the new name has paid', () => {
       const charges = [oldRent, newRent];
       const paid = new Map([['New Rent Name', 2497.49]]);
-      const superseded = findSupersededSeries(charges, paid, lastSeen);
+      const superseded = findSupersededSeries(charges, paid, lastSeen,
+      31,
+    );
 
       const fixedCostSeries = buildFixedCostSeries(
         charges.filter(c => !superseded.has(c.merchantDisplayName)),
@@ -692,5 +740,20 @@ describe('findSupersededSeries', () => {
 
       expect(fixedCostSeries).toEqual([{ expectedAmount: 2497.49, paidThisMonth: 2497.49 }]);
     });
+  });
+});
+
+describe('circularDayDistance', () => {
+  it('is the plain difference inside the month', () => {
+    expect(circularDayDistance(3, 6, 31)).toBe(3);
+  });
+
+  it.each([28, 29, 30, 31])('treats the last and first day as 1 apart in a %i day month', n => {
+    expect(circularDayDistance(n, 1, n)).toBe(1);
+    expect(circularDayDistance(1, n, n)).toBe(1);
+  });
+
+  it('is 0 for the same day', () => {
+    expect(circularDayDistance(15, 15, 30)).toBe(0);
   });
 });

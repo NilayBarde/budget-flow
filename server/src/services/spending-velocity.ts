@@ -176,6 +176,13 @@ export const FUZZY_MATCH_TOLERANCE = 0.1;
 export const FUZZY_MATCH_DAY_WINDOW = 7;
 export const FUZZY_MATCH_MIN_AMOUNT = 100;
 
+// Day of month distance that wraps around the month boundary, so rent that
+// last posted on the 31st and now posts on the 1st is 1 day apart, not 30.
+export const circularDayDistance = (a: number, b: number, daysInMonth: number): number => {
+  const diff = Math.abs(a - b);
+  return Math.min(diff, Math.max(0, daysInMonth - diff));
+};
+
 export interface UnmatchedExpense {
   day: number;
   amount: number;
@@ -190,6 +197,7 @@ export const matchRenamedRecurringPayments = (
   paidThisMonthByMerchant: ReadonlyMap<string, number>,
   lastExpenseDateByMerchant: ReadonlyMap<string, string>,
   unmatchedExpenses: UnmatchedExpense[],
+  daysInMonth: number,
 ): RenamedPaymentMatch[] => {
   const candidates = liveCharges
     .filter(
@@ -216,7 +224,7 @@ export const matchRenamedRecurringPayments = (
       if (used.has(i)) return;
       const relativeDiff = Math.abs(expense.amount - charge.averageAmount) / charge.averageAmount;
       if (relativeDiff > FUZZY_MATCH_TOLERANCE) return;
-      if (Math.abs(expense.day - usualDay) > FUZZY_MATCH_DAY_WINDOW) return;
+      if (circularDayDistance(expense.day, usualDay, daysInMonth) > FUZZY_MATCH_DAY_WINDOW) return;
       if (relativeDiff < bestDiff) {
         bestDiff = relativeDiff;
         bestIndex = i;
@@ -244,6 +252,7 @@ export const findSupersededSeries = (
   liveCharges: RecurringChargeRow[],
   paidThisMonthByMerchant: ReadonlyMap<string, number>,
   lastExpenseDateByMerchant: ReadonlyMap<string, string>,
+  daysInMonth: number,
 ): Set<string> => {
   const billingDay = (charge: RecurringChargeRow): number | null => {
     const lastSeen = lastExpenseDateByMerchant.get(charge.merchantDisplayName);
@@ -270,7 +279,7 @@ export const findSupersededSeries = (
         Math.abs(sibling.averageAmount - charge.averageAmount) / charge.averageAmount;
       return (
         relativeDiff <= FUZZY_MATCH_TOLERANCE &&
-        Math.abs(siblingDay - day) <= FUZZY_MATCH_DAY_WINDOW
+        circularDayDistance(siblingDay, day, daysInMonth) <= FUZZY_MATCH_DAY_WINDOW
       );
     });
     if (hasPaidTwin) superseded.add(charge.merchantDisplayName);

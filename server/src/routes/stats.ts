@@ -305,7 +305,6 @@ router.get('/insights', asyncHandler(async (req, res) => {
       const transactionType = t.transaction_type || (t.amount > 0 ? 'expense' : 'income');
       if (transactionType === 'transfer') return;
 
-      const txDate = new Date(t.date);
       // Use string parsing for month/year to avoid timezone shifts
       const dateParts = t.date.split('-');
       const txMonth = parseInt(dateParts[1], 10);
@@ -346,7 +345,7 @@ router.get('/insights', asyncHandler(async (req, res) => {
 
         // Current-month velocity tracking
         if (txMonth === currentMonth && txYear === currentYear) {
-          const day = txDate.getDate();
+          const day = parseInt(dateParts[2], 10);
           currentMonthSpent += amountToCount;
 
           // Track recurring vs variable for velocity
@@ -395,7 +394,7 @@ router.get('/insights', asyncHandler(async (req, res) => {
 
         // Current-month velocity tracking
         if (txMonth === currentMonth && txYear === currentYear) {
-          const day = txDate.getDate();
+          const day = parseInt(dateParts[2], 10);
           dailyVariable.set(day, Math.max(0, (dailyVariable.get(day) || 0) - returnAmount));
           currentMonthSpent = Math.max(0, currentMonthSpent - returnAmount);
         }
@@ -461,6 +460,7 @@ router.get('/insights', asyncHandler(async (req, res) => {
       recurringPaidByMerchant,
       lastExpenseDateByMerchant,
       unmatchedExpenses,
+      daysInMonth,
     );
     for (const payment of renamedPayments) {
       recurringPaidByMerchant.set(
@@ -476,6 +476,7 @@ router.get('/insights', asyncHandler(async (req, res) => {
       liveCharges,
       recurringPaidByMerchant,
       lastExpenseDateByMerchant,
+      daysInMonth,
     );
 
     const dailyVariableSpending: number[] = [];
