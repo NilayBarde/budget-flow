@@ -1,7 +1,7 @@
 import { supabase } from '../db/supabase.js';
 import { cleanMerchantName } from './categorizer.js';
 import { scaleSplits, type SplitInput } from './split-scaling.js';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 
 // Plaid issues a pending authorization and, when it clears, a separate posted
 // transaction with a NEW transaction_id and a `pending_transaction_id` pointing
@@ -88,7 +88,7 @@ export async function reconcilePendingTransaction(
 
     const { error: splitError } = await supabase.from('transaction_splits').insert(
       scaled.map(s => ({
-        id: uuidv4(),
+        id: randomUUID(),
         parent_transaction_id: postedLocalId,
         amount: s.amount,
         description: s.description,

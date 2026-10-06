@@ -3,7 +3,7 @@ import multer from 'multer';
 import { parse } from 'csv-parse/sync';
 import { supabase } from '../db/supabase.js';
 import { categorizeWithPlaid, cleanMerchantName } from '../services/categorizer.js';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 
 const router = Router();
 
@@ -453,7 +453,7 @@ router.post('/:accountId/import', upload.single('file'), async (req, res) => {
     const merchantMappings = await loadMerchantMappings();
 
     // Create import record
-    const importId = uuidv4();
+    const importId = randomUUID();
     const { error: importError } = await supabase.from('csv_imports').insert({
       id: importId,
       account_id: accountId,
@@ -530,7 +530,7 @@ router.post('/:accountId/import', upload.single('file'), async (req, res) => {
 
         // Insert transaction with import_id
         const { error: insertError } = await supabase.from('transactions').insert({
-          id: uuidv4(),
+          id: randomUUID(),
           account_id: accountId,
           plaid_transaction_id: null,
           csv_reference: reference || null,

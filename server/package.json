@@ -21,8 +21,7 @@
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "multer": "^2.4.0",
-    "plaid": "^41.0.0",
-    "uuid": "^14.0.0"
+    "plaid": "^41.0.0"
   },
   "devDependencies": {
     "@types/compression": "^1.8.1",
@@ -30,7 +29,6 @@
     "@types/express": "^5.0.6",
     "@types/multer": "^2.0.0",
     "@types/node": "^25.0.3",
-    "@types/uuid": "^10.0.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.11"

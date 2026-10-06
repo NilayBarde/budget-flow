@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 import { asyncHandler } from '../utils/asyncHandler.js';
 
 const router = Router();
@@ -25,7 +25,7 @@ router.post(
     const { data, error } = await supabase
       .from('tags')
       .insert({
-        id: uuidv4(),
+        id: randomUUID(),
         name,
         color,
         created_at: new Date().toISOString(),

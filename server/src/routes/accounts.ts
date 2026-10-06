@@ -8,7 +8,7 @@ import { recordSyncFailure } from '../services/sync-error.js';
 import { classifySyncHealth, DEFAULT_STALE_DAYS, INVESTMENT_STALE_DAYS, parseStaleDaysOverride } from '../services/sync-health.js';
 import { isHoldingsAccountType } from '../services/account-types.js';
 import { toPublicAccount } from '../services/account-redaction.js';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 
 const router = Router();
 
@@ -98,7 +98,7 @@ router.post('/manual', async (req, res) => {
       });
     }
 
-    const accountId = uuidv4();
+    const accountId = randomUUID();
     const manualId = `manual-${accountId}`;
 
     const account: Record<string, unknown> = {
@@ -441,7 +441,7 @@ router.post('/:id/refresh-accounts', async (req, res) => {
       }
 
       // Create new account
-      const accountId = uuidv4();
+      const accountId = randomUUID();
       const account = {
         id: accountId,
         user_id: existingAccount.user_id,

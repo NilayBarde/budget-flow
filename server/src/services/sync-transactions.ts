@@ -1,4 +1,4 @@
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 import { supabase } from '../db/supabase.js';
 import { categorizeWithPlaid, cleanMerchantName, type PlaidPFC } from './categorizer.js';
 import { detectTransactionType, type TransactionType } from './transaction-type.js';
@@ -237,7 +237,7 @@ export const applySyncResult = async ({
     }
 
     const row = {
-      id: uuidv4(),
+      id: randomUUID(),
       ...buildNewTransactionRow(tx, {
         accountId,
         accountType: accountTypeById.get(accountId),
