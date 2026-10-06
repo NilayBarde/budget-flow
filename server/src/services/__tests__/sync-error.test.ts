@@ -51,6 +51,19 @@ describe('describeSyncError', () => {
     expect(text).not.toContain('client-id-value');
   });
 
+  it('does not leak credentials from an error that wraps a Plaid failure', () => {
+    // The credentials sit on the inner error's request config. Only the message may be kept.
+    const wrapped = new Error('Sync failed while saving', { cause: plaidError('RATE_LIMIT', 'too many requests') });
+    const aggregate = new AggregateError([plaidError('RATE_LIMIT', 'too many requests')], 'several failures');
+
+    for (const error of [wrapped, aggregate]) {
+      const text = describeSyncError(error);
+      expect(text).not.toContain('super-secret-value');
+      expect(text).not.toContain('client-id-value');
+      expect(text.length).toBeGreaterThan(0);
+    }
+  });
+
   it('reads a database failure as its code and message, without the failing row', () => {
     const text = describeSyncError({
       code: '23505',
@@ -104,6 +117,22 @@ describe('recordSyncFailure', () => {
 
     expect(logged).toHaveBeenCalled();
     logged.mockRestore();
+  });
+
+  it('also flags the item for reconnecting when the login expired, so every sync path agrees', async () => {
+    await recordSyncFailure('item-1', plaidError('ITEM_LOGIN_REQUIRED', 'the login details of this item have changed'));
+
+    const flag = db.updates.find(u => 'needs_reauth' in u.payload);
+    expect(flag?.filters).toEqual([['plaid_item_id', 'item-1']]);
+    expect(flag?.payload.needs_reauth).toBe(true);
+    expect(new Date(flag?.payload.reauth_detected_at as string).getTime()).not.toBeNaN();
+  });
+
+  it('does not flag a reconnect for any other failure', async () => {
+    await recordSyncFailure('item-1', plaidError('RATE_LIMIT_EXCEEDED', 'too many requests'));
+    await recordSyncFailure('item-1', new Error('Failed to save 1 transaction(s).'));
+
+    expect(db.updates.some(u => 'needs_reauth' in u.payload)).toBe(false);
   });
 
   it('does nothing when the item is unknown', async () => {

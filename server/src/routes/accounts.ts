@@ -276,24 +276,22 @@ router.post('/:id/sync', async (req, res) => {
     // redactError, not the raw error: an axios error carries the request headers, including the Plaid secret.
     console.error('Error syncing account:', redactError(error));
 
-    // Save the reason on the item so the app can show it. Errors from the transaction fetch were
-    // already saved above and are saved again here with the same text, which is harmless.
-    const { data: failedAccount } = await supabase
-      .from('accounts')
-      .select('plaid_item_id')
-      .eq('id', req.params.id)
-      .single();
-    await recordSyncFailure(failedAccount?.plaid_item_id, error);
+    // Save the reason on the item so the app can show it, and flag an expired login so the
+    // dashboard offers Reconnect (webhooks also flag this, but they can be missed). Errors from the
+    // transaction fetch were already saved above and are saved again here, which is harmless. This
+    // must not stop the response below, so a failure here is only logged.
+    try {
+      const { data: failedAccount } = await supabase
+        .from('accounts')
+        .select('plaid_item_id')
+        .eq('id', req.params.id)
+        .single();
+      await recordSyncFailure(failedAccount?.plaid_item_id, error);
+    } catch (recordError) {
+      console.error('Could not record the sync failure:', redactError(recordError));
+    }
 
     if (needsReconnect(plaidErrorCode)) {
-      // Webhooks are the only other place that flags this, and they can be missed. Flag every
-      // account on the item so the dashboard offers Reconnect instead of a vague stale warning.
-      if (failedAccount) {
-        await supabase
-          .from('accounts')
-          .update({ needs_reauth: true, reauth_detected_at: new Date().toISOString() })
-          .eq('plaid_item_id', failedAccount.plaid_item_id);
-      }
       return res.status(409).json({ message: 'This connection needs to be reconnected', code: plaidErrorCode });
     }
 

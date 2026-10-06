@@ -3,6 +3,7 @@ import { supabase } from '../db/supabase.js';
 import * as plaidService from '../services/plaid.js';
 import { applySyncResult } from '../services/sync-transactions.js';
 import { redactError } from '../services/plaid-errors.js';
+import { recordSyncFailure } from '../services/sync-error.js';
 import { toPublicAccount } from '../services/account-redaction.js';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -260,6 +261,8 @@ router.post('/exchange-token', async (req, res) => {
       }
     } catch (syncError) {
       console.error('Auto-sync failed (accounts created, but transactions need manual sync):', redactError(syncError));
+      // Without this the new accounts would show as never synced, with no reason.
+      await recordSyncFailure(itemId, syncError);
     }
 
     // Return the first created account for backwards compatibility
