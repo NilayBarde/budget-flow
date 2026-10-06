@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Scissors } from 'lucide-react';
 import { Card, Button } from '../ui';
 import { useTransactions, useUpdateTransaction, useModalState } from '../../hooks';
@@ -18,6 +19,12 @@ export const LargeUnsplitTransactions = ({ month, year }: LargeUnsplitTransactio
     const { data: transactions } = useTransactions({ month, year, transaction_type: 'expense' });
     const splitModal = useModalState<Transaction>();
     const updateTransaction = useUpdateTransaction();
+    const [saveFailed, setSaveFailed] = useState(false);
+
+    const keepWhole = (id: string) => {
+        setSaveFailed(false);
+        updateTransaction.mutate({ id, data: { split_dismissed: true } }, { onError: () => setSaveFailed(true) });
+    };
 
     const candidates = findMissedSplitCandidates(transactions || [], LARGE_UNSPLIT_THRESHOLD);
 
@@ -38,8 +45,8 @@ export const LargeUnsplitTransactions = ({ month, year }: LargeUnsplitTransactio
                         Large expenses ({formatCurrency(LARGE_UNSPLIT_THRESHOLD)}+) that haven't been split.
                     </p>
                     {shown.map(t => (
-                        <div key={t.id} className="flex items-center justify-between gap-3 text-sm">
-                            <div className="min-w-0">
+                        <div key={t.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-sm">
+                            <div className="min-w-0 flex-1 basis-32">
                                 <p className="font-medium text-slate-200 truncate">
                                     {t.merchant_display_name || t.merchant_name}
                                 </p>
@@ -57,13 +64,18 @@ export const LargeUnsplitTransactions = ({ month, year }: LargeUnsplitTransactio
                                     size="sm"
                                     aria-label={`Don't split ${t.merchant_display_name || t.merchant_name}`}
                                     disabled={updateTransaction.isPending}
-                                    onClick={() => updateTransaction.mutate({ id: t.id, data: { split_dismissed: true } })}
+                                    onClick={() => keepWhole(t.id)}
                                 >
                                     Don't split
                                 </Button>
                             </div>
                         </div>
                     ))}
+                    {saveFailed && (
+                        <p role="alert" className="text-xs text-rose-400">
+                            Could not save that change. Try again.
+                        </p>
+                    )}
                     {hiddenCount > 0 && (
                         <p className="text-xs text-slate-500">+{hiddenCount} more above the threshold</p>
                     )}

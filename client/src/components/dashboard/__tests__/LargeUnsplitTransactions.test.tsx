@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import type { Transaction } from '../../../types';
 
 const state = {
@@ -43,7 +43,31 @@ describe('LargeUnsplitTransactions', () => {
     fireEvent.click(screen.getByRole('button', { name: "Don't split Bilt Housing Payment" }));
 
     expect(state.mutate).toHaveBeenCalledTimes(1);
-    expect(state.mutate).toHaveBeenCalledWith({ id: 'rent', data: { split_dismissed: true } });
+    expect(state.mutate).toHaveBeenCalledWith(
+      { id: 'rent', data: { split_dismissed: true } },
+      expect.objectContaining({ onError: expect.any(Function) }),
+    );
+  });
+
+  it('tells the user when the change could not be saved, instead of doing nothing', () => {
+    render(<LargeUnsplitTransactions month={10} year={2026} />);
+
+    fireEvent.click(screen.getByRole('button', { name: "Don't split Bilt Housing Payment" }));
+    const [, options] = state.mutate.mock.calls[0] as [unknown, { onError: (error: Error) => void }];
+    act(() => options.onError(new Error('Failed to update transaction')));
+
+    expect(screen.getByRole('alert').textContent).toContain('Could not save');
+  });
+
+  it('clears that message on the next attempt', () => {
+    render(<LargeUnsplitTransactions month={10} year={2026} />);
+
+    fireEvent.click(screen.getByRole('button', { name: "Don't split Bilt Housing Payment" }));
+    const [, options] = state.mutate.mock.calls[0] as [unknown, { onError: (error: Error) => void }];
+    act(() => options.onError(new Error('boom')));
+    fireEvent.click(screen.getByRole('button', { name: "Don't split Cos" }));
+
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('does not list a transaction already marked as not to be split', () => {
