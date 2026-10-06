@@ -247,10 +247,11 @@ router.post('/:id/sync', async (req, res) => {
     // local row rather than dumping them all onto the row that triggered sync.
     const { data: itemAccounts } = await supabase
       .from('accounts')
-      .select('id, plaid_account_id')
+      .select('id, plaid_account_id, account_type')
       .eq('plaid_item_id', account.plaid_item_id);
 
     const resolveAccountId = buildAccountResolver(itemAccounts || [], id);
+    const accountTypeById = new Map((itemAccounts || []).map(a => [a.id, a.account_type]));
 
     let addedCount = 0;
     let modifiedCount = 0;
@@ -288,7 +289,7 @@ router.post('/:id/sync', async (req, res) => {
       const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
 
       // Detect transaction type with Plaid PFC, unless the user already corrected this merchant
-      const detectedType = detectTransactionType(tx.amount, texts, plaidPFC);
+      const detectedType = detectTransactionType(tx.amount, texts, plaidPFC, null, accountTypeById.get(targetAccountId));
       const transactionType = resolveTransactionType(detectedType, mapping);
 
       // Auto-assign category only for expenses and returns
@@ -351,7 +352,13 @@ router.post('/:id/sync', async (req, res) => {
       const mapping = merchantMappings.find(tx.merchant_name, tx.name);
       const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
 
-      const detectedType = detectTransactionType(tx.amount, texts, plaidPFC);
+      const detectedType = detectTransactionType(
+        tx.amount,
+        texts,
+        plaidPFC,
+        null,
+        accountTypeById.get(resolveAccountId(tx.account_id)),
+      );
 
       // Preserve a user-customized display name. merchant_display_name is
       // user-editable and wins in the UI, so only refresh it when it still

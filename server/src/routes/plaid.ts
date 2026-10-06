@@ -156,7 +156,7 @@ router.post('/exchange-token', async (req, res) => {
 
     const institutionName = metadata?.institution?.name || 'Unknown';
     const plaidAccounts = accountsResponse.accounts;
-    const createdAccounts: Array<{ id: string; plaid_account_id: string }> = [];
+    const createdAccounts: Array<{ id: string; plaid_account_id: string; account_type: string }> = [];
 
     console.log(`Found ${plaidAccounts.length} accounts from ${institutionName}`);
 
@@ -196,7 +196,11 @@ router.post('/exchange-token', async (req, res) => {
         }
 
         console.log(`Updated existing account: ${institutionName} - ${plaidAccount.name} (relinked)`);
-        createdAccounts.push({ id: existingId, plaid_account_id: plaidAccount.account_id });
+        createdAccounts.push({
+          id: existingId,
+          plaid_account_id: plaidAccount.account_id,
+          account_type: plaidAccount.subtype || plaidAccount.type || 'unknown',
+        });
       } else {
         // New account — create it
         const accountId = uuidv4();
@@ -221,7 +225,11 @@ router.post('/exchange-token', async (req, res) => {
         }
 
         console.log(`Created account: ${institutionName} - ${plaidAccount.name} (${plaidAccount.subtype || plaidAccount.type})`);
-        createdAccounts.push({ id: accountId, plaid_account_id: plaidAccount.account_id });
+        createdAccounts.push({
+          id: accountId,
+          plaid_account_id: plaidAccount.account_id,
+          account_type: account.account_type,
+        });
       }
     }
 
@@ -234,6 +242,7 @@ router.post('/exchange-token', async (req, res) => {
 
     // Create a map of Plaid account IDs to our account IDs
     const accountIdMap = new Map(createdAccounts.map(a => [a.plaid_account_id, a.id]));
+    const accountTypeById = new Map(createdAccounts.map(a => [a.id, a.account_type]));
 
     try {
       const syncResult = await plaidService.syncTransactions(accessToken, null);
@@ -261,7 +270,7 @@ router.post('/exchange-token', async (req, res) => {
         // Check for existing merchant mapping (user's previous corrections)
         const mapping = merchantMappings.find(tx.merchant_name, tx.name);
 
-        const detectedType = detectTransactionType(tx.amount, texts, plaidPFC);
+        const detectedType = detectTransactionType(tx.amount, texts, plaidPFC, null, accountTypeById.get(accountId));
         const transactionType = resolveTransactionType(detectedType, mapping);
 
         // Auto-assign category based on type and Plaid's categorization
