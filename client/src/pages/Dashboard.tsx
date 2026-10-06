@@ -2,15 +2,11 @@ import { RefreshCw } from 'lucide-react';
 import { Card, CardHeader, Spinner, Button, MonthSelector, CategoryPieChart, ErrorState } from '../components/ui';
 import { DashboardHero } from '../components/dashboard/DashboardHero';
 import { SyncHealthBanner } from '../components/dashboard/SyncHealthBanner';
-import { DailySpending } from '../components/dashboard/DailySpending';
-import { SpendingPace } from '../components/dashboard/SpendingPace';
 import { RecentActivity } from '../components/dashboard/RecentActivity';
-import { BudgetWatchlist } from '../components/dashboard/BudgetWatchlist';
-import { BudgetVariance } from '../components/dashboard/BudgetVariance';
+import { BudgetStatus } from '../components/dashboard/BudgetStatus';
 import { LargeUnsplitTransactions } from '../components/dashboard/LargeUnsplitTransactions';
 import { useMonthlyStats, useMonthNavigation, usePrefetchAdjacentMonths } from '../hooks';
 import { MONTHS } from '../utils/constants';
-import { isCurrentMonth } from '../utils/month';
 
 export const Dashboard = () => {
   const { currentDate, handlePrevMonth, handleNextMonth } = useMonthNavigation();
@@ -18,9 +14,6 @@ export const Dashboard = () => {
 
   // Warm the cache for the neighboring months so prev/next paints instantly
   usePrefetchAdjacentMonths(currentDate.month, currentDate.year);
-
-  // Check if viewing current month for Spending Pace widget
-  const viewingCurrentMonth = isCurrentMonth(currentDate.month, currentDate.year);
 
   // No page-level loading gate: every widget has its own loading state, so
   // mounting them immediately lets their queries fire in parallel instead of
@@ -72,15 +65,10 @@ export const Dashboard = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column (2/3 width on large screens) */}
         <div className="lg:col-span-2 space-y-6">
-          <BudgetVariance
+          <BudgetStatus
             month={currentDate.month}
             year={currentDate.year}
           />
-          <DailySpending
-            month={currentDate.month}
-            year={currentDate.year}
-          />
-          {viewingCurrentMonth && <SpendingPace />}
           <RecentActivity
             month={currentDate.month}
             year={currentDate.year}
@@ -106,11 +94,6 @@ export const Dashboard = () => {
                 )}
               </div>
             </Card>
-
-            <BudgetWatchlist
-              month={currentDate.month}
-              year={currentDate.year}
-            />
 
             <LargeUnsplitTransactions
               month={currentDate.month}
