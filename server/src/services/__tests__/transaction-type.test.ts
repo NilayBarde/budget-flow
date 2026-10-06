@@ -274,6 +274,41 @@ describe('detectTransactionType', () => {
     });
   });
 
+  // ── Credit card inflows ───────────────────────────────────────────────
+
+  describe('credit card inflows', () => {
+    it('a payment into a credit card is a transfer even when Plaid tags it INCOME', () => {
+      // Real Bilt row: the bank autopay landing on the card, tagged INCOME_RENTAL by Plaid.
+      expect(
+        detectTransactionType(
+          -2497.49,
+          ['Payment - Bilt Housing'],
+          { primary: 'INCOME', detailed: 'INCOME_RENTAL' },
+          null,
+          'credit card',
+        ),
+      ).toBe('transfer');
+    });
+
+    it('still treats income as income on a checking account', () => {
+      expect(
+        detectTransactionType(-3000, ['Employer'], { primary: 'INCOME' }, null, 'checking'),
+      ).toBe('income');
+    });
+
+    it('still treats a refund on a credit card as a return', () => {
+      expect(
+        detectTransactionType(-20, ['Amazon'], { primary: 'GENERAL_MERCHANDISE' }, null, 'credit card'),
+      ).toBe('return');
+    });
+
+    it('does not change behavior when the account type is unknown', () => {
+      expect(
+        detectTransactionType(-2497.49, ['Payment - Bilt Housing'], { primary: 'INCOME' }),
+      ).toBe('income');
+    });
+  });
+
   // ── Edge cases ────────────────────────────────────────────────────────
 
   describe('edge cases', () => {

@@ -25,11 +25,12 @@ const lastWebhookSyncByItem = new Map<string, number>();
 // `triggeringAccountId` is the fallback when a transaction's account_id is
 // unknown (single-account items, or an account not yet stored locally).
 const processSyncedTransactions = async (
-  itemAccounts: { id: string; plaid_account_id: string | null }[],
+  itemAccounts: { id: string; plaid_account_id: string | null; account_type?: string | null }[],
   triggeringAccountId: string,
   syncResult: Awaited<ReturnType<typeof plaidService.syncTransactions>>
 ) => {
   const resolveAccountId = buildAccountResolver(itemAccounts, triggeringAccountId);
+  const accountTypeById = new Map(itemAccounts.map(a => [a.id, a.account_type]));
 
   // Get categories for mapping
   const { data: categories } = await supabase.from('categories').select('id, name');
@@ -71,7 +72,7 @@ const processSyncedTransactions = async (
     const mapping = merchantMappings.find(tx.merchant_name, tx.name);
     const displayName = mapping?.display_name || cleanMerchantName(tx.merchant_name || tx.name);
     const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
-    const detectedType = detectTransactionType(tx.amount, texts, plaidPFC);
+    const detectedType = detectTransactionType(tx.amount, texts, plaidPFC, null, accountTypeById.get(targetAccountId));
     const transactionType = resolveTransactionType(detectedType, mapping);
 
     // Auto-assign category based on type with Plaid-first approach
@@ -134,7 +135,13 @@ const processSyncedTransactions = async (
     const newMerchantName = tx.merchant_name || tx.name;
     const mapping = merchantMappings.find(tx.merchant_name, tx.name);
     const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
-    const detectedType = detectTransactionType(tx.amount, texts, plaidPFC);
+    const detectedType = detectTransactionType(
+      tx.amount,
+      texts,
+      plaidPFC,
+      null,
+      accountTypeById.get(resolveAccountId(tx.account_id)),
+    );
 
     // Preserve a user-customized display name (it wins in the UI); only refresh
     // it when it still equals the auto-cleaned form of the prior merchant_name.

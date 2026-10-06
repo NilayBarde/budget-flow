@@ -81,6 +81,9 @@ export const SPENDING_PFC_PRIMARY = [
   'HOME_IMPROVEMENT',
 ];
 
+const isCreditCardAccount = (accountType?: string | null): boolean =>
+  Boolean(accountType && /credit/i.test(accountType));
+
 /**
  * Detect transaction type based on amount and patterns.
  *
@@ -91,12 +94,14 @@ export const SPENDING_PFC_PRIMARY = [
  * @param texts - Array of text strings to check against patterns (merchant name, full name, description, etc.)
  * @param plaidPFC - Optional Plaid personal finance category
  * @param plaidCategories - Optional legacy Plaid category strings
+ * @param accountType - Optional type of the account the transaction belongs to
  */
 export const detectTransactionType = (
   amount: number,
   texts: string[],
   plaidPFC?: PlaidPFC | null,
   plaidCategories?: string[] | null,
+  accountType?: string | null,
 ): TransactionType => {
   const hasSpendingCategory = Boolean(
     plaidPFC?.primary && SPENDING_PFC_PRIMARY.includes(plaidPFC.primary),
@@ -138,7 +143,10 @@ export const detectTransactionType = (
       }
     }
     if (pfcPrimary === 'INCOME') {
-      return 'income';
+      // A credit card never receives income. Money arriving on one is the bank paying the
+      // card (Plaid sometimes tags that INCOME, e.g. "Payment - Bilt Housing" as
+      // INCOME_RENTAL), which is a transfer between the user's own accounts.
+      return isCreditCardAccount(accountType) && amount < 0 ? 'transfer' : 'income';
     }
   }
 
