@@ -1,10 +1,7 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
 import * as plaidService from '../services/plaid.js';
-import { categorizeWithPlaid, cleanMerchantName, PlaidPFC } from '../services/categorizer.js';
-import { detectTransactionType } from '../services/transaction-type.js';
-import { loadMerchantMappings, resolveTransactionType } from '../services/merchant-mappings.js';
-import { reconcileCardPaymentsAfterSync } from '../services/card-payment-reconciliation.js';
+import { applySyncResult } from '../services/sync-transactions.js';
 import { redactError } from '../services/plaid-errors.js';
 import { toPublicAccount } from '../services/account-redaction.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -245,87 +242,18 @@ router.post('/exchange-token', async (req, res) => {
     try {
       const syncResult = await plaidService.syncTransactions(accessToken, null);
 
-      // Get categories for mapping
-      const { data: categories } = await supabase.from('categories').select('id, name');
-      const categoryMap = new Map(categories?.map(c => [c.name, c.id]) || []);
+      // The same save every sync path uses: the transactions, the cursor and the sync time. A first
+      // link imports a long history, so card payments are paired across all of it.
+      const counts = await applySyncResult({
+        plaidItemId: itemId,
+        syncResult,
+        resolveAccountId: plaidAccountId => accountIdMap.get(plaidAccountId),
+        accountTypeById,
+        historicalComplete: syncResult.transactionsUpdateStatus === 'HISTORICAL_UPDATE_COMPLETE',
+        reconcileSinceDate: null,
+      });
 
-      // Get merchant mappings for user-defined categorizations
-      const merchantMappings = await loadMerchantMappings();
-
-      let syncedCount = 0;
-      for (const tx of syncResult.added) {
-        // Map the transaction to the correct account using Plaid's account_id
-        const accountId = accountIdMap.get(tx.account_id);
-        if (!accountId) {
-          console.warn(`No matching account for transaction with Plaid account_id: ${tx.account_id}`);
-          continue;
-        }
-
-        const texts = [tx.merchant_name || '', tx.name || '', tx.original_description || ''];
-        const displayName = cleanMerchantName(tx.merchant_name || tx.name);
-        const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
-
-        // Check for existing merchant mapping (user's previous corrections)
-        const mapping = merchantMappings.find(tx.merchant_name, tx.name);
-
-        const detectedType = detectTransactionType(tx.amount, texts, plaidPFC, accountTypeById.get(accountId));
-        const transactionType = resolveTransactionType(detectedType, mapping);
-
-        // Auto-assign category based on type and Plaid's categorization
-        let categoryId: string | null = null;
-        let needsReview = false;
-
-        if (transactionType === 'expense') {
-          // Priority: merchant mapping > Plaid PFC > pattern matching
-          if (mapping?.default_category_id) {
-            categoryId = mapping.default_category_id;
-          } else {
-            const result = categorizeWithPlaid(
-              tx.merchant_name || tx.name,
-              tx.original_description,
-              plaidPFC
-            );
-            categoryId = categoryMap.get(result.categoryName) || null;
-            needsReview = result.needsReview;
-          }
-        } else if (transactionType === 'income') {
-          categoryId = categoryMap.get('Income') || null;
-        } else if (transactionType === 'investment') {
-          categoryId = categoryMap.get('Investment') || null;
-        }
-
-        await supabase.from('transactions').insert({
-          id: uuidv4(),
-          account_id: accountId,
-          plaid_transaction_id: tx.transaction_id,
-          amount: tx.amount,
-          date: tx.date,
-          merchant_name: tx.merchant_name || tx.name,
-          original_description: tx.original_description || tx.name,
-          merchant_display_name: mapping?.display_name || displayName,
-          category_id: categoryId,
-          transaction_type: transactionType,
-          type_manually_set: Boolean(mapping?.default_transaction_type),
-          is_split: false,
-          is_recurring: false,
-          needs_review: needsReview,
-          pending: tx.pending,
-          plaid_category: plaidPFC || null,
-        });
-        syncedCount++;
-      }
-
-      // Save the cursor for future syncs - store on the first account (they all share the same access token)
-      const firstAccountId = createdAccounts[0].id;
-      await supabase
-        .from('accounts')
-        .update({ plaid_cursor: syncResult.nextCursor })
-        .eq('id', firstAccountId);
-
-      // A first link imports a long history, so pair payments across all of it.
-      await reconcileCardPaymentsAfterSync({ sinceDate: null });
-
-      console.log(`Auto-synced ${syncedCount} transactions across ${createdAccounts.length} accounts`);
+      console.log(`Auto-synced ${counts.added} transactions across ${createdAccounts.length} accounts`);
     } catch (syncError) {
       console.error('Auto-sync failed (accounts created, but transactions need manual sync):', redactError(syncError));
     }

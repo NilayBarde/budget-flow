@@ -1,17 +1,16 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
 import * as plaidService from '../services/plaid.js';
-import { categorizeWithPlaid, cleanMerchantName, PlaidPFC } from '../services/categorizer.js';
+import { categorizeWithPlaid, PlaidPFC } from '../services/categorizer.js';
 import { detectTransactionType } from '../services/transaction-type.js';
-import { loadManuallyTypedIds, loadMerchantMappings, resolveTransactionType } from '../services/merchant-mappings.js';
+import { loadMerchantMappings, resolveTransactionType } from '../services/merchant-mappings.js';
 import { getCategoryIdForType } from '../services/category-lookup.js';
 import { buildAccountResolver } from '../services/sync-attribution.js';
-import { reconcileCardPaymentsAfterSync } from '../services/card-payment-reconciliation.js';
+import { applySyncResult } from '../services/sync-transactions.js';
 import { getPlaidErrorCode, needsReconnect, redactError } from '../services/plaid-errors.js';
 import { classifySyncHealth, DEFAULT_STALE_DAYS, INVESTMENT_STALE_DAYS, parseStaleDaysOverride } from '../services/sync-health.js';
 import { isHoldingsAccountType } from '../services/account-types.js';
 import { toPublicAccount } from '../services/account-redaction.js';
-import { reconcilePendingTransaction } from '../services/pending-reconciliation.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -231,220 +230,38 @@ router.post('/:id/sync', async (req, res) => {
       throw syncError;
     }
 
-    // Get categories for mapping
-    const { data: categories } = await supabase
-      .from('categories')
-      .select('id, name');
-
-    const categoryMap = new Map(categories?.map(c => [c.name, c.id]) || []);
-
-    // Get merchant mappings (user's previous corrections)
-    const merchantMappings = await loadMerchantMappings();
-
-    // A Plaid item can hold multiple accounts (e.g. an Amex login with both a
-    // Gold and a Platinum card). /transactions/sync returns all of them tagged
-    // with their own account_id, so attribute each transaction to the correct
-    // local row rather than dumping them all onto the row that triggered sync.
+    // A Plaid item can hold multiple accounts (e.g. an Amex login with both a Gold and a Platinum
+    // card). /transactions/sync returns all of them tagged with their own account_id, so each
+    // transaction is attributed to the right local row rather than to the row that triggered sync.
     const { data: itemAccounts } = await supabase
       .from('accounts')
       .select('id, plaid_account_id, account_type')
       .eq('plaid_item_id', account.plaid_item_id);
 
-    const resolveAccountId = buildAccountResolver(itemAccounts || [], id);
-    const accountTypeById = new Map((itemAccounts || []).map(a => [a.id, a.account_type]));
-
-    let addedCount = 0;
-    let modifiedCount = 0;
-    let removedCount = 0;
-    let reattributedCount = 0;
-    let reconciledCount = 0;
-
-    // Handle added transactions
-    for (const tx of syncResult.added) {
-      const targetAccountId = resolveAccountId(tx.account_id);
-
-      // Check if already exists
-      const { data: existing } = await supabase
-        .from('transactions')
-        .select('id, account_id')
-        .eq('plaid_transaction_id', tx.transaction_id)
-        .single();
-
-      if (existing) {
-        // Re-attribute if a prior sync filed this transaction under the wrong
-        // card. Preserves all user edits (splits, category, notes, display name).
-        if (existing.account_id !== targetAccountId) {
-          await supabase
-            .from('transactions')
-            .update({ account_id: targetAccountId })
-            .eq('id', existing.id);
-          reattributedCount++;
-        }
-        continue;
-      }
-
-      const texts = [tx.merchant_name || '', tx.name || '', (tx as { original_description?: string }).original_description || ''];
-      const mapping = merchantMappings.find(tx.merchant_name, tx.name);
-      const displayName = mapping?.display_name || cleanMerchantName(tx.merchant_name || tx.name);
-      const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
-
-      // Detect transaction type with Plaid PFC, unless the user already corrected this merchant
-      const detectedType = detectTransactionType(tx.amount, texts, plaidPFC, accountTypeById.get(targetAccountId));
-      const transactionType = resolveTransactionType(detectedType, mapping);
-
-      // Auto-assign category only for expenses and returns
-      // Income, investment, and transfer types don't need categories - the type is sufficient
-      let categoryId: string | null = null;
-      let needsReview = false;
-
-      if (transactionType === 'expense' || transactionType === 'return') {
-        // Returns use the same categorization as expenses (e.g., Amazon return → Shopping)
-        if (mapping?.default_category_id) {
-          categoryId = mapping.default_category_id;
-        } else {
-          const result = categorizeWithPlaid(
-            tx.merchant_name || tx.name,
-            (tx as { original_description?: string }).original_description,
-            plaidPFC
-          );
-          categoryId = categoryMap.get(result.categoryName) || null;
-          needsReview = result.needsReview;
-        }
-      }
-
-      const newTxId = uuidv4();
-      await supabase.from('transactions').insert({
-        id: newTxId,
-        account_id: targetAccountId,
-        plaid_transaction_id: tx.transaction_id,
-        amount: tx.amount,
-        date: tx.date,
-        merchant_name: tx.merchant_name || tx.name,
-        original_description: (tx as { original_description?: string }).original_description || tx.name,
-        merchant_display_name: displayName,
-        category_id: categoryId,
-        transaction_type: transactionType,
-        type_manually_set: Boolean(mapping?.default_transaction_type),
-        is_split: false,
-        is_recurring: false,
-        needs_review: needsReview,
-        pending: tx.pending,
-        plaid_category: plaidPFC || null,
-      });
-
-      addedCount++;
-
-      // If this posted transaction supersedes a pending auth, carry the pending
-      // row's edits/splits onto it and remove the pending row (prevents the
-      // tip-adjustment double-count).
-      if (await reconcilePendingTransaction(newTxId, tx.amount, tx.pending_transaction_id)) {
-        reconciledCount++;
-      }
-    }
-
-    // Handle modified transactions.
-    // Fetch the manual-type flags up front so the loop below doesn't query per transaction.
-    const manuallyTypedIds = await loadManuallyTypedIds(syncResult.modified);
-
-    for (const tx of syncResult.modified) {
-      const texts = [tx.merchant_name || '', tx.name || '', (tx as { original_description?: string }).original_description || ''];
-      const newMerchantName = tx.merchant_name || tx.name;
-      const mapping = merchantMappings.find(tx.merchant_name, tx.name);
-      const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
-
-      const detectedType = detectTransactionType(
-        tx.amount,
-        texts,
-        plaidPFC,
-        accountTypeById.get(resolveAccountId(tx.account_id)),
-      );
-
-      // Preserve a user-customized display name. merchant_display_name is
-      // user-editable and wins in the UI, so only refresh it when it still
-      // equals the auto-cleaned form of the prior merchant_name (i.e. untouched).
-      const { data: existing } = await supabase
-        .from('transactions')
-        .select('merchant_name, merchant_display_name')
-        .eq('plaid_transaction_id', tx.transaction_id)
-        .single();
-
-      const update: Record<string, unknown> = {
-        account_id: resolveAccountId(tx.account_id),
-        amount: tx.amount,
-        date: tx.date,
-        merchant_name: newMerchantName,
-        original_description: (tx as { original_description?: string }).original_description || tx.name,
-        pending: tx.pending,
-      };
-
-      // Never overwrite a type the user set by hand
-      if (!manuallyTypedIds.has(tx.transaction_id)) {
-        update.transaction_type = resolveTransactionType(detectedType, mapping);
-      }
-
-      const userCustomizedDisplayName =
-        !!existing?.merchant_display_name &&
-        existing.merchant_display_name !== cleanMerchantName(existing.merchant_name);
-      if (!userCustomizedDisplayName) {
-        update.merchant_display_name = mapping?.display_name || cleanMerchantName(newMerchantName);
-      }
-
-      await supabase
-        .from('transactions')
-        .update(update)
-        .eq('plaid_transaction_id', tx.transaction_id);
-      modifiedCount++;
-    }
-
-    // Handle removed transactions
-    for (const tx of syncResult.removed) {
-      await supabase
-        .from('transactions')
-        .delete()
-        .eq('plaid_transaction_id', tx.transaction_id);
-      removedCount++;
-    }
-
-    // Update the cursor and historical sync status. The Plaid cursor is
-    // item-level, so advance it for every account under the item to keep them
-    // in lockstep (the webhook path does the same). Balance is per-account.
     const historicalComplete = syncResult.transactionsUpdateStatus === 'HISTORICAL_UPDATE_COMPLETE';
-    // A successful sync proves the item is authenticated and healthy: advance the
-    // item-level cursor, stamp last_synced_at, and clear any re-auth flag.
-    await supabase
-      .from('accounts')
-      .update({
-        plaid_cursor: syncResult.nextCursor,
-        last_synced_at: new Date().toISOString(),
-        needs_reauth: false,
-        reauth_detected_at: null,
-      })
-      .eq('plaid_item_id', account.plaid_item_id);
+    const counts = await applySyncResult({
+      plaidItemId: account.plaid_item_id,
+      syncResult,
+      resolveAccountId: buildAccountResolver(itemAccounts || [], id),
+      accountTypeById: new Map((itemAccounts || []).map(a => [a.id, a.account_type])),
+      historicalComplete,
+    });
 
-    // historical_sync_complete only ever flips to true (never back to false).
-    if (historicalComplete) {
-      await supabase
-        .from('accounts')
-        .update({ historical_sync_complete: true })
-        .eq('plaid_item_id', account.plaid_item_id);
-    }
-
+    // Balance is per account, unlike the cursor, so it stays here.
     await supabase
       .from('accounts')
       .update({ current_balance: latestBalance })
       .eq('id', id);
 
-    await reconcileCardPaymentsAfterSync();
-
-    console.log(`Sync complete: +${addedCount} added, ~${modifiedCount} modified, -${removedCount} removed, ⇄${reattributedCount} re-attributed, ⤳${reconciledCount} pending-reconciled`);
+    console.log(`Sync complete: +${counts.added} added, ~${counts.modified} modified, -${counts.removed} removed, ⇄${counts.reattributed} re-attributed, ⤳${counts.reconciled} pending-reconciled`);
     console.log(`Historical sync status: ${syncResult.transactionsUpdateStatus || 'unknown'}`);
 
     res.json({
-      added: addedCount,
-      modified: modifiedCount,
-      removed: removedCount,
-      reattributed: reattributedCount,
-      reconciled: reconciledCount,
+      added: counts.added,
+      modified: counts.modified,
+      removed: counts.removed,
+      reattributed: counts.reattributed,
+      reconciled: counts.reconciled,
       cursor_updated: true,
       transactions_update_status: syncResult.transactionsUpdateStatus,
       historical_complete: historicalComplete || account.historical_sync_complete,
