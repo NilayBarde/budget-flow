@@ -309,6 +309,51 @@ describe('detectTransactionType', () => {
     });
   });
 
+  // ── Card bill wording on the bank side ────────────────────────────────
+
+  describe('card bill payments from a bank account', () => {
+    // Plaid shortens these to the card issuer's name and labels them as investment transfers,
+    // so only the raw bank text tells a card bill from a brokerage contribution.
+    const brokerageTransferOut = {
+      primary: 'TRANSFER_OUT',
+      detailed: 'TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS',
+    };
+
+    it('types a credit card bill (CCB) payment as a transfer, not an investment', () => {
+      expect(
+        detectTransactionType(520.13, ['Robinhood', 'Robinhood Ccb - Payment Withdrawal WITHDRAWAL'], brokerageTransferOut),
+      ).toBe('transfer');
+      expect(
+        detectTransactionType(55.52, ['Robinhood', 'Robinhood Ccb-Payment Withdrawal DDA_TRANSACTION'], brokerageTransferOut),
+      ).toBe('transfer');
+    });
+
+    it('matches "Card - Payment" with spaces and a dash, not only "card-payment"', () => {
+      for (const text of [
+        'Robinhood Card - Payment Withdrawal WITHDRAWAL',
+        'Robinhood Card-Payment Withdrawal DDA_TRANSACTION',
+        'Acme Card Payment Withdrawal',
+        'Acme Card – Payment',
+      ]) {
+        expect(detectTransactionType(100, ['Acme', text], brokerageTransferOut)).toBe('transfer');
+      }
+    });
+
+    it('still types a brokerage contribution as an investment', () => {
+      for (const text of ['Robinhood - Debits Withdrawal WITHDRAWAL', 'Robinhood-Debits-411981616 Withdrawal DDA_TRANSACTION']) {
+        expect(detectTransactionType(500, ['Robinhood', text], brokerageTransferOut)).toBe('investment');
+      }
+    });
+
+    it('recognizes "Robinhood - Debits" with spaces as a contribution even without a brokerage category', () => {
+      expect(detectTransactionType(540, ['Robinhood', 'Robinhood - Debits Withdrawal WITHDRAWAL'], { primary: 'TRANSFER_OUT' })).toBe('investment');
+    });
+
+    it('does not mistake words that merely contain ccb for a card bill', () => {
+      expect(detectTransactionType(40, ['Accbury Cafe'], { primary: 'FOOD_AND_DRINK' })).toBe('expense');
+    });
+  });
+
   // ── Edge cases ────────────────────────────────────────────────────────
 
   describe('edge cases', () => {

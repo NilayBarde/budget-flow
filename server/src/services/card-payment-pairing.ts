@@ -1,9 +1,10 @@
 import { SPENDING_PFC_PRIMARY, type TransactionType } from './transaction-type.js';
 
 // Paying a credit card shows up twice: money leaves a bank account and the same amount lands on
-// the card. Both rows are one transfer, whatever their descriptions say or how Plaid categorized
-// them (a rent payment through a card comes back as RENT or INCOME on one leg and spending on
-// the other). Matching on accounts, exact amount and date works for any bank and any card.
+// the card. Both rows are one transfer, whatever Plaid categorized them as (a rent payment
+// through a card comes back as RENT or INCOME on one leg and spending on the other). Accounts,
+// exact amount and date find the candidates, and both legs must also look like a card payment,
+// so two unrelated rows that merely share an amount are never paired.
 
 export interface PairingRow {
   id: string;
@@ -15,9 +16,13 @@ export interface PairingRow {
   transaction_type: TransactionType;
   type_manually_set?: boolean | null;
   is_credit_card: boolean;
+  /** Checking, savings and similar. Only these can fund a card payment. */
+  is_cash_account: boolean;
   plaid_primary?: string | null;
-  /** Merchant name and bank description, joined. Only used to spot the word "payment". */
+  /** Merchant name and bank description, joined. */
   description?: string | null;
+  /** Institution and account name, e.g. "Bilt Rewards Bilt Blue Card". */
+  account_label?: string | null;
 }
 
 // Card payments post to the card a day or two after they leave the bank.
@@ -31,9 +36,11 @@ const daysBetween = (a: string, b: string): number => Math.abs(Date.parse(a) - D
 const isLockedNonTransfer = (row: PairingRow): boolean =>
   Boolean(row.type_manually_set) && row.transaction_type !== 'transfer';
 
+// ── Card leg ─────────────────────────────────────────────────────────────
+
 // How a card statement words a payment, whichever bank it came from.
 const PAYMENT_WORDS = /\b(payment|pmt|autopay|auto[- ]?pay|thank\s*you)\b/i;
-const PAYMENT_PFC_PRIMARY = ['LOAN_PAYMENTS', 'TRANSFER_IN'];
+const CARD_PAYMENT_PFC_PRIMARY = ['LOAN_PAYMENTS', 'TRANSFER_IN'];
 
 // Money arriving on a card is not necessarily a payment: refunds and statement credits also
 // look like that. It counts as a payment only with positive evidence (already a transfer, Plaid
@@ -45,15 +52,50 @@ const isPaymentLeg = (card: PairingRow): boolean => {
   if (card.plaid_primary && SPENDING_PFC_PRIMARY.includes(card.plaid_primary)) return false;
   return (
     card.transaction_type === 'transfer' ||
-    Boolean(card.plaid_primary && PAYMENT_PFC_PRIMARY.includes(card.plaid_primary)) ||
+    Boolean(card.plaid_primary && CARD_PAYMENT_PFC_PRIMARY.includes(card.plaid_primary)) ||
     PAYMENT_WORDS.test(card.description ?? '')
   );
 };
 
+// ── Bank leg ─────────────────────────────────────────────────────────────
+
+const BANK_PAYMENT_PFC_PRIMARY = ['TRANSFER_OUT', 'LOAN_PAYMENTS'];
+
+// Words that appear on every card payment or card, so sharing one proves nothing.
+const GENERIC_WORDS = new Set([
+  'account', 'amex', 'autopay', 'bank', 'card', 'cards', 'cash', 'checking', 'credit', 'deposit',
+  'elite', 'gold', 'individual', 'mastercard', 'mobile', 'online', 'payment', 'payments', 'platinum',
+  'preferred', 'rewards', 'reward', 'savings', 'signature', 'thank', 'visa', 'web', 'withdrawal',
+  'world',
+]);
+
+const distinctiveWords = (text?: string | null): Set<string> =>
+  new Set(
+    (text ?? '')
+      .toLowerCase()
+      .split(/[^a-z]+/)
+      .filter(word => word.length >= 4 && !GENERIC_WORDS.has(word)),
+  );
+
+// The bank row must itself look like a card payment: already a transfer, a Plaid transfer or
+// loan payment, or text that names the card's issuer or the same thing the card row names.
+// Without this, an unrelated purchase that happens to match an amount would be hidden.
+const looksLikeFundingForCard = (bank: PairingRow, card: PairingRow): boolean => {
+  if (bank.transaction_type === 'transfer') return true;
+  if (bank.plaid_primary && BANK_PAYMENT_PFC_PRIMARY.includes(bank.plaid_primary)) return true;
+
+  const bankWords = distinctiveWords(bank.description);
+  if (bankWords.size === 0) return false;
+  const cardWords = new Set([...distinctiveWords(card.account_label), ...distinctiveWords(card.description)]);
+  return [...bankWords].some(word => cardWords.has(word));
+};
+
 /**
  * Find the rows that are a leg of a credit card payment but are not typed as a transfer yet.
- * A card inflow is paired with the bank outflow of the exact same amount within a few days.
- * Ambiguous matches are skipped rather than guessed, and rows the user typed by hand are left alone.
+ * A card payment is paired with the cash account outflow of the exact same amount within a few
+ * days. Ambiguous matches are skipped rather than guessed, rows the user typed by hand are left
+ * alone, and an investment is never demoted: weekly brokerage debits can equal a card bill to
+ * the cent, and what counts as "invested" is the user's decision.
  *
  * @returns ids of the rows to retype as transfers
  */
@@ -62,10 +104,8 @@ export const findCardPaymentCounterparts = (
   windowDays: number = DEFAULT_WINDOW_DAYS,
 ): string[] => {
   const cardLegs = rows.filter(r => r.is_credit_card && r.amount < 0 && isPaymentLeg(r));
-  // An investment is never demoted automatically: weekly brokerage debits can equal a card bill
-  // to the cent, and what counts as "invested" is the user's decision.
   const bankLegs = rows.filter(
-    r => !r.is_credit_card && r.amount > 0 && !isLockedNonTransfer(r) && r.transaction_type !== 'investment',
+    r => r.is_cash_account && r.amount > 0 && !isLockedNonTransfer(r) && r.transaction_type !== 'investment',
   );
   const byId = new Map(rows.map(r => [r.id, r]));
 
@@ -76,7 +116,8 @@ export const findCardPaymentCounterparts = (
       .filter(bank =>
         bank.account_id !== card.account_id &&
         toCents(bank.amount) === toCents(card.amount) &&
-        daysBetween(bank.date, card.date) <= windowDays)
+        daysBetween(bank.date, card.date) <= windowDays &&
+        looksLikeFundingForCard(bank, card))
       .map(bank => ({ id: bank.id, distance: daysBetween(bank.date, card.date) }))
       .sort((a, b) => a.distance - b.distance);
 

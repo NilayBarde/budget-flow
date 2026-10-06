@@ -325,7 +325,8 @@ router.post('/exchange-token', async (req, res) => {
         .update({ plaid_cursor: syncResult.nextCursor })
         .eq('id', firstAccountId);
 
-      await reconcileCardPaymentsAfterSync();
+      // A first link imports a long history, so pair payments across all of it.
+      await reconcileCardPaymentsAfterSync({ sinceDate: null });
 
       console.log(`Auto-synced ${syncedCount} transactions across ${createdAccounts.length} accounts`);
     } catch (syncError) {
