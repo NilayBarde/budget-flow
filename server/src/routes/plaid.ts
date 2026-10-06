@@ -42,7 +42,6 @@ router.post('/create-link-token', async (req, res) => {
     console.error('Error creating link token:', redactError(error));
     const plaidError = error as { response?: { data?: unknown } };
     if (plaidError.response?.data) {
-      console.error('Plaid error details:', JSON.stringify(plaidError.response.data, null, 2));
       // Return more detailed error in development
       const isDevelopment = process.env.NODE_ENV !== 'production';
       if (isDevelopment) {
@@ -96,10 +95,6 @@ router.post('/create-update-link-token', async (req, res) => {
     });
   } catch (error: unknown) {
     console.error('Error creating update link token:', redactError(error));
-    const plaidError = error as { response?: { data?: unknown } };
-    if (plaidError.response?.data) {
-      console.error('Plaid error details:', JSON.stringify(plaidError.response.data, null, 2));
-    }
     res.status(500).json({ message: 'Failed to create update link token' });
   }
 });
@@ -345,11 +340,6 @@ router.post('/exchange-token', async (req, res) => {
     // Extract Plaid error details if available
     const plaidError = error as { response?: { data?: { error_code?: string; error_message?: string; display_message?: string } } };
     const errorDetails = plaidError.response?.data;
-
-    // Log detailed error for debugging
-    if (errorDetails) {
-      console.error('Plaid error details:', JSON.stringify(errorDetails, null, 2));
-    }
 
     // Return more helpful error message
     const isDevelopment = process.env.NODE_ENV !== 'production';

@@ -522,7 +522,7 @@ router.delete('/:id', async (req, res) => {
       try {
         await plaidService.removeItem(account.plaid_access_token);
       } catch (plaidError) {
-        console.warn('Could not remove item from Plaid:', plaidError);
+        console.warn('Could not remove item from Plaid:', redactError(plaidError));
         // Continue with local deletion even if Plaid removal fails
       }
     }

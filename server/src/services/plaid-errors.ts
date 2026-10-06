@@ -9,8 +9,17 @@ interface AxiosLikeError {
   isAxiosError?: boolean;
   code?: string;
   message?: string;
-  response?: { data?: { error_code?: unknown; error_message?: unknown } };
+  config?: unknown;
+  response?: { data?: { error_code?: unknown; error_message?: unknown }; config?: unknown };
 }
+
+// Anything carrying the request config holds the credentials, whether or not the axios flag
+// survived re-wrapping or came from a second copy of axios.
+const isAxiosLike = (error: unknown): error is AxiosLikeError => {
+  if (typeof error !== 'object' || error === null) return false;
+  const { isAxiosError, config, response } = error as AxiosLikeError;
+  return isAxiosError === true || (typeof config === 'object' && config !== null) || (typeof response?.config === 'object' && response.config !== null);
+};
 
 /**
  * Make an error safe to log. An axios error holds the entire request, including the Plaid client
@@ -18,10 +27,20 @@ interface AxiosLikeError {
  * "CODE: message". Every other error is returned untouched, so stack traces still show.
  */
 export const redactError = (error: unknown): unknown => {
-  if (typeof error !== 'object' || error === null || !(error as AxiosLikeError).isAxiosError) return error;
-  const { code, message, response } = error as AxiosLikeError;
-  const plaidMessage = response?.data?.error_message;
-  return `${getPlaidErrorCode(error) ?? code ?? 'REQUEST_FAILED'}: ${typeof plaidMessage === 'string' ? plaidMessage : message}`;
+  if (isAxiosLike(error)) {
+    const { code, message, response } = error;
+    const plaidMessage = response?.data?.error_message;
+    return `${getPlaidErrorCode(error) ?? code ?? 'REQUEST_FAILED'}: ${typeof plaidMessage === 'string' ? plaidMessage : message}`;
+  }
+
+  // An axios error can sit behind a wrapping Error's cause, and logging prints the cause in full.
+  const cause = error instanceof Error ? error.cause : undefined;
+  if (cause !== undefined) {
+    const redactedCause = redactError(cause);
+    if (redactedCause !== cause) return `${(error as Error).message} (caused by ${redactedCause})`;
+  }
+
+  return error;
 };
 
 // The user has to re-authenticate in Plaid Link (update mode) before the item syncs again.

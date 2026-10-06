@@ -62,6 +62,24 @@ describe('redactError', () => {
     expect(redacted).toBe('ECONNRESET: socket hang up');
   });
 
+  it('redacts an error that carries a request config even without the axios flag', () => {
+    // A re-wrapped error or one from a second axios copy can lose isAxiosError but keep the headers.
+    const redacted = redactError({
+      message: 'Request failed',
+      config: { headers: { 'PLAID-SECRET': 'super-secret' }, data: '{"secret":"super-secret"}' },
+    });
+    expect(typeof redacted).toBe('string');
+    expect(JSON.stringify(redacted)).not.toContain('super-secret');
+  });
+
+  it('redacts an axios error hidden behind an Error cause', () => {
+    const wrapped = new Error('sync failed', { cause: axiosPlaidError() });
+    const redacted = redactError(wrapped);
+    expect(String(redacted)).toContain('sync failed');
+    expect(String(redacted)).toContain('ITEM_LOGIN_REQUIRED');
+    expect(JSON.stringify(redacted)).not.toContain('super-secret');
+  });
+
   it('returns ordinary errors unchanged so their stack traces survive', () => {
     const error = new Error('boom');
     expect(redactError(error)).toBe(error);

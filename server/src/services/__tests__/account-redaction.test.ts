@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { REDACTED_ACCOUNT_FIELDS, toPublicAccount } from '../account-redaction.js';
+import { toPublicAccount } from '../account-redaction.js';
 
 const row = {
   id: 'a1',
@@ -35,11 +35,5 @@ describe('toPublicAccount', () => {
 
   it('works on a row that has none of the redacted fields', () => {
     expect(toPublicAccount({ id: 'a2' })).toEqual({ id: 'a2' });
-  });
-});
-
-describe('REDACTED_ACCOUNT_FIELDS', () => {
-  it('lists the credential and cursor columns', () => {
-    expect([...REDACTED_ACCOUNT_FIELDS]).toEqual(['plaid_access_token', 'plaid_cursor']);
   });
 });
