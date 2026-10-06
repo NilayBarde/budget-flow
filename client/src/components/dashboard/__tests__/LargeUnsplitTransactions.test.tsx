@@ -6,11 +6,19 @@ const state = {
   transactions: [] as Partial<Transaction>[],
   mutate: vi.fn(),
   isPending: false,
+  isLoading: false,
+  isPlaceholderData: false,
+  isError: false,
 };
 
 vi.mock('../../../hooks', async importOriginal => ({
   ...(await importOriginal<typeof import('../../../hooks')>()),
-  useTransactions: () => ({ data: state.transactions }),
+  useTransactions: () => ({
+    data: state.transactions,
+    isLoading: state.isLoading,
+    isPlaceholderData: state.isPlaceholderData,
+    isError: state.isError,
+  }),
   useUpdateTransaction: () => ({ mutate: state.mutate, isPending: state.isPending }),
 }));
 // The modal pulls in its own data hooks; it is closed here and not under test.
@@ -26,6 +34,9 @@ describe('LargeUnsplitTransactions', () => {
     state.transactions = [rent, cos];
     state.mutate = vi.fn();
     state.isPending = false;
+    state.isLoading = false;
+    state.isPlaceholderData = false;
+    state.isError = false;
   });
 
   it('lists the large unsplit expenses with a way to split or keep each whole', () => {
@@ -78,11 +89,67 @@ describe('LargeUnsplitTransactions', () => {
     expect(screen.getByText('Cos')).toBeTruthy();
   });
 
-  it('hides the whole card once every row is dismissed', () => {
+  it('keeps the card and says there is nothing to review once every row is dismissed', () => {
     state.transactions = [{ ...rent, split_dismissed: true }, { ...cos, split_dismissed: true }];
-    const { container } = render(<LargeUnsplitTransactions month={10} year={2026} />);
+    render(<LargeUnsplitTransactions month={10} year={2026} />);
 
-    expect(container.textContent).toBe('');
+    expect(screen.getByText('Possible missed splits')).toBeTruthy();
+    expect(screen.getByText('No possible splits')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Split' })).toBeNull();
+  });
+
+  it('keeps the card for a month with no large expenses at all', () => {
+    state.transactions = [{ id: 'coffee', amount: 4.5, date: '2026-10-02', merchant_name: 'Coffee', is_split: false }];
+    render(<LargeUnsplitTransactions month={10} year={2026} />);
+
+    expect(screen.getByText('Possible missed splits')).toBeTruthy();
+    expect(screen.getByText('No possible splits')).toBeTruthy();
+  });
+
+  it('does not say there is nothing to review while the transactions are still loading', () => {
+    state.transactions = [];
+    state.isLoading = true;
+    render(<LargeUnsplitTransactions month={10} year={2026} />);
+
+    expect(screen.getByText('Possible missed splits')).toBeTruthy();
+    expect(screen.getByRole('status', { name: 'Loading' })).toBeTruthy();
+    expect(screen.queryByText('No possible splits')).toBeNull();
+  });
+
+  it('shows the spinner, not the previous month, while a new month loads behind the old data', () => {
+    // The query keeps the last month's rows on screen while the next month fetches. Acting on those rows
+    // would split or dismiss a transaction from another month.
+    state.transactions = [rent, cos];
+    state.isPlaceholderData = true;
+    render(<LargeUnsplitTransactions month={11} year={2026} />);
+
+    expect(screen.getByRole('status', { name: 'Loading' })).toBeTruthy();
+    expect(screen.queryByText('Bilt Housing Payment')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Split' })).toBeNull();
+  });
+
+  it('does not claim there is nothing to review while the new month loads behind an empty old one', () => {
+    state.transactions = [];
+    state.isPlaceholderData = true;
+    render(<LargeUnsplitTransactions month={11} year={2026} />);
+
+    expect(screen.queryByText('No possible splits')).toBeNull();
+    expect(screen.getByRole('status', { name: 'Loading' })).toBeTruthy();
+  });
+
+  it('does not say there is nothing to review when the transactions failed to load', () => {
+    state.transactions = [];
+    state.isError = true;
+    render(<LargeUnsplitTransactions month={10} year={2026} />);
+
+    expect(screen.queryByText('No possible splits')).toBeNull();
+    expect(screen.getByText(/Could not load/)).toBeTruthy();
+  });
+
+  it('does not show the empty message when there are rows to review', () => {
+    render(<LargeUnsplitTransactions month={10} year={2026} />);
+
+    expect(screen.queryByText('No possible splits')).toBeNull();
   });
 
   it('disables the buttons while a change is being saved so it cannot be sent twice', () => {

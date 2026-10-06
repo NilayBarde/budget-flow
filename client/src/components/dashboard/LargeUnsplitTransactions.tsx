@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Scissors } from 'lucide-react';
-import { Card, Button } from '../ui';
+import { Card, Button, Spinner } from '../ui';
 import { useTransactions, useUpdateTransaction, useModalState } from '../../hooks';
 import { SplitTransactionModal } from '../transactions/SplitTransactionModal';
 import { formatCurrency, formatDate } from '../../utils/formatters';
@@ -16,7 +16,7 @@ interface LargeUnsplitTransactionsProps {
 const MAX_ROWS = 5;
 
 export const LargeUnsplitTransactions = ({ month, year }: LargeUnsplitTransactionsProps) => {
-    const { data: transactions } = useTransactions({ month, year, transaction_type: 'expense' });
+    const { data: transactions, isLoading, isPlaceholderData, isError } = useTransactions({ month, year, transaction_type: 'expense' });
     const splitModal = useModalState<Transaction>();
     const updateTransaction = useUpdateTransaction();
     const [saveFailed, setSaveFailed] = useState(false);
@@ -28,10 +28,12 @@ export const LargeUnsplitTransactions = ({ month, year }: LargeUnsplitTransactio
 
     const candidates = findMissedSplitCandidates(transactions || [], LARGE_UNSPLIT_THRESHOLD);
 
-    if (candidates.length === 0) return null;
-
-    const shown = candidates.slice(0, MAX_ROWS);
-    const hiddenCount = candidates.length - shown.length;
+    // Changing month keeps the previous month's rows on screen (placeholder data) while the new month
+    // loads. Those rows are not this month's, so they are treated as not loaded: no rows to act on and no
+    // "nothing to review" claim until the real data arrives.
+    const loading = isLoading || isPlaceholderData;
+    const shown = loading ? [] : candidates.slice(0, MAX_ROWS);
+    const hiddenCount = loading ? 0 : candidates.length - shown.length;
 
     return (
         <>
@@ -44,6 +46,19 @@ export const LargeUnsplitTransactions = ({ month, year }: LargeUnsplitTransactio
                     <p className="text-xs text-slate-400">
                         Large expenses ({formatCurrency(LARGE_UNSPLIT_THRESHOLD)}+) that haven't been split.
                     </p>
+                    {/* The card stays put so it does not appear and vanish as the month changes. Nothing is
+                        claimed while loading or after a failed load: "no possible splits" must mean none. */}
+                    {loading && (
+                        <div role="status" aria-label="Loading" className="flex justify-center py-2">
+                            <Spinner />
+                        </div>
+                    )}
+                    {!loading && isError && (
+                        <p className="text-sm text-rose-400">Could not load this month's transactions.</p>
+                    )}
+                    {!loading && !isError && candidates.length === 0 && (
+                        <p className="text-sm text-slate-400">No possible splits</p>
+                    )}
                     {shown.map(t => (
                         <div key={t.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-sm">
                             <div className="min-w-0 flex-1 basis-32">
