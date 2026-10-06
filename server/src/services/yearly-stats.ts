@@ -4,6 +4,7 @@ import { getMyShareAmount } from './category-spend.js';
 import type { CategoryData } from '../types/stats.js';
 
 export interface YearlyRow {
+  id: string;
   amount: number;
   date: string;
   transaction_type: string | null;
@@ -115,6 +116,7 @@ export const loadYearlyStats = async (year: number): Promise<YearlyStats> => {
       supabase
         .from('transactions')
         .select(`
+          id,
           amount,
           date,
           transaction_type,
@@ -128,6 +130,8 @@ export const loadYearlyStats = async (year: number): Promise<YearlyStats> => {
         .order('date')
         .order('id')
         .range(from, to) as unknown as PromiseLike<{ data: YearlyRow[] | null; error: unknown }>,
+    // A sync between two pages can shift the offsets and repeat a row; counting it twice would double it.
+    { keyOf: row => row.id },
   );
 
   return buildYearlyStats(year, transactions);

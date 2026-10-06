@@ -74,6 +74,7 @@ router.get('/', async (req, res) => {
     // id breaks ties between rows on the same date, so paging never skips or repeats a row.
     const data = await fetchAllRows((from, to) =>
       buildQuery().order('date', { ascending: false }).order('id').range(from, to),
+      { keyOf: row => row.id },
     );
 
     res.json(filterByTag(data, typeof tag_id === 'string' ? tag_id : undefined));
@@ -159,6 +160,7 @@ router.get('/duplicates', async (req, res) => {
         .order('date', { ascending: false })
         .order('id')
         .range(from, to),
+      { keyOf: row => row.id },
     );
 
     // Helper: group transactions by a key field, returning groups with 2+ entries

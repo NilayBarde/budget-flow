@@ -165,6 +165,7 @@ router.get('/insights', asyncHandler(async (req, res) => {
         supabase
           .from('transactions')
           .select(`
+            id,
             amount,
             date,
             transaction_type,
@@ -179,6 +180,7 @@ router.get('/insights', asyncHandler(async (req, res) => {
           .order('date')
           .order('id')
           .range(from, to),
+      { keyOf: row => row.id },
     );
 
     // ── Category Trends (per-category, per-month) ──────────────────────

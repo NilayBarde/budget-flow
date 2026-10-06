@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 
 interface Row {
+  id: string;
   amount: number;
   date: string;
   transaction_type: string;
@@ -43,7 +44,9 @@ vi.mock('../../db/supabase.js', () => ({
 const { buildYearlyStats, loadYearlyStats } = await import('../yearly-stats.js');
 
 const dining = { id: 'c-dining', name: 'Dining', color: '#f00', icon: 'utensils' };
+let nextId = 0;
 const row = (overrides: Partial<Row>): Row => ({
+  id: `row-${++nextId}`,
   amount: 10,
   date: '2026-05-10',
   transaction_type: 'expense',
@@ -118,6 +121,17 @@ describe('loadYearlyStats', () => {
     expect(stats.monthly_totals[4].income).toBe(400);
     expect(stats.monthly_totals[0].spent).toBe(1500);
     expect(db.rangeCalls).toEqual([[0, 999], [1000, 1999]]);
+  });
+
+  it('counts a transaction once even if a sync shifted the pages and it came back twice', async () => {
+    const filler = Array.from({ length: 999 }, () => row({ amount: 1, date: '2026-01-15' }));
+    const paycheck = income(1, '2026-05-06');
+    // The paycheck is the last row of page one and, after a row was inserted mid read, the first of page two.
+    db.rows = [...filler, paycheck, paycheck, income(2, '2026-05-13')];
+
+    const stats = await loadYearlyStats(2026);
+
+    expect(stats.monthly_totals[4].income).toBe(200);
   });
 
   it('pages in a stable order, so no row is skipped or repeated between pages', async () => {

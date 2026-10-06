@@ -13,6 +13,16 @@ interface PageResult<T> {
   error: unknown;
 }
 
+interface FetchAllOptions<T> {
+  /**
+   * Identifies a row (its id). Offset paging is not a snapshot: if a sync inserts a row between two
+   * requests, every later offset shifts and the row at the end of one page comes back again at the
+   * start of the next. With a key, a repeated row is kept once, so a total is not doubled and a
+   * transaction does not look like a duplicate of itself.
+   */
+  keyOf?: (row: T) => string | number;
+}
+
 /**
  * Read every row a query matches. `fetchPage(from, to)` must run the query with `.range(from, to)`
  * and a stable order (for example `.order('date').order('id')`): paging an unordered query can skip
@@ -20,8 +30,11 @@ interface PageResult<T> {
  */
 export const fetchAllRows = async <T>(
   fetchPage: (from: number, to: number) => PromiseLike<PageResult<T>>,
+  options: FetchAllOptions<T> = {},
 ): Promise<T[]> => {
+  const { keyOf } = options;
   const rows: T[] = [];
+  const seen = new Set<string | number>();
 
   for (let page = 0; page < MAX_PAGES; page++) {
     const from = page * SUPABASE_PAGE_SIZE;
@@ -29,7 +42,15 @@ export const fetchAllRows = async <T>(
     if (error) throw error;
 
     const batch = data ?? [];
-    rows.push(...batch);
+    for (const row of batch) {
+      if (keyOf) {
+        const key = keyOf(row);
+        if (seen.has(key)) continue;
+        seen.add(key);
+      }
+      rows.push(row);
+    }
+    // The page length, not the kept length: a dropped repeat must not look like the last page.
     if (batch.length < SUPABASE_PAGE_SIZE) return rows;
   }
 

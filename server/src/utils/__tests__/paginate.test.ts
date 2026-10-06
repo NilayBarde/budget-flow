@@ -57,6 +57,31 @@ describe('fetchAllRows', () => {
     await expect(fetchAllRows(fetchPage)).rejects.toBe(failure);
   });
 
+  it('drops a row that two pages both returned, when told how to tell rows apart', async () => {
+    // A sync that inserts a row between two requests shifts every later offset by one, so the last
+    // row of page one comes back again as the first row of page two. Counting it twice would
+    // double a total, or make a transaction look like a duplicate of itself.
+    const page1 = Array.from({ length: SUPABASE_PAGE_SIZE }, (_, i) => ({ id: i }));
+    const page2 = [{ id: SUPABASE_PAGE_SIZE - 1 }, { id: SUPABASE_PAGE_SIZE }, { id: SUPABASE_PAGE_SIZE + 1 }];
+    const fetchPage = vi
+      .fn()
+      .mockResolvedValueOnce({ data: page1, error: null })
+      .mockResolvedValueOnce({ data: page2, error: null });
+
+    const result = await fetchAllRows<{ id: number }>(fetchPage, { keyOf: row => row.id });
+
+    expect(result).toHaveLength(SUPABASE_PAGE_SIZE + 2);
+    expect(new Set(result.map(r => r.id)).size).toBe(result.length);
+  });
+
+  it('keeps repeated rows when no key is given, since it cannot tell a repeat from a distinct row', async () => {
+    const fetchPage = vi
+      .fn()
+      .mockResolvedValueOnce({ data: [{ x: 1 }, { x: 1 }], error: null });
+
+    expect(await fetchAllRows(fetchPage)).toHaveLength(2);
+  });
+
   it('gives up instead of looping forever if the server keeps returning full pages', async () => {
     const fetchPage = vi.fn(async () => ({
       data: Array.from({ length: SUPABASE_PAGE_SIZE }, (_, i) => ({ id: i })),
