@@ -14,6 +14,14 @@ interface SyncHealthAccount {
   last_synced_at: string | null;
 }
 
+// The ?staleDays= override must be a positive, finite number. Zero, negatives, Infinity and
+// non numeric values would otherwise flag every account as stale or none of them.
+export const parseStaleDaysOverride = (value: unknown): number | undefined => {
+  if (typeof value !== 'number' && typeof value !== 'string') return undefined;
+  const days = Number(value);
+  return Number.isFinite(days) && days > 0 ? days : undefined;
+};
+
 export const staleDaysFor = (accountType?: string | null, override?: number): number => {
   if (override) return override;
   return isHoldingsAccountType(accountType) ? INVESTMENT_STALE_DAYS : DEFAULT_STALE_DAYS;
@@ -33,7 +41,9 @@ export const classifySyncHealth = <T extends SyncHealthAccount>(
   stale: accounts.filter(a => {
     if (a.needs_reauth) return false;
     if (!a.last_synced_at) return true;
-    const staleBefore = now - staleDaysFor(a.account_type, staleDaysOverride) * DAY_MS;
-    return new Date(a.last_synced_at).getTime() < staleBefore;
+    const syncedAt = new Date(a.last_synced_at).getTime();
+    // An unreadable date is not evidence of a recent sync.
+    if (Number.isNaN(syncedAt)) return true;
+    return syncedAt < now - staleDaysFor(a.account_type, staleDaysOverride) * DAY_MS;
   }),
 });

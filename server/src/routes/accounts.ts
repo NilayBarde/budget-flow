@@ -7,7 +7,7 @@ import { loadManuallyTypedIds, loadMerchantMappings, resolveTransactionType } fr
 import { getCategoryIdForType } from '../services/category-lookup.js';
 import { buildAccountResolver } from '../services/sync-attribution.js';
 import { getPlaidErrorCode, needsReconnect } from '../services/plaid-errors.js';
-import { classifySyncHealth, DEFAULT_STALE_DAYS, INVESTMENT_STALE_DAYS } from '../services/sync-health.js';
+import { classifySyncHealth, DEFAULT_STALE_DAYS, INVESTMENT_STALE_DAYS, parseStaleDaysOverride } from '../services/sync-health.js';
 import { isHoldingsAccountType } from '../services/account-types.js';
 import { reconcilePendingTransaction } from '../services/pending-reconciliation.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -62,7 +62,7 @@ router.get('/', async (req, res) => {
 // they never sync via Plaid.
 router.get('/sync-health', async (req, res) => {
   try {
-    const staleDaysOverride = Number(req.query.staleDays) || undefined;
+    const staleDaysOverride = parseStaleDaysOverride(req.query.staleDays);
 
     const { data: accounts, error } = await supabase
       .from('accounts')

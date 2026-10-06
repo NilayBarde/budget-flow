@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifySyncHealth, staleDaysFor } from '../sync-health.js';
+import { classifySyncHealth, parseStaleDaysOverride, staleDaysFor } from '../sync-health.js';
 
 const NOW = new Date('2026-10-06T12:00:00Z').getTime();
 const daysAgo = (days: number) => new Date(NOW - days * 24 * 60 * 60 * 1000).toISOString();
@@ -94,5 +94,37 @@ describe('classifySyncHealth', () => {
   it('returns nothing for healthy accounts', () => {
     const result = classifySyncHealth([account()], NOW);
     expect(result).toEqual({ needsReauth: [], stale: [] });
+  });
+
+  it('pins the card boundary: exactly 5 days is not stale, 5 days and a second is', () => {
+    const exactly = new Date(NOW - 5 * 24 * 60 * 60 * 1000).toISOString();
+    const justOver = new Date(NOW - 5 * 24 * 60 * 60 * 1000 - 1000).toISOString();
+    expect(classifySyncHealth([account({ last_synced_at: exactly })], NOW).stale).toHaveLength(0);
+    expect(classifySyncHealth([account({ last_synced_at: justOver })], NOW).stale).toHaveLength(1);
+  });
+
+  it('pins the investment boundary at 14 days, including an HSA', () => {
+    const hsa = (days: number) => account({ account_type: 'hsa', last_synced_at: daysAgo(days) });
+    expect(classifySyncHealth([hsa(13)], NOW).stale).toHaveLength(0);
+    expect(classifySyncHealth([hsa(15)], NOW).stale).toHaveLength(1);
+  });
+
+  it('treats an unparseable last sync date as stale instead of healthy', () => {
+    const { stale } = classifySyncHealth([account({ last_synced_at: 'not a date' })], NOW);
+    expect(stale).toHaveLength(1);
+  });
+});
+
+describe('parseStaleDaysOverride', () => {
+  it('accepts a positive number or numeric string', () => {
+    expect(parseStaleDaysOverride(3)).toBe(3);
+    expect(parseStaleDaysOverride('3')).toBe(3);
+    expect(parseStaleDaysOverride('2.5')).toBe(2.5);
+  });
+
+  it('ignores anything that is not a positive finite number', () => {
+    for (const bad of [0, '0', -3, '-3', NaN, 'abc', '', Infinity, '-Infinity', undefined, null, ['3'], {}]) {
+      expect(parseStaleDaysOverride(bad)).toBeUndefined();
+    }
   });
 });
