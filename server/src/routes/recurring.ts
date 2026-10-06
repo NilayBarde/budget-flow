@@ -65,8 +65,12 @@ interface RefreshResult {
   txns: WindowTxn[];
 }
 
-const runDetection = (txns: WindowTxn[], today: string) => {
-  const charges = detectRecurringSeries(txns, today, 'expense');
+// Merchants the user deleted (kept as hidden rows). Detection skips them so a
+// deleted series is not re-created, re-activated, or paired with credits.
+const runDetection = (txns: WindowTxn[], today: string, deletedMerchants: ReadonlySet<string>) => {
+  const charges = detectRecurringSeries(txns, today, 'expense').filter(
+    c => !deletedMerchants.has(c.merchant),
+  );
   const credits = detectRecurringSeries(txns, today, 'return');
   const offsets = matchCreditsToCharges(charges, credits);
   return { charges, credits, offsets };
@@ -76,11 +80,15 @@ const runDetection = (txns: WindowTxn[], today: string) => {
 // user_hidden is never touched; manual rows keep their source.
 const refreshRecurringTable = async (today: string): Promise<RefreshResult> => {
   const txns = await fetchWindowTransactions();
-  const { charges, credits, offsets } = runDetection(txns, today);
 
   const { data: existing, error } = await supabase.from('recurring_transactions').select('*');
   if (error) throw error;
   const byName = new Map((existing || []).map(r => [r.merchant_display_name, r]));
+  const deletedMerchants = new Set(
+    (existing || []).filter(r => r.user_hidden).map(r => r.merchant_display_name),
+  );
+
+  const { charges, credits, offsets } = runDetection(txns, today, deletedMerchants);
 
   if (charges.length > 0) {
     const upserts = charges.map(c => ({
@@ -196,7 +204,13 @@ router.get(
       result = await refreshRecurringTable(today);
     } else {
       const txns = await fetchWindowTransactions();
-      const { charges, credits, offsets } = runDetection(txns, today);
+      const { data: deletedRows, error: deletedError } = await supabase
+        .from('recurring_transactions')
+        .select('merchant_display_name')
+        .eq('user_hidden', true);
+      if (deletedError) throw deletedError;
+      const deletedMerchants = new Set((deletedRows || []).map(r => r.merchant_display_name));
+      const { charges, credits, offsets } = runDetection(txns, today, deletedMerchants);
       result = {
         charges,
         credits,
@@ -256,22 +270,51 @@ router.get(
   }),
 );
 
-// Update recurring transaction (e.g., hide it from the overview)
-router.patch(
+// Delete a recurring series. Its transactions stop being flagged recurring,
+// and the row is kept as a hidden, inactive marker so the next detection
+// refresh does not re-create the series (detection never touches
+// user_hidden). Marking the merchant recurring again clears the marker.
+router.delete(
   '/:id',
   asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const updates = req.body;
 
-    const { data, error } = await supabase
+    const { data: series, error: findError } = await supabase
       .from('recurring_transactions')
-      .update(updates)
+      .select('merchant_display_name')
       .eq('id', id)
-      .select()
-      .single();
+      .maybeSingle();
+    if (findError) throw findError;
+    if (!series) {
+      res.status(404).json({ message: 'Recurring charge not found' });
+      return;
+    }
 
+    // The series key is the display name, falling back to the raw merchant
+    // name when a transaction has no display name.
+    const name = series.merchant_display_name;
+    const { error: byDisplayError } = await supabase
+      .from('transactions')
+      .update({ is_recurring: false })
+      .eq('merchant_display_name', name);
+    if (byDisplayError) throw byDisplayError;
+
+    const { error: byNameError } = await supabase
+      .from('transactions')
+      .update({ is_recurring: false })
+      .is('merchant_display_name', null)
+      .eq('merchant_name', name);
+    if (byNameError) throw byNameError;
+
+    // Marker last: if clearing the flags failed above, the series is still
+    // visible and the delete can simply be retried.
+    const { error } = await supabase
+      .from('recurring_transactions')
+      .update({ user_hidden: true, is_active: false })
+      .eq('id', id);
     if (error) throw error;
-    res.json(data);
+
+    res.status(204).send();
   }),
 );
 

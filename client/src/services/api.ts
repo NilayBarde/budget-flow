@@ -354,11 +354,8 @@ export const getRecurringTransactions = () =>
 export const getRecurringOverview = () =>
   fetchApi<RecurringOverview>('/recurring-transactions/overview');
 
-export const updateRecurringTransaction = (id: string, data: Partial<RecurringTransaction>) =>
-  fetchApi<RecurringTransaction>(`/recurring-transactions/${id}`, {
-    method: 'PATCH',
-    body: JSON.stringify(data),
-  });
+export const deleteRecurringTransaction = (id: string) =>
+  fetchApi<void>(`/recurring-transactions/${id}`, { method: 'DELETE' });
 
 // Stats
 export const getMonthlyStats = (month: number, year: number) =>

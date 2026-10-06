@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import { Repeat, ChevronDown, ChevronUp, X, BadgeCheck, CreditCard } from 'lucide-react';
 import clsx from 'clsx';
 import { Card, Badge, Spinner, ErrorState } from '../ui';
-import { useRecurringOverview, useUpdateRecurringTransaction } from '../../hooks';
+import { useRecurringOverview, useDeleteRecurringTransaction } from '../../hooks';
 import { formatCurrency } from '../../utils/formatters';
 
 const FREQUENCY_COLORS: Record<string, string> = {
@@ -13,14 +13,21 @@ const FREQUENCY_COLORS: Record<string, string> = {
 
 export const SubscriptionOverview = () => {
   const { data: overview, isLoading, isError, refetch } = useRecurringOverview();
-  const updateRecurring = useUpdateRecurringTransaction();
+  const deleteRecurring = useDeleteRecurringTransaction();
   const [open, setOpen] = useState(false);
 
-  const handleHide = useCallback(
-    (id: string) => {
-      updateRecurring.mutate({ id, data: { user_hidden: true } });
+  const handleDelete = useCallback(
+    (id: string, merchant: string) => {
+      if (
+        !window.confirm(
+          `Delete ${merchant} from recurring? Its past charges will no longer be marked recurring.`
+        )
+      ) {
+        return;
+      }
+      deleteRecurring.mutate(id);
     },
-    [updateRecurring]
+    [deleteRecurring]
   );
 
   const charges = overview?.charges ?? [];
@@ -118,10 +125,11 @@ export const SubscriptionOverview = () => {
                           )}
                         </div>
                         <button
-                          onClick={() => handleHide(charge.id)}
-                          className="p-2 text-slate-500 hover:text-red-400 active:bg-red-500/10 rounded-lg transition-colors flex-shrink-0 touch-target"
-                          title="Hide this subscription"
-                          aria-label="Hide subscription"
+                          onClick={() => handleDelete(charge.id, charge.merchant)}
+                          disabled={deleteRecurring.isPending}
+                          className="p-2 text-slate-500 hover:text-red-400 active:bg-red-500/10 rounded-lg transition-colors flex-shrink-0 touch-target disabled:opacity-50"
+                          title="Delete this recurring charge"
+                          aria-label="Delete recurring charge"
                         >
                           <X className="h-4 w-4" />
                         </button>

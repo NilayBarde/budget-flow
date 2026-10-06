@@ -1,6 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as api from '../services/api';
-import type { RecurringTransaction } from '../types';
 
 export const useRecurringTransactions = () => {
   return useQuery({
@@ -16,18 +15,19 @@ export const useRecurringOverview = () => {
   });
 };
 
-export const useUpdateRecurringTransaction = () => {
+export const useDeleteRecurringTransaction = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<RecurringTransaction> }) =>
-      api.updateRecurringTransaction(id, data),
+    mutationFn: (id: string) => api.deleteRecurringTransaction(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['recurring-transactions'] });
       queryClient.invalidateQueries({ queryKey: ['recurring-overview'] });
       // Recurring rows feed the fixed-cost / Spending Pace computation
       queryClient.invalidateQueries({ queryKey: ['insights'] });
       queryClient.invalidateQueries({ queryKey: ['stats'] });
+      // Deleting clears the Recurring badge on the series' transactions
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
     },
   });
 };

@@ -477,6 +477,8 @@ router.patch('/:id', async (req, res) => {
             // Explicit user intent must survive detection's stale-row sweep,
             // which only deactivates source='detected' rows.
             source: 'manual' as const,
+            // Marking recurring again revives a series the user deleted.
+            user_hidden: false,
           }, {
             onConflict: 'merchant_display_name',
           });
