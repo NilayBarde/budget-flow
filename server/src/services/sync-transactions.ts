@@ -42,7 +42,7 @@ export const buildNewTransactionRow = (tx: PlaidTransaction, { accountId, accoun
     if (mapping?.default_category_id) {
       categoryId = mapping.default_category_id;
     } else {
-      const result = categorizeWithPlaid(tx.merchant_name || tx.name, tx.original_description, plaidPFC);
+      const result = categorizeWithPlaid(tx.merchant_name || tx.name, tx.original_description || tx.name, plaidPFC);
       categoryId = (result.categoryName && categoryMap.get(result.categoryName)) || null;
       needsReview = result.needsReview;
     }

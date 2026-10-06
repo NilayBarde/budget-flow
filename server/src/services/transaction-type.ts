@@ -28,7 +28,7 @@ export const GAMBLING_OPERATOR_PATTERNS = [
   /\bfan\s*duel\b/i,
   /\bbet\s*mgm\b/i,
   /\bprize\s*picks\b/i,
-  /\bunderdog\s*(fantasy|sports)\b/i,
+  /\bunderdog\s*fantasy\b/i,
   /\bespn\s*bet\b/i,
   /\bbet\s*365\b/i,
   /\bbet\s*rivers\b/i,
