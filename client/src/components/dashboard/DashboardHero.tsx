@@ -3,6 +3,7 @@ import clsx from 'clsx';
 import { AlertTriangle, Wallet, PiggyBank, Target, TrendingUp, Eye, EyeOff } from 'lucide-react';
 import { Card, Spinner } from '../ui';
 import { formatCurrency } from '../../utils/formatters';
+import { resolveBudgetTarget } from '../../utils/budget-target';
 import { useBudgetGoals, useAppSettings, useFinancialHealth } from '../../hooks';
 
 interface StatRowProps {
@@ -86,10 +87,7 @@ export const DashboardHero = ({ month, year }: { month: number; year: number }) 
     }
 
     // Budget Calculations
-    const manualBudgetLimit = appSettings?.monthly_budget_limit ? parseFloat(appSettings.monthly_budget_limit) : 0;
-    const totalBudgeted = manualBudgetLimit > 0
-        ? manualBudgetLimit
-        : (budgetGoals?.reduce((sum, goal) => sum + goal.limit_amount, 0) || 0);
+    const totalBudgeted = resolveBudgetTarget(appSettings?.monthly_budget_limit, budgetGoals);
 
     const remainingBudget = totalBudgeted - totalSpent;
     const isOverBudget = remainingBudget < 0;

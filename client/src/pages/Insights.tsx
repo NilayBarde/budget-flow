@@ -9,6 +9,8 @@ import {
 import { Card, CardHeader, Spinner, EmptyState, ErrorState, YearSelector } from '../components/ui';
 import { useInsights, useYearlyStats } from '../hooks';
 import { SpendingTrend } from '../components/dashboard/SpendingTrend';
+import { DailySpending } from '../components/dashboard/DailySpending';
+import { SpendingPace } from '../components/dashboard/SpendingPace';
 import { SubscriptionOverview } from '../components/insights/SubscriptionOverview';
 import { formatCurrency } from '../utils/formatters';
 
@@ -107,6 +109,18 @@ export const Insights = () => {
           className="flex-1 md:flex-initial md:w-fit"
         />
       </div>
+
+      {/* ── This month: how today's spending is tracking ─────────────── */}
+      {isCurrentYear && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 items-start gap-4 md:gap-6">
+          {/* Both cards use the server's current month, so they cannot disagree after a month rolls over. */}
+          <DailySpending
+            month={insights.monthOverMonth.currentMonth.month}
+            year={insights.monthOverMonth.currentMonth.year}
+          />
+          <SpendingPace />
+        </div>
+      )}
 
       {/* ── Yearly Overview Cards ───────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">

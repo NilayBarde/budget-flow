@@ -3,6 +3,7 @@ import { Card, CardHeader, Spinner } from '../ui';
 import { ProgressBar } from '../ui/ProgressBar';
 import { useInsights, useAppSettings, useBudgetGoals } from '../../hooks';
 import { formatCurrency } from '../../utils/formatters';
+import { resolveBudgetTarget } from '../../utils/budget-target';
 import { MONTHS } from '../../utils/constants';
 
 export const SpendingPace = () => {
@@ -24,11 +25,7 @@ export const SpendingPace = () => {
 
     const { spendingVelocity, monthOverMonth: { currentMonth: cm } } = insights;
 
-    // Resolve monthly budget target (same logic as DashboardHero)
-    const manualBudgetLimit = appSettings?.monthly_budget_limit ? parseFloat(appSettings.monthly_budget_limit) : 0;
-    const budgetTarget = manualBudgetLimit > 0
-        ? manualBudgetLimit
-        : (budgetGoals?.reduce((sum, goal) => sum + goal.limit_amount, 0) || 0);
+    const budgetTarget = resolveBudgetTarget(appSettings?.monthly_budget_limit, budgetGoals);
     const hasBudget = budgetTarget > 0;
 
     // Calculate pace percentage
