@@ -7,12 +7,18 @@ const state = {
   mutate: vi.fn(),
   isPending: false,
   isLoading: false,
+  isPlaceholderData: false,
   isError: false,
 };
 
 vi.mock('../../../hooks', async importOriginal => ({
   ...(await importOriginal<typeof import('../../../hooks')>()),
-  useTransactions: () => ({ data: state.transactions, isLoading: state.isLoading, isError: state.isError }),
+  useTransactions: () => ({
+    data: state.transactions,
+    isLoading: state.isLoading,
+    isPlaceholderData: state.isPlaceholderData,
+    isError: state.isError,
+  }),
   useUpdateTransaction: () => ({ mutate: state.mutate, isPending: state.isPending }),
 }));
 // The modal pulls in its own data hooks; it is closed here and not under test.
@@ -29,6 +35,7 @@ describe('LargeUnsplitTransactions', () => {
     state.mutate = vi.fn();
     state.isPending = false;
     state.isLoading = false;
+    state.isPlaceholderData = false;
     state.isError = false;
   });
 
@@ -105,7 +112,29 @@ describe('LargeUnsplitTransactions', () => {
     render(<LargeUnsplitTransactions month={10} year={2026} />);
 
     expect(screen.getByText('Possible missed splits')).toBeTruthy();
+    expect(screen.getByRole('status', { name: 'Loading' })).toBeTruthy();
     expect(screen.queryByText('No possible splits')).toBeNull();
+  });
+
+  it('shows the spinner, not the previous month, while a new month loads behind the old data', () => {
+    // The query keeps the last month's rows on screen while the next month fetches. Acting on those rows
+    // would split or dismiss a transaction from another month.
+    state.transactions = [rent, cos];
+    state.isPlaceholderData = true;
+    render(<LargeUnsplitTransactions month={11} year={2026} />);
+
+    expect(screen.getByRole('status', { name: 'Loading' })).toBeTruthy();
+    expect(screen.queryByText('Bilt Housing Payment')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Split' })).toBeNull();
+  });
+
+  it('does not claim there is nothing to review while the new month loads behind an empty old one', () => {
+    state.transactions = [];
+    state.isPlaceholderData = true;
+    render(<LargeUnsplitTransactions month={11} year={2026} />);
+
+    expect(screen.queryByText('No possible splits')).toBeNull();
+    expect(screen.getByRole('status', { name: 'Loading' })).toBeTruthy();
   });
 
   it('does not say there is nothing to review when the transactions failed to load', () => {
