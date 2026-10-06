@@ -215,6 +215,10 @@ export interface InsightsSpendingVelocity {
   expectedFixedCosts: number;
   recurringSpent: number;
   variableSpent: number;
+  /** Fixed costs still due this month. */
+  remainingFixed: number;
+  /** Variable spending so far plus the remaining days at the daily rate. */
+  projectedVariable: number;
   excludedOutlierAmount: number;
 }
 

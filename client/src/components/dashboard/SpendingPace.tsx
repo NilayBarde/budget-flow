@@ -4,6 +4,7 @@ import { ProgressBar } from '../ui/ProgressBar';
 import { useInsights, useAppSettings, useBudgetGoals } from '../../hooks';
 import { formatCurrency } from '../../utils/formatters';
 import { resolveBudgetTarget } from '../../utils/budget-target';
+import { describePace } from '../../utils/pace';
 import { MONTHS } from '../../utils/constants';
 
 export const SpendingPace = () => {
@@ -33,11 +34,10 @@ export const SpendingPace = () => {
         ? (spendingVelocity.daysElapsed / spendingVelocity.daysInMonth) * 100
         : 0;
 
-    // Determine if on pace against the budget (with 5% grace period)
+    // On pace against the budget (with a 5% grace), and by how much it is over or under
     const benchmark = hasBudget ? budgetTarget : spendingVelocity.lastMonthTotal;
-    const isOnPace = benchmark > 0
-        ? spendingVelocity.projectedTotal <= benchmark * 1.05
-        : true;
+    const pace = describePace({ projectedTotal: spendingVelocity.projectedTotal, budget: benchmark, hasBudget });
+    const isOnPace = pace.onPace;
 
     return (
         <Card padding="sm">
@@ -98,6 +98,9 @@ export const SpendingPace = () => {
                         <p className={`text-sm font-medium ${spendingVelocity.projectedTotal > benchmark ? 'text-rose-400' : 'text-emerald-400'}`}>
                             {formatCurrency(spendingVelocity.projectedTotal)}
                         </p>
+                        <p className="text-[10px] text-slate-500 mt-0.5">
+                            {formatCurrency(spendingVelocity.recurringSpent + spendingVelocity.remainingFixed)} fixed + {formatCurrency(spendingVelocity.projectedVariable)} variable
+                        </p>
                         {spendingVelocity.excludedOutlierAmount > 0 && (
                             <p
                                 className="text-[10px] text-slate-500 mt-0.5"
@@ -112,6 +115,11 @@ export const SpendingPace = () => {
                         <p className={`text-sm font-medium ${isOnPace ? 'text-emerald-400' : 'text-amber-400'}`}>
                             {isOnPace ? 'On pace' : 'Over pace'}
                         </p>
+                        {pace.difference !== null && (
+                            <p className="text-[10px] text-slate-500 mt-0.5">
+                                {formatCurrency(pace.difference)} {pace.direction} {pace.against}
+                            </p>
+                        )}
                     </div>
                 </div>
             </div>
