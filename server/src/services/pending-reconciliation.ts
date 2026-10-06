@@ -19,6 +19,7 @@ interface PendingRow {
   merchant_name: string;
   is_split: boolean;
   needs_review: boolean;
+  split_dismissed: boolean | null;
   splits: SplitInput[] | null;
 }
 
@@ -34,7 +35,7 @@ export async function reconcilePendingTransaction(
 
   const { data: pending, error: lookupError } = await supabase
     .from('transactions')
-    .select('id, amount, category_id, notes, merchant_display_name, merchant_name, is_split, needs_review, splits:transaction_splits(amount, description, is_my_share)')
+    .select('id, amount, category_id, notes, merchant_display_name, merchant_name, is_split, needs_review, split_dismissed, splits:transaction_splits(amount, description, is_my_share)')
     .eq('plaid_transaction_id', pendingPlaidTxId)
     .maybeSingle();
 
@@ -54,6 +55,8 @@ export async function reconcilePendingTransaction(
     updates.needs_review = p.needs_review ?? false; // preserve a user-cleared review state
   }
   if (p.notes && p.notes.trim()) updates.notes = p.notes;
+  // "This should stay whole" is a decision about the purchase, not about which row carries it.
+  if (p.split_dismissed) updates.split_dismissed = true;
   // Only copy a display name the user actually customized (differs from the
   // auto-cleaned form), so we don't clobber the posted row's own clean name.
   if (p.merchant_display_name && p.merchant_display_name !== cleanMerchantName(p.merchant_name)) {

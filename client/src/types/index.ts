@@ -54,6 +54,8 @@ export interface Transaction {
   category_id: string | null;
   transaction_type: TransactionType;
   is_split: boolean;
+  /** The user said this should stay whole, so it no longer shows under "Possible missed splits". */
+  split_dismissed?: boolean;
   parent_transaction_id: string | null;
   is_recurring: boolean;
   needs_review: boolean;  // Flag for transactions that need manual categorization

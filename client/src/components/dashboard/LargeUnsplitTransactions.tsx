@@ -1,9 +1,10 @@
 import { Scissors } from 'lucide-react';
 import { Card, Button } from '../ui';
-import { useTransactions, useModalState } from '../../hooks';
+import { useTransactions, useUpdateTransaction, useModalState } from '../../hooks';
 import { SplitTransactionModal } from '../transactions/SplitTransactionModal';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import { LARGE_UNSPLIT_THRESHOLD } from '../../utils/constants';
+import { findMissedSplitCandidates } from '../../utils/missed-splits';
 import type { Transaction } from '../../types';
 
 interface LargeUnsplitTransactionsProps {
@@ -16,10 +17,9 @@ const MAX_ROWS = 5;
 export const LargeUnsplitTransactions = ({ month, year }: LargeUnsplitTransactionsProps) => {
     const { data: transactions } = useTransactions({ month, year, transaction_type: 'expense' });
     const splitModal = useModalState<Transaction>();
+    const updateTransaction = useUpdateTransaction();
 
-    const candidates = (transactions || [])
-        .filter(t => !t.is_split && Math.abs(t.amount) >= LARGE_UNSPLIT_THRESHOLD)
-        .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+    const candidates = findMissedSplitCandidates(transactions || [], LARGE_UNSPLIT_THRESHOLD);
 
     if (candidates.length === 0) return null;
 
@@ -51,6 +51,15 @@ export const LargeUnsplitTransactions = ({ month, year }: LargeUnsplitTransactio
                                 </span>
                                 <Button variant="ghost" size="sm" onClick={() => splitModal.edit(t)}>
                                     Split
+                                </Button>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    aria-label={`Don't split ${t.merchant_display_name || t.merchant_name}`}
+                                    disabled={updateTransaction.isPending}
+                                    onClick={() => updateTransaction.mutate({ id: t.id, data: { split_dismissed: true } })}
+                                >
+                                    Don't split
                                 </Button>
                             </div>
                         </div>
