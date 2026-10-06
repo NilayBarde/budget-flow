@@ -641,7 +641,7 @@ router.post('/:id/refresh-accounts', async (req, res) => {
         .insert(account);
 
       if (insertError) {
-        console.error(`Failed to create account ${plaidAccount.name}:`, insertError);
+        console.error(`Failed to create account ${plaidAccount.name}:`, redactError(insertError));
         continue;
       }
 

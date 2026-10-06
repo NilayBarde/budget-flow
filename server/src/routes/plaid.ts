@@ -188,7 +188,7 @@ router.post('/exchange-token', async (req, res) => {
           .eq('id', existingId);
 
         if (error) {
-          console.error(`Failed to update existing account ${plaidAccount.name}:`, error);
+          console.error(`Failed to update existing account ${plaidAccount.name}:`, redactError(error));
           continue;
         }
 
@@ -217,7 +217,7 @@ router.post('/exchange-token', async (req, res) => {
         const { error } = await supabase.from('accounts').insert(account).select().single();
 
         if (error) {
-          console.error(`Failed to create account ${plaidAccount.name}:`, error);
+          console.error(`Failed to create account ${plaidAccount.name}:`, redactError(error));
           continue;
         }
 

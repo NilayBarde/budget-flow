@@ -80,6 +80,34 @@ describe('redactError', () => {
     expect(JSON.stringify(redacted)).not.toContain('super-secret');
   });
 
+  it('does not recurse forever on a circular cause chain', () => {
+    const error = new Error('loop') as Error & { cause?: unknown };
+    error.cause = error;
+    expect(() => redactError(error)).not.toThrow();
+  });
+
+  it('redacts axios errors inside an AggregateError', () => {
+    const aggregate = new AggregateError([axiosPlaidError(), new Error('other')], 'all failed');
+    const redacted = redactError(aggregate);
+    expect(typeof redacted).toBe('string');
+    expect(String(redacted)).toContain('all failed');
+    expect(String(redacted)).toContain('ITEM_LOGIN_REQUIRED');
+    expect(JSON.stringify(redacted)).not.toContain('super-secret');
+  });
+
+  it('drops the row dump from a database error, which can include credential columns', () => {
+    // PostgREST puts "Failing row contains (...)" in details on a constraint violation.
+    const redacted = redactError({
+      code: '23502',
+      message: 'null value in column "plaid_item_id" violates not-null constraint',
+      details: 'Failing row contains (a1, access-production-super-secret, cursor-secret).',
+      hint: null,
+    });
+    expect(String(redacted)).toContain('23502');
+    expect(String(redacted)).toContain('violates not-null constraint');
+    expect(JSON.stringify(redacted)).not.toContain('super-secret');
+  });
+
   it('returns ordinary errors unchanged so their stack traces survive', () => {
     const error = new Error('boom');
     expect(redactError(error)).toBe(error);
