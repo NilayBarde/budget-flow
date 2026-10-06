@@ -364,7 +364,9 @@ router.get('/insights', asyncHandler(async (req, res) => {
             );
           } else {
             dailyVariable.set(day, (dailyVariable.get(day) || 0) + amountToCount);
-            if (amountToCount > 0) unmatchedExpenses.push({ day, amount: amountToCount });
+            if (amountToCount > 0) {
+              unmatchedExpenses.push({ day, amount: amountToCount, merchantName: merchantName || '' });
+            }
           }
         }
 

@@ -168,10 +168,12 @@ export const filterLiveCharges = (
 // unpaid. As a fallback an unmatched charge is attributed to a live monthly
 // series that has not paid yet when BOTH hold:
 //   - the amount is within FUZZY_MATCH_TOLERANCE of the series average, and
-//   - it posted within FUZZY_MATCH_DAY_WINDOW days of the series' usual day.
-// The day check keeps a one-off purchase of a similar size from being
-// mistaken for rent. Small series are excluded because similar amounts are
-// common coincidences (a $75 gym vs any $75 dinner).
+//   - it posted within FUZZY_MATCH_DAY_WINDOW days of the series' usual day, AND
+//   - the merchant names share a meaningful token ("bilt", "housing").
+// The text signal keeps a similarly sized one-off (a $2,300 flight on the 4th)
+// from absorbing the rent slot, which would push the real rent into variable
+// spend. Small series are excluded because similar amounts are common
+// coincidences (a $75 gym vs any $75 dinner).
 export const FUZZY_MATCH_TOLERANCE = 0.1;
 export const FUZZY_MATCH_DAY_WINDOW = 7;
 export const FUZZY_MATCH_MIN_AMOUNT = 100;
@@ -186,11 +188,38 @@ export const circularDayDistance = (a: number, b: number, daysInMonth: number): 
 export interface UnmatchedExpense {
   day: number;
   amount: number;
+  /** Display name of the charge's merchant, '' when unknown. */
+  merchantName: string;
 }
 
-export interface RenamedPaymentMatch extends UnmatchedExpense {
+export interface RenamedPaymentMatch {
   merchantDisplayName: string;
+  day: number;
+  amount: number;
 }
+
+// Words that appear in most bill payment descriptors and say nothing about
+// who is being paid.
+const GENERIC_NAME_TOKENS = new Set([
+  'payment', 'pay', 'withdrawal', 'card', 'bill', 'autopay', 'online', 'debit',
+  'ach', 'transfer', 'the', 'and', 'inc', 'llc',
+]);
+
+const nameTokens = (name: string): Set<string> =>
+  new Set(
+    name
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter(t => t.length >= 3 && !GENERIC_NAME_TOKENS.has(t)),
+  );
+
+const sharesNameToken = (a: string, b: string): boolean => {
+  const tokensA = nameTokens(a);
+  for (const token of nameTokens(b)) {
+    if (tokensA.has(token)) return true;
+  }
+  return false;
+};
 
 export const matchRenamedRecurringPayments = (
   liveCharges: RecurringChargeRow[],
@@ -225,6 +254,7 @@ export const matchRenamedRecurringPayments = (
       const relativeDiff = Math.abs(expense.amount - charge.averageAmount) / charge.averageAmount;
       if (relativeDiff > FUZZY_MATCH_TOLERANCE) return;
       if (circularDayDistance(expense.day, usualDay, daysInMonth) > FUZZY_MATCH_DAY_WINDOW) return;
+      if (!sharesNameToken(expense.merchantName, charge.merchantDisplayName)) return;
       if (relativeDiff < bestDiff) {
         bestDiff = relativeDiff;
         bestIndex = i;

@@ -468,7 +468,7 @@ describe('matchRenamedRecurringPayments', () => {
       [rent],
       new Map(),
       lastSeen,
-      [{ day: 5, amount: 2497.49 }],
+      [{ day: 5, amount: 2497.49, merchantName: 'Landlord Co Rent' }],
       31,
     );
 
@@ -482,7 +482,7 @@ describe('matchRenamedRecurringPayments', () => {
       [rent],
       new Map([['Landlord Co', 2400]]),
       lastSeen,
-      [{ day: 5, amount: 2400 }],
+      [{ day: 5, amount: 2400, merchantName: 'Landlord Co Rent' }],
       31,
     );
 
@@ -494,7 +494,7 @@ describe('matchRenamedRecurringPayments', () => {
       [rent],
       new Map(),
       lastSeen,
-      [{ day: 4, amount: 1800 }],
+      [{ day: 4, amount: 1800, merchantName: 'Landlord Co Rent' }],
       31,
     );
 
@@ -506,7 +506,7 @@ describe('matchRenamedRecurringPayments', () => {
       [rent],
       new Map(),
       lastSeen,
-      [{ day: 20, amount: 2350 }],
+      [{ day: 20, amount: 2350, merchantName: 'Landlord Co Rent' }],
       31,
     );
 
@@ -520,7 +520,7 @@ describe('matchRenamedRecurringPayments', () => {
       [gym],
       new Map(),
       new Map([['Gym', '2026-09-03']]),
-      [{ day: 4, amount: 74 }],
+      [{ day: 4, amount: 74, merchantName: 'Gym Membership' }],
       31,
     );
 
@@ -532,21 +532,21 @@ describe('matchRenamedRecurringPayments', () => {
       [{ ...rent, frequency: 'weekly' as const }, { ...rent, merchantDisplayName: 'Annual', frequency: 'yearly' as const }],
       new Map(),
       new Map([['Landlord Co', '2026-09-03'], ['Annual', '2026-09-03']]),
-      [{ day: 5, amount: 2400 }],
+      [{ day: 5, amount: 2400, merchantName: 'Landlord Co Rent' }],
       31,
     );
 
     expect(matches).toEqual([]);
   });
 
-  it('uses each charge for at most one series, preferring the closest amount', () => {
+  it('gives a charge that fits two series to the largest series first', () => {
     const other = { merchantDisplayName: 'Other Bill', averageAmount: 2300, frequency: 'monthly' as const };
 
     const matches = matchRenamedRecurringPayments(
       [rent, other],
       new Map(),
       new Map([['Landlord Co', '2026-09-03'], ['Other Bill', '2026-09-03']]),
-      [{ day: 4, amount: 2410 }],
+      [{ day: 4, amount: 2410, merchantName: 'Landlord Other Bill' }],
       31,
     );
 
@@ -555,12 +555,53 @@ describe('matchRenamedRecurringPayments', () => {
     ]);
   });
 
+  it('does not let a flight sized one-off absorb the rent slot', () => {
+    const matches = matchRenamedRecurringPayments(
+      [rent],
+      new Map(),
+      lastSeen,
+      [{ day: 4, amount: 2300, merchantName: 'Delta Air Lines' }],
+      31,
+    );
+
+    expect(matches).toEqual([]);
+  });
+
+  it('matches the renamed payee even when a flight is also near the amount and day', () => {
+    const matches = matchRenamedRecurringPayments(
+      [rent],
+      new Map(),
+      lastSeen,
+      [
+        { day: 4, amount: 2410, merchantName: 'Delta Air Lines' },
+        { day: 5, amount: 2497.49, merchantName: 'Landlord Co Housing Payment' },
+      ],
+      31,
+    );
+
+    expect(matches).toEqual([
+      { merchantDisplayName: 'Landlord Co', day: 5, amount: 2497.49 },
+    ]);
+  });
+
+  it('ignores generic payment words when comparing merchant names', () => {
+    const matches = matchRenamedRecurringPayments(
+      [rent],
+      new Map(),
+      lastSeen,
+      [{ day: 4, amount: 2400, merchantName: 'Online Payment Transfer' }],
+      31,
+    );
+
+    expect(matches).toEqual([]);
+  });
+
   it('skips a series with no known billing day', () => {
     const matches = matchRenamedRecurringPayments(
       [rent],
       new Map(),
       new Map(),
-      [{ day: 5, amount: 2400 }],
+      [{ day: 5, amount: 2400, merchantName: 'Landlord Co Rent' }],
       31,
     );
 
@@ -573,7 +614,7 @@ describe('matchRenamedRecurringPayments', () => {
         [rent],
         new Map(),
         new Map([['Landlord Co', lastDate]]),
-        [{ day, amount: 2400 }],
+        [{ day, amount: 2400, merchantName: 'Landlord Co Rent' }],
         daysInMonth,
       );
 
@@ -602,7 +643,7 @@ describe('matchRenamedRecurringPayments', () => {
       // Withdrawal" ($2,404.99). It landed in the variable bucket AND stayed
       // unpaid as a fixed cost, projecting ~$21k against a $5,500 budget.
       const variableByDay = [38, 53, 791, 142, 2556, 0];
-      const unmatched = [{ day: 5, amount: 2497.49 }];
+      const unmatched = [{ day: 5, amount: 2497.49, merchantName: 'Bilt Housing Payment' }];
       const biltRent = {
         merchantDisplayName: 'Bilt Card - Housing Withdrawal Withdrawal',
         averageAmount: 2404.99,
