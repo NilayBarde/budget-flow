@@ -148,6 +148,19 @@ describe('planCategoryBackfill', () => {
     expect(plan([purchase, ...refunds])).toEqual([]);
   });
 
+  it('does not pool rows with no merchant name into one history, or give them the rule of another', () => {
+    // A blank name is not a merchant: unrelated rows would otherwise share one bucket and inherit its majority.
+    const blank = row({ merchant_name: '' });
+    const whitespace = row({ merchant_name: '   ' });
+    const nameless = [
+      row({ merchant_name: '', category_id: 'cat-shopping' }),
+      row({ merchant_name: '', category_id: 'cat-shopping' }),
+      row({ merchant_name: null, category_id: 'cat-shopping' }),
+    ];
+
+    expect(plan([blank, whitespace, ...nameless], [['', 'cat-dining']])).toEqual([]);
+  });
+
   it('ignores a rule that points at no category', () => {
     const blank = row({ merchant_name: 'Uber' });
 

@@ -76,8 +76,8 @@ export const PLAID_PFC_MAP: Record<string, string> = {
   // Home
   'HOME_IMPROVEMENT_FURNITURE': 'Shopping',
   'HOME_IMPROVEMENT_HARDWARE': 'Shopping',
-  'HOME_IMPROVEMENT_REPAIR_AND_MAINTENANCE': 'Housing',
-  'HOME_IMPROVEMENT_SECURITY': 'Housing',
+  'HOME_IMPROVEMENT_REPAIR_AND_MAINTENANCE': 'Shopping',
+  'HOME_IMPROVEMENT_SECURITY': 'Shopping',
   'HOME_IMPROVEMENT_OTHER_HOME_IMPROVEMENT': 'Shopping',
 
   // Entertainment

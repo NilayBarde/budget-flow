@@ -17,7 +17,8 @@ import { fetchAllRows } from '../utils/paginate.js';
 import { planCategoryBackfill, type BackfillRow } from '../services/category-backfill.js';
 
 const APPLY = process.argv.includes('--apply');
-const UPDATE_CHUNK_SIZE = 200;
+// 50 ids keep the request URL well under the limit gateways in front of PostgREST enforce (200 ids is about 7.5 KB).
+const UPDATE_CHUNK_SIZE = 50;
 
 const loadRows = () =>
   fetchAllRows<BackfillRow & { merchant_display_name: string | null }>(

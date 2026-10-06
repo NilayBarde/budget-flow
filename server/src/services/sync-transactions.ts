@@ -45,6 +45,12 @@ export const buildNewTransactionRow = (tx: PlaidTransaction, { accountId, accoun
       const result = categorizeWithPlaid(tx.merchant_name || tx.name, tx.original_description || tx.name, plaidPFC);
       categoryId = resolveCategoryId(result.categoryName, categoryMap);
       needsReview = result.needsReview;
+      // Income and Investment are for rows typed that way. Spending Plaid tags as income (a merchant the user
+      // typed as an expense, say) is left for the user rather than filed where it would count as earnings.
+      if (categoryId && (categoryId === categoryMap.get('Income') || categoryId === categoryMap.get('Investment'))) {
+        categoryId = null;
+        needsReview = true;
+      }
     }
   } else if (transactionType === 'income') {
     categoryId = categoryMap.get('Income') || null;

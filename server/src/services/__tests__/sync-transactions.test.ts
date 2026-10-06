@@ -179,6 +179,18 @@ describe('buildNewTransactionRow', () => {
     expect(row.needs_review).toBe(false);
   });
 
+  it('never files spending under Income or Investment, even when Plaid tags the row as income', () => {
+    // The user typed this merchant as an expense with a rule that has no category, while Plaid calls it income.
+    const row = newRow(
+      tx({ personal_finance_category: { primary: 'INCOME', detailed: 'INCOME_WAGES' } }),
+      { mapping: mapping({ default_transaction_type: 'expense' }) },
+    );
+
+    expect(row.transaction_type).toBe('expense');
+    expect(row.category_id).toBeNull();
+    expect(row.needs_review).toBe(true);
+  });
+
   it('lets a merchant rule set the category, display name and type, and locks the type', () => {
     const row = newRow(tx(), { mapping: mapping({ default_category_id: 'cat-custom', default_transaction_type: 'expense' }) });
 

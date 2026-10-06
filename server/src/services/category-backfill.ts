@@ -47,6 +47,7 @@ export const planCategoryBackfill = ({ rows, ruleCategoryByMerchant, categoryIdB
   for (const r of rows) {
     if (r.transaction_type !== 'expense' || !r.category_id || reserved.has(r.category_id)) continue;
     const key = merchantKey(r.merchant_name);
+    if (!key) continue; // a blank name is not a merchant, so its rows must not share a history
     const counts = historyByMerchant.get(key) ?? new Map<string, number>();
     counts.set(r.category_id, (counts.get(r.category_id) ?? 0) + 1);
     historyByMerchant.set(key, counts);
@@ -66,16 +67,19 @@ export const planCategoryBackfill = ({ rows, ruleCategoryByMerchant, categoryIdB
     if (!isSpending(r) || r.category_id) continue;
     const key = merchantKey(r.merchant_name);
 
-    const rule = ruleCategoryByMerchant.get(key);
-    if (rule && !reserved.has(rule)) {
-      plan.push({ id: r.id, categoryId: rule, source: 'rule' });
-      continue;
-    }
+    // With no merchant name there is nothing to look a rule or a history up by; only Plaid can place the row.
+    if (key) {
+      const rule = ruleCategoryByMerchant.get(key);
+      if (rule && !reserved.has(rule)) {
+        plan.push({ id: r.id, categoryId: rule, source: 'rule' });
+        continue;
+      }
 
-    const history = fromHistory(key);
-    if (history) {
-      plan.push({ id: r.id, categoryId: history, source: 'history' });
-      continue;
+      const history = fromHistory(key);
+      if (history) {
+        plan.push({ id: r.id, categoryId: history, source: 'history' });
+        continue;
+      }
     }
 
     if (r.plaid_category) {

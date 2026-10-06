@@ -86,6 +86,14 @@ describe('the Plaid category map', () => {
     expect(categoryFor('MEDICAL', 'MEDICAL_PRIMARY_CARE')).toBe('Healthcare');
   });
 
+  it('files home repairs with the rest of home improvement, not under rent', () => {
+    const categoryFor = (detailed: string) => categorizeWithPlaid('M', null, { primary: 'HOME_IMPROVEMENT', detailed }).categoryName;
+
+    expect(categoryFor('HOME_IMPROVEMENT_REPAIR_AND_MAINTENANCE')).toBe('Shopping');
+    expect(categoryFor('HOME_IMPROVEMENT_SECURITY')).toBe('Shopping');
+    expect(categoryFor('HOME_IMPROVEMENT_FURNITURE')).toBe('Shopping');
+  });
+
   it('falls back to the broad category for a detail Plaid adds later', () => {
     const result = categorizeWithPlaid('M', null, { primary: 'FOOD_AND_DRINK', detailed: 'FOOD_AND_DRINK_SOMETHING_NEW' });
 
