@@ -1,7 +1,14 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
-import { buildFixedCostSeries, computeSpendingVelocity } from '../services/spending-velocity.js';
+import {
+  buildFixedCostSeries,
+  computeSpendingVelocity,
+  filterLiveCharges,
+  findSupersededSeries,
+  matchRenamedRecurringPayments,
+  type UnmatchedExpense,
+} from '../services/spending-velocity.js';
 import {
   rankTopCategories,
   buildCategoryTrends,
@@ -288,6 +295,9 @@ router.get('/insights', asyncHandler(async (req, res) => {
     // ── Spending velocity (current month) ──────────────────────────────
     let currentMonthSpent = 0;
     const recurringPaidByMerchant = new Map<string, number>();
+    // Current-month expenses not matched to a recurring series by name; a
+    // second pass attributes renamed recurring payments (see below).
+    const unmatchedExpenses: UnmatchedExpense[] = [];
     let prevMonthTotalSpent = 0;
 
     // ── Process all transactions ───────────────────────────────────────
@@ -349,6 +359,7 @@ router.get('/insights', asyncHandler(async (req, res) => {
             );
           } else {
             dailyVariable.set(day, (dailyVariable.get(day) || 0) + amountToCount);
+            if (amountToCount > 0) unmatchedExpenses.push({ day, amount: amountToCount });
           }
         }
 
@@ -427,11 +438,6 @@ router.get('/insights', asyncHandler(async (req, res) => {
     const topMerchants = buildTopMerchants(merchantMap);
 
     // ── Build spending velocity ────────────────────────────────────────
-    const dailyVariableSpending: number[] = [];
-    for (let d = 1; d <= today; d++) {
-      dailyVariableSpending.push(dailyVariable.get(d) || 0);
-    }
-
     // Only recurring series whose merchant has actually charged recently
     // count as fixed costs; merchantMap already holds each merchant's most
     // recent expense date across the 6-month window.
@@ -439,12 +445,46 @@ router.get('/insights', asyncHandler(async (req, res) => {
       Array.from(merchantMap.values()).map(m => [m.merchantName, m.lastDate]),
     );
     const todayStr = `${currentYear}-${String(currentMonth).padStart(2, '0')}-${String(today).padStart(2, '0')}`;
+    const recurringChargeRows = (recurringCharges || []).map(r => ({
+      merchantDisplayName: r.merchant_display_name,
+      averageAmount: r.average_amount,
+      frequency: r.frequency as RecurringFrequency,
+    }));
+
+    // A recurring bill that posted under a different merchant name than its
+    // series (rent via a payment processor) was counted as variable spend
+    // above. Move it to its series so it is neither extrapolated across the
+    // month nor projected a second time as an unpaid fixed cost.
+    const liveCharges = filterLiveCharges(recurringChargeRows, lastExpenseDateByMerchant, todayStr);
+    const renamedPayments = matchRenamedRecurringPayments(
+      liveCharges,
+      recurringPaidByMerchant,
+      lastExpenseDateByMerchant,
+      unmatchedExpenses,
+    );
+    for (const payment of renamedPayments) {
+      recurringPaidByMerchant.set(
+        payment.merchantDisplayName,
+        (recurringPaidByMerchant.get(payment.merchantDisplayName) || 0) + payment.amount,
+      );
+      dailyVariable.set(payment.day, Math.max(0, (dailyVariable.get(payment.day) || 0) - payment.amount));
+    }
+
+    // The same bill can also be tracked under two merchant names once
+    // detection catches up; drop the unpaid alias so it is not projected twice.
+    const supersededSeries = findSupersededSeries(
+      liveCharges,
+      recurringPaidByMerchant,
+      lastExpenseDateByMerchant,
+    );
+
+    const dailyVariableSpending: number[] = [];
+    for (let d = 1; d <= today; d++) {
+      dailyVariableSpending.push(dailyVariable.get(d) || 0);
+    }
+
     const fixedCostSeries = buildFixedCostSeries(
-      (recurringCharges || []).map(r => ({
-        merchantDisplayName: r.merchant_display_name,
-        averageAmount: r.average_amount,
-        frequency: r.frequency as RecurringFrequency,
-      })),
+      recurringChargeRows.filter(r => !supersededSeries.has(r.merchantDisplayName)),
       lastExpenseDateByMerchant,
       recurringPaidByMerchant,
       todayStr,

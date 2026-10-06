@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { buildFixedCostSeries, computeSpendingVelocity } from '../spending-velocity.js';
+import {
+  buildFixedCostSeries,
+  computeSpendingVelocity,
+  findSupersededSeries,
+  matchRenamedRecurringPayments,
+} from '../spending-velocity.js';
 
 /** Shorthand: a single fixed-cost series fully described by two numbers. */
 const series = (expectedAmount: number, paidThisMonth: number) => ({
@@ -448,6 +453,244 @@ describe('buildFixedCostSeries', () => {
       expect(result.expectedFixedCosts).toBeCloseTo(2479.99, 2);
       expect(result.projectedTotal).toBeCloseTo(7962.07, 1);
       expect(result.projectedTotal).toBeLessThan(8000);
+    });
+  });
+});
+
+describe('matchRenamedRecurringPayments', () => {
+  const rent = { merchantDisplayName: 'Landlord Co', averageAmount: 2400, frequency: 'monthly' as const };
+  // Rent usually posts on the 3rd.
+  const lastSeen = new Map([['Landlord Co', '2026-09-03']]);
+
+  it('attributes a renamed rent payment near the usual day and amount', () => {
+    const matches = matchRenamedRecurringPayments(
+      [rent],
+      new Map(),
+      lastSeen,
+      [{ day: 5, amount: 2497.49 }],
+    );
+
+    expect(matches).toEqual([
+      { merchantDisplayName: 'Landlord Co', day: 5, amount: 2497.49 },
+    ]);
+  });
+
+  it('skips a series that has already been paid by name this month', () => {
+    const matches = matchRenamedRecurringPayments(
+      [rent],
+      new Map([['Landlord Co', 2400]]),
+      lastSeen,
+      [{ day: 5, amount: 2400 }],
+    );
+
+    expect(matches).toEqual([]);
+  });
+
+  it('ignores a charge outside the amount tolerance', () => {
+    const matches = matchRenamedRecurringPayments(
+      [rent],
+      new Map(),
+      lastSeen,
+      [{ day: 4, amount: 1800 }],
+    );
+
+    expect(matches).toEqual([]);
+  });
+
+  it('ignores a charge far from the usual billing day (a one-off purchase)', () => {
+    const matches = matchRenamedRecurringPayments(
+      [rent],
+      new Map(),
+      lastSeen,
+      [{ day: 20, amount: 2350 }],
+    );
+
+    expect(matches).toEqual([]);
+  });
+
+  it('never matches small series, where amount coincidences are common', () => {
+    const gym = { merchantDisplayName: 'Gym', averageAmount: 75, frequency: 'monthly' as const };
+
+    const matches = matchRenamedRecurringPayments(
+      [gym],
+      new Map(),
+      new Map([['Gym', '2026-09-03']]),
+      [{ day: 4, amount: 74 }],
+    );
+
+    expect(matches).toEqual([]);
+  });
+
+  it('only matches monthly series', () => {
+    const matches = matchRenamedRecurringPayments(
+      [{ ...rent, frequency: 'weekly' as const }, { ...rent, merchantDisplayName: 'Annual', frequency: 'yearly' as const }],
+      new Map(),
+      new Map([['Landlord Co', '2026-09-03'], ['Annual', '2026-09-03']]),
+      [{ day: 5, amount: 2400 }],
+    );
+
+    expect(matches).toEqual([]);
+  });
+
+  it('uses each charge for at most one series, preferring the closest amount', () => {
+    const other = { merchantDisplayName: 'Other Bill', averageAmount: 2300, frequency: 'monthly' as const };
+
+    const matches = matchRenamedRecurringPayments(
+      [rent, other],
+      new Map(),
+      new Map([['Landlord Co', '2026-09-03'], ['Other Bill', '2026-09-03']]),
+      [{ day: 4, amount: 2410 }],
+    );
+
+    expect(matches).toEqual([
+      { merchantDisplayName: 'Landlord Co', day: 4, amount: 2410 },
+    ]);
+  });
+
+  it('skips a series with no known billing day', () => {
+    const matches = matchRenamedRecurringPayments(
+      [rent],
+      new Map(),
+      new Map(),
+      [{ day: 5, amount: 2400 }],
+    );
+
+    expect(matches).toEqual([]);
+  });
+
+  describe('regression: October 2026 rent posted under a new merchant name', () => {
+    it('stops double counting rent as both variable spend and an unpaid fixed cost', () => {
+      // Day 6 of 31. Rent ($2,497.49) posted on day 5 as "Bilt Housing
+      // Payment" while the series is "Bilt Card - Housing Withdrawal
+      // Withdrawal" ($2,404.99). It landed in the variable bucket AND stayed
+      // unpaid as a fixed cost, projecting ~$21k against a $5,500 budget.
+      const variableByDay = [38, 53, 791, 142, 2556, 0];
+      const unmatched = [{ day: 5, amount: 2497.49 }];
+      const biltRent = {
+        merchantDisplayName: 'Bilt Card - Housing Withdrawal Withdrawal',
+        averageAmount: 2404.99,
+        frequency: 'monthly' as const,
+      };
+
+      const [match] = matchRenamedRecurringPayments(
+        [biltRent],
+        new Map(),
+        new Map([[biltRent.merchantDisplayName, '2026-09-03']]),
+        unmatched,
+      );
+      expect(match).toBeDefined();
+
+      const dailyVariableSpending = [...variableByDay];
+      dailyVariableSpending[match.day - 1] -= match.amount;
+
+      const result = computeSpendingVelocity({
+        daysElapsed: 6,
+        daysInMonth: 31,
+        spentSoFar: 3579.83,
+        fixedCostSeries: [{ expectedAmount: 2404.99, paidThisMonth: match.amount }],
+        lastMonthTotal: 0,
+        dailyVariableSpending,
+      });
+
+      expect(result.recurringSpent).toBeCloseTo(2497.49, 2);
+      expect(result.variableSpent).toBeCloseTo(1082.51, 2);
+      // 2497.49 rent + (1082.51 / 6) * 31 projected variable, nowhere near $21k.
+      expect(result.projectedTotal).toBeLessThan(9000);
+    });
+  });
+});
+
+describe('findSupersededSeries', () => {
+  const monthly = (merchantDisplayName: string, averageAmount: number) => ({
+    merchantDisplayName,
+    averageAmount,
+    frequency: 'monthly' as const,
+  });
+  const oldRent = monthly('Old Rent Name', 2404.99);
+  const newRent = monthly('New Rent Name', 2497.49);
+  const lastSeen = new Map([
+    ['Old Rent Name', '2026-09-03'],
+    ['New Rent Name', '2026-10-05'],
+  ]);
+
+  it('drops an unpaid series when a same-sized sibling already paid near its billing day', () => {
+    const superseded = findSupersededSeries(
+      [oldRent, newRent],
+      new Map([['New Rent Name', 2497.49]]),
+      lastSeen,
+    );
+
+    expect([...superseded]).toEqual(['Old Rent Name']);
+  });
+
+  it('keeps an unpaid series when no sibling has paid', () => {
+    expect(findSupersededSeries([oldRent, newRent], new Map(), lastSeen).size).toBe(0);
+  });
+
+  it('keeps a series that has itself paid this month', () => {
+    const superseded = findSupersededSeries(
+      [oldRent, newRent],
+      new Map([['Old Rent Name', 2404.99], ['New Rent Name', 2497.49]]),
+      lastSeen,
+    );
+
+    expect(superseded.size).toBe(0);
+  });
+
+  it('keeps an unpaid series whose amount differs from the paid sibling', () => {
+    const superseded = findSupersededSeries(
+      [monthly('Old Rent Name', 1500), newRent],
+      new Map([['New Rent Name', 2497.49]]),
+      lastSeen,
+    );
+
+    expect(superseded.size).toBe(0);
+  });
+
+  it('keeps an unpaid series with a different billing day', () => {
+    const superseded = findSupersededSeries(
+      [oldRent, newRent],
+      new Map([['New Rent Name', 2497.49]]),
+      new Map([['Old Rent Name', '2026-09-22'], ['New Rent Name', '2026-10-05']]),
+    );
+
+    expect(superseded.size).toBe(0);
+  });
+
+  it('never drops small series', () => {
+    const superseded = findSupersededSeries(
+      [monthly('Gym A', 75), monthly('Gym B', 76)],
+      new Map([['Gym B', 76]]),
+      new Map([['Gym A', '2026-09-03'], ['Gym B', '2026-10-03']]),
+    );
+
+    expect(superseded.size).toBe(0);
+  });
+
+  it('ignores non-monthly series', () => {
+    const superseded = findSupersededSeries(
+      [{ ...oldRent, frequency: 'yearly' as const }, newRent],
+      new Map([['New Rent Name', 2497.49]]),
+      lastSeen,
+    );
+
+    expect(superseded.size).toBe(0);
+  });
+
+  describe('regression: October 2026 rent tracked under two merchant names', () => {
+    it('counts rent once in fixed costs once the new name has paid', () => {
+      const charges = [oldRent, newRent];
+      const paid = new Map([['New Rent Name', 2497.49]]);
+      const superseded = findSupersededSeries(charges, paid, lastSeen);
+
+      const fixedCostSeries = buildFixedCostSeries(
+        charges.filter(c => !superseded.has(c.merchantDisplayName)),
+        lastSeen,
+        paid,
+        '2026-10-06',
+      );
+
+      expect(fixedCostSeries).toEqual([{ expectedAmount: 2497.49, paidThisMonth: 2497.49 }]);
     });
   });
 });
