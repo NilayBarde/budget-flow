@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { detectRecurringSeries, type DetectionTxn, type DetectedSeries } from '../services/recurring-detection.js';
-import { matchCreditsToCharges } from '../services/credit-matching.js';
+import { matchCreditsByPosting, matchCreditsToCharges } from '../services/credit-matching.js';
 import { getMyShareAmount, type SplitShare } from '../services/category-spend.js';
 import { monthlyEquivalentAmount, type RecurringFrequency } from '../services/recurring-normalize.js';
 
@@ -72,7 +72,17 @@ const runDetection = (txns: WindowTxn[], today: string, deletedMerchants: Readon
     c => !deletedMerchants.has(c.merchant),
   );
   const credits = detectRecurringSeries(txns, today, 'return');
-  const offsets = matchCreditsToCharges(charges, credits);
+
+  // Posting level pairs first: they use real amounts, dates and accounts, so
+  // they catch generic perk credits that name matching cannot. Credit series
+  // already claimed that way are not offered to the name matcher again.
+  const postingOffsets = matchCreditsByPosting(charges, txns);
+  const claimedCredits = new Set([...postingOffsets.values()].map(m => m.merchant));
+  const nameOffsets = matchCreditsToCharges(
+    charges.filter(c => !postingOffsets.has(c.merchant)),
+    credits.filter(c => !claimedCredits.has(c.merchant)),
+  );
+  const offsets = new Map([...postingOffsets, ...nameOffsets]);
   return { charges, credits, offsets };
 };
 

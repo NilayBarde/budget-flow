@@ -34,6 +34,107 @@ const overlap = (a: Set<string>, b: Set<string>): number => {
 // A matched credit should roughly offset the charge, not dwarf it.
 const AMOUNT_CAP_RATIO = 1.5;
 
+export interface PostingTxn {
+  merchant: string;
+  amount: number; // absolute
+  date: string; // YYYY-MM-DD
+  transaction_type: string | null;
+  accountName: string | null;
+}
+
+// Card perks often post as one generic credit per charge ("Platinum Digital
+// Entertainment Credit" for Peacock and the NYT) on irregular days, under a
+// name that shares no word with the merchant. Name matching and series
+// detection both miss those, so pair individual postings instead: a charge is
+// covered when, for most of its recent charges, a credit of the same amount
+// landed on the same account shortly after.
+const RECENT_CHARGES = 3;
+const MIN_PAIRED_CHARGES = 2;
+const CREDIT_WINDOW_BEFORE_DAYS = 1; // posting dates can lead by a day
+const CREDIT_WINDOW_AFTER_DAYS = 10;
+const PAIR_AMOUNT_TOLERANCE_ABS = 0.5;
+const PAIR_AMOUNT_TOLERANCE_RATIO = 0.05;
+const PERK_CREDIT_PATTERN = /credit/i;
+const NOT_PERK_PATTERN = /dispute/i;
+
+const dayDiff = (from: string, to: string): number =>
+  Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000);
+
+const medianOf = (values: number[]): number => {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+};
+
+export function matchCreditsByPosting(
+  charges: DetectedSeries[],
+  txns: PostingTxn[]
+): Map<string, MatchedCredit> {
+  const matches = new Map<string, MatchedCredit>();
+  const credits = txns.filter(t => t.transaction_type === 'return' && t.accountName);
+  const usedCredits = new Set<PostingTxn>();
+
+  // Larger series first so a big charge claims its credit before a smaller
+  // one with a coincidentally similar amount.
+  const monthly = charges
+    .filter(c => c.frequency === 'monthly')
+    .sort((a, b) => b.averageAmount - a.averageAmount);
+
+  for (const series of monthly) {
+    const seriesTokens = significantTokens(series.merchant);
+    const recent = txns
+      .filter(t => t.transaction_type === 'expense' && t.merchant === series.merchant && t.accountName)
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, RECENT_CHARGES);
+    if (recent.length < MIN_PAIRED_CHARGES) continue;
+
+    const eligible = credits.filter(
+      c =>
+        !usedCredits.has(c) &&
+        ((PERK_CREDIT_PATTERN.test(c.merchant) && !NOT_PERK_PATTERN.test(c.merchant)) ||
+          overlap(seriesTokens, significantTokens(c.merchant)) > 0),
+    );
+
+    const pairs: PostingTxn[] = [];
+    const claimed = new Set<PostingTxn>();
+    for (const chargeTxn of recent) {
+      const tolerance = Math.max(PAIR_AMOUNT_TOLERANCE_ABS, chargeTxn.amount * PAIR_AMOUNT_TOLERANCE_RATIO);
+      let best: PostingTxn | null = null;
+      let bestScore = Infinity;
+      for (const c of eligible) {
+        if (claimed.has(c) || c.accountName !== chargeTxn.accountName) continue;
+        const days = dayDiff(chargeTxn.date, c.date);
+        if (days < -CREDIT_WINDOW_BEFORE_DAYS || days > CREDIT_WINDOW_AFTER_DAYS) continue;
+        const amountDiff = Math.abs(c.amount - chargeTxn.amount);
+        if (amountDiff > tolerance) continue;
+        // Prefer the closest amount, then the closest date.
+        const score = amountDiff * 100 + Math.abs(days);
+        if (score < bestScore) {
+          bestScore = score;
+          best = c;
+        }
+      }
+      if (best) {
+        claimed.add(best);
+        pairs.push(best);
+      }
+    }
+
+    if (pairs.length < MIN_PAIRED_CHARGES) continue;
+    pairs.forEach(p => usedCredits.add(p));
+
+    // Label with the most common credit name among the pairs.
+    const labelCounts = new Map<string, number>();
+    for (const p of pairs) labelCounts.set(p.merchant, (labelCounts.get(p.merchant) || 0) + 1);
+    const [label] = [...labelCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+
+    const monthlyAmount = Math.min(medianOf(pairs.map(p => p.amount)), series.averageAmount);
+    matches.set(series.merchant, { merchant: label, monthlyAmount: Math.round(monthlyAmount * 100) / 100 });
+  }
+
+  return matches;
+}
+
 export function matchCreditsToCharges(
   charges: DetectedSeries[],
   credits: DetectedSeries[]
