@@ -252,7 +252,6 @@ export interface InsightsTopCategory {
 export interface InsightsData {
   categoryTrends: InsightsCategoryTrend[];
   topCategories: InsightsTopCategory[];
-  topMerchants: InsightsTopMerchant[];
   spendingVelocity: InsightsSpendingVelocity;
   monthOverMonth: InsightsMonthOverMonth;
 }

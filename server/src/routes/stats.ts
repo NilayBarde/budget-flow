@@ -14,7 +14,9 @@ import {
   type CategoryMonthEntry,
 } from '../services/category-trends.js';
 import {
-  buildTopMerchants,
+  addMerchantSpend,
+  merchantKey,
+  subtractMerchantReturn,
   type MerchantAggregate,
 } from '../services/merchant-stats.js';
 import { percentChange } from '../services/mom-totals.js';
@@ -186,7 +188,7 @@ router.get('/insights', asyncHandler(async (req, res) => {
     // ── Category Trends (per-category, per-month) ──────────────────────
     const categoryMonthMap = new Map<string, CategoryMonthEntry>();
 
-    // ── Top Merchants ──────────────────────────────────────────────────
+    // ── Per-merchant totals ────────────────────────────────────────────
     const merchantMap = new Map<string, MerchantAggregate>();
     // Calendar months (YYYY-MM) each merchant charged in, used to tell a
     // renamed recurring series apart from a similar looking separate bill.
@@ -243,25 +245,13 @@ router.get('/insights', asyncHandler(async (req, res) => {
           entry.months.set(monthKey, (entry.months.get(monthKey) || 0) + amountToCount);
         }
 
-        // Top merchants (all 6 months aggregated)
-        const merchant = t.merchant_display_name || t.merchant_name;
+        // Per-merchant totals and last charge date (all 6 months aggregated)
+        const merchant = merchantKey(t);
         if (merchant && amountToCount > 0) {
           const months = chargeMonthsByMerchant.get(merchant) ?? new Set<string>();
           months.add(monthKey);
           chargeMonthsByMerchant.set(merchant, months);
-          const existing = merchantMap.get(merchant);
-          if (existing) {
-            existing.totalSpent += amountToCount;
-            existing.transactionCount += 1;
-            if (t.date > existing.lastDate) existing.lastDate = t.date;
-          } else {
-            merchantMap.set(merchant, {
-              merchantName: merchant,
-              totalSpent: amountToCount,
-              transactionCount: 1,
-              lastDate: t.date,
-            });
-          }
+          addMerchantSpend(merchantMap, merchant, amountToCount, t.date);
         }
 
         // Current-month velocity tracking
@@ -306,13 +296,10 @@ router.get('/insights', asyncHandler(async (req, res) => {
           }
         }
 
-        // Top merchants: subtract returns from merchant totals
-        const merchant = t.merchant_display_name || t.merchant_name;
+        // Subtract returns from merchant totals
+        const merchant = merchantKey(t);
         if (merchant && returnAmount > 0) {
-          const existing = merchantMap.get(merchant);
-          if (existing) {
-            existing.totalSpent = Math.max(0, existing.totalSpent - returnAmount);
-          }
+          subtractMerchantReturn(merchantMap, merchant, returnAmount);
         }
 
         // Current-month velocity tracking
@@ -355,9 +342,6 @@ router.get('/insights', asyncHandler(async (req, res) => {
       }
     });
     const topCategories = buildTopCategories(rankedCategories, categoryCounts);
-
-    // ── Build top merchants response ───────────────────────────────────
-    const topMerchants = buildTopMerchants(merchantMap);
 
     // ── Build spending velocity ────────────────────────────────────────
     // Only recurring series whose merchant has actually charged recently
@@ -430,7 +414,6 @@ router.get('/insights', asyncHandler(async (req, res) => {
     res.json({
       categoryTrends,
       topCategories,
-      topMerchants,
       spendingVelocity,
       monthOverMonth,
     });

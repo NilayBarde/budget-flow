@@ -1,7 +1,14 @@
 import { supabase } from '../db/supabase.js';
 import { fetchAllRows } from '../utils/paginate.js';
 import { getMyShareAmount } from './category-spend.js';
-import { buildTopMerchants, type MerchantAggregate, type TopMerchant } from './merchant-stats.js';
+import {
+  addMerchantSpend,
+  buildTopMerchants,
+  merchantKey,
+  subtractMerchantReturn,
+  type MerchantAggregate,
+  type TopMerchant,
+} from './merchant-stats.js';
 import type { CategoryData } from '../types/stats.js';
 
 export interface YearlyRow {
@@ -82,21 +89,9 @@ export const buildYearlyStats = (year: number, transactions: YearlyRow[]): Yearl
         }
       }
 
-      const merchant = t.merchant_display_name || t.merchant_name;
+      const merchant = merchantKey(t);
       if (merchant && amountToCount > 0) {
-        const existing = merchantMap.get(merchant);
-        if (existing) {
-          existing.totalSpent += amountToCount;
-          existing.transactionCount += 1;
-          if (t.date > existing.lastDate) existing.lastDate = t.date;
-        } else {
-          merchantMap.set(merchant, {
-            merchantName: merchant,
-            totalSpent: amountToCount,
-            transactionCount: 1,
-            lastDate: t.date,
-          });
-        }
+        addMerchantSpend(merchantMap, merchant, amountToCount, t.date);
       }
     } else if (transactionType === 'return') {
       // Returns respect splits like everywhere else (only my share nets out)
@@ -106,7 +101,7 @@ export const buildYearlyStats = (year: number, transactions: YearlyRow[]): Yearl
         amount: returnAmount,
         month,
         category: t.category,
-        merchant: t.merchant_display_name || t.merchant_name || null,
+        merchant: merchantKey(t),
       });
     } else if (transactionType === 'income') {
       const incomeAmount = Math.abs(t.amount);
@@ -123,10 +118,7 @@ export const buildYearlyStats = (year: number, transactions: YearlyRow[]): Yearl
         existing.amount = Math.max(0, existing.amount - ret.amount);
       }
     }
-    const merchantTotal = ret.merchant ? merchantMap.get(ret.merchant) : undefined;
-    if (merchantTotal) {
-      merchantTotal.totalSpent = Math.max(0, merchantTotal.totalSpent - ret.amount);
-    }
+    if (ret.merchant) subtractMerchantReturn(merchantMap, ret.merchant, ret.amount);
     monthlyTotals[ret.month].spent = Math.max(0, monthlyTotals[ret.month].spent - ret.amount);
   }
 

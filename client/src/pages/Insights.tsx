@@ -19,8 +19,13 @@ const CURRENT_YEAR = new Date().getFullYear();
 export const Insights = () => {
   const [year, setYear] = useState(CURRENT_YEAR);
   const isCurrentYear = year === CURRENT_YEAR;
-  const { data: insights, isLoading: insightsLoading, isError: insightsError, refetch } = useInsights();
-  const { data: yearlyStats, isLoading: yearlyLoading, isError: yearlyError } = useYearlyStats(year);
+  const { data: insights, isLoading: insightsLoading, isError: insightsError, refetch: refetchInsights } = useInsights();
+  const {
+    data: yearlyStats,
+    isLoading: yearlyLoading,
+    isError: yearlyError,
+    refetch: refetchYearly,
+  } = useYearlyStats(year);
 
   // Calculate YTD Stats
   const ytdStats = useMemo(() => {
@@ -67,7 +72,11 @@ export const Insights = () => {
   if (insightsError || yearlyError) {
     return (
       <ErrorState
-        onRetry={() => refetch()}
+        onRetry={() => {
+          // Retry only the query that failed; refetching a healthy one is wasted work.
+          if (insightsError) refetchInsights();
+          if (yearlyError) refetchYearly();
+        }}
         description="Your spending insights couldn't be loaded."
       />
     );
