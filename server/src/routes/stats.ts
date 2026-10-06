@@ -4,9 +4,7 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import {
   buildFixedCostSeries,
   computeSpendingVelocity,
-  filterLiveCharges,
-  findSupersededSeries,
-  matchRenamedRecurringPayments,
+  reconcileRecurringSeries,
   type UnmatchedExpense,
 } from '../services/spending-velocity.js';
 import {
@@ -462,41 +460,22 @@ router.get('/insights', asyncHandler(async (req, res) => {
     // series (rent via a payment processor) was counted as variable spend
     // above. Move it to its series so it is neither extrapolated across the
     // month nor projected a second time as an unpaid fixed cost.
-    const liveCharges = filterLiveCharges(recurringChargeRows, lastExpenseDateByMerchant, todayStr);
-    const renamedPayments = matchRenamedRecurringPayments(
-      liveCharges,
-      recurringPaidByMerchant,
-      lastExpenseDateByMerchant,
-      unmatchedExpenses,
-      daysInMonth,
-    );
-    for (const payment of renamedPayments) {
-      recurringPaidByMerchant.set(
-        payment.merchantDisplayName,
-        (recurringPaidByMerchant.get(payment.merchantDisplayName) || 0) + payment.amount,
-      );
-      dailyVariable.set(payment.day, Math.max(0, (dailyVariable.get(payment.day) || 0) - payment.amount));
-    }
-
-    // The same bill can also be tracked under two merchant names once
-    // detection catches up; drop the unpaid alias so it is not projected twice.
-    const supersededSeries = findSupersededSeries(
-      liveCharges,
-      recurringPaidByMerchant,
+    const reconciled = reconcileRecurringSeries({
+      charges: recurringChargeRows,
+      paidThisMonthByMerchant: recurringPaidByMerchant,
       lastExpenseDateByMerchant,
       chargeMonthsByMerchant,
+      unmatchedExpenses,
+      dailyVariable,
+      today: todayStr,
       daysInMonth,
-    );
-
-    const dailyVariableSpending: number[] = [];
-    for (let d = 1; d <= today; d++) {
-      dailyVariableSpending.push(dailyVariable.get(d) || 0);
-    }
+    });
+    const dailyVariableSpending = reconciled.dailyVariableSpending;
 
     const fixedCostSeries = buildFixedCostSeries(
-      recurringChargeRows.filter(r => !supersededSeries.has(r.merchantDisplayName)),
+      reconciled.charges,
       lastExpenseDateByMerchant,
-      recurringPaidByMerchant,
+      reconciled.paidThisMonthByMerchant,
       todayStr,
     );
 

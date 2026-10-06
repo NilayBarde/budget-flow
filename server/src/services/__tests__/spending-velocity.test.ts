@@ -5,6 +5,7 @@ import {
   computeSpendingVelocity,
   findSupersededSeries,
   matchRenamedRecurringPayments,
+  reconcileRecurringSeries,
 } from '../spending-velocity.js';
 
 /** Shorthand: a single fixed-cost series fully described by two numbers. */
@@ -635,48 +636,6 @@ describe('matchRenamedRecurringPayments', () => {
       expect(matchOn('2026-09-10', 25, 30)).toHaveLength(0);
     });
   });
-
-  describe('regression: October 2026 rent posted under a new merchant name', () => {
-    it('stops double counting rent as both variable spend and an unpaid fixed cost', () => {
-      // Day 6 of 31. Rent ($2,497.49) posted on day 5 as "Bilt Housing
-      // Payment" while the series is "Bilt Card - Housing Withdrawal
-      // Withdrawal" ($2,404.99). It landed in the variable bucket AND stayed
-      // unpaid as a fixed cost, projecting ~$21k against a $5,500 budget.
-      const variableByDay = [38, 53, 791, 142, 2556, 0];
-      const unmatched = [{ day: 5, amount: 2497.49, merchantName: 'Bilt Housing Payment' }];
-      const biltRent = {
-        merchantDisplayName: 'Bilt Card - Housing Withdrawal Withdrawal',
-        averageAmount: 2404.99,
-        frequency: 'monthly' as const,
-      };
-
-      const [match] = matchRenamedRecurringPayments(
-        [biltRent],
-        new Map(),
-        new Map([[biltRent.merchantDisplayName, '2026-09-03']]),
-        unmatched,
-      31,
-    );
-      expect(match).toBeDefined();
-
-      const dailyVariableSpending = [...variableByDay];
-      dailyVariableSpending[match.day - 1] -= match.amount;
-
-      const result = computeSpendingVelocity({
-        daysElapsed: 6,
-        daysInMonth: 31,
-        spentSoFar: 3579.83,
-        fixedCostSeries: [{ expectedAmount: 2404.99, paidThisMonth: match.amount }],
-        lastMonthTotal: 0,
-        dailyVariableSpending,
-      });
-
-      expect(result.recurringSpent).toBeCloseTo(2497.49, 2);
-      expect(result.variableSpent).toBeCloseTo(1082.51, 2);
-      // 2497.49 rent + (1082.51 / 6) * 31 projected variable, nowhere near $21k.
-      expect(result.projectedTotal).toBeLessThan(9000);
-    });
-  });
 });
 
 describe('findSupersededSeries', () => {
@@ -824,26 +783,6 @@ describe('findSupersededSeries', () => {
       expect([...superseded]).toEqual(['Old Rent Name']);
     });
   });
-
-  describe('regression: October 2026 rent tracked under two merchant names', () => {
-    it('counts rent once in fixed costs once the new name has paid', () => {
-      const charges = [oldRent, newRent];
-      const paid = new Map([['New Rent Name', 2497.49]]);
-      const superseded = findSupersededSeries(charges, paid, lastSeen,
-      months,
-      31,
-    );
-
-      const fixedCostSeries = buildFixedCostSeries(
-        charges.filter(c => !superseded.has(c.merchantDisplayName)),
-        lastSeen,
-        paid,
-        '2026-10-06',
-      );
-
-      expect(fixedCostSeries).toEqual([{ expectedAmount: 2497.49, paidThisMonth: 2497.49 }]);
-    });
-  });
 });
 
 describe('circularDayDistance', () => {
@@ -858,5 +797,114 @@ describe('circularDayDistance', () => {
 
   it('is 0 for the same day', () => {
     expect(circularDayDistance(15, 15, 30)).toBe(0);
+  });
+});
+
+describe('reconcileRecurringSeries', () => {
+  const biltName = 'Bilt Card - Housing Withdrawal Withdrawal';
+  const biltRent = { merchantDisplayName: biltName, averageAmount: 2404.99, frequency: 'monthly' as const };
+  const baseInput = {
+    charges: [biltRent],
+    paidThisMonthByMerchant: new Map<string, number>(),
+    lastExpenseDateByMerchant: new Map([[biltName, '2026-09-03']]),
+    chargeMonthsByMerchant: new Map([[biltName, new Set(['2026-08', '2026-09'])]]),
+    unmatchedExpenses: [{ day: 5, amount: 2497.49, merchantName: 'Bilt Housing Payment' }],
+    dailyVariable: new Map([[1, 38], [2, 53], [3, 791], [4, 142], [5, 2556], [6, 0]]),
+    today: '2026-10-06',
+    daysInMonth: 31,
+  };
+
+  describe('regression: October 2026 rent posted under a new merchant name', () => {
+    it('stops double counting rent as both variable spend and an unpaid fixed cost', () => {
+      // Day 6 of 31. Rent ($2,497.49) posted on day 5 as "Bilt Housing
+      // Payment" while the series is "Bilt Card - Housing Withdrawal
+      // Withdrawal" ($2,404.99). It landed in the variable bucket AND stayed
+      // unpaid as a fixed cost, projecting ~$21k against a $5,500 budget.
+      const reconciled = reconcileRecurringSeries(baseInput);
+
+      const result = computeSpendingVelocity({
+        daysElapsed: 6,
+        daysInMonth: 31,
+        spentSoFar: 3579.83,
+        fixedCostSeries: buildFixedCostSeries(
+          reconciled.charges,
+          baseInput.lastExpenseDateByMerchant,
+          reconciled.paidThisMonthByMerchant,
+          baseInput.today,
+        ),
+        lastMonthTotal: 0,
+        dailyVariableSpending: reconciled.dailyVariableSpending,
+      });
+
+      expect(result.recurringSpent).toBeCloseTo(2497.49, 2);
+      expect(result.variableSpent).toBeCloseTo(1082.51, 2);
+      // 2497.49 rent + (1082.51 / 6) * 31 projected variable, nowhere near $21k.
+      expect(result.projectedTotal).toBeLessThan(9000);
+    });
+  });
+
+  it('moves the renamed payment out of the day it posted on and does not mutate inputs', () => {
+    const reconciled = reconcileRecurringSeries(baseInput);
+
+    expect(reconciled.paidThisMonthByMerchant.get(biltName)).toBeCloseTo(2497.49, 2);
+    expect(reconciled.dailyVariableSpending).toEqual([38, 53, 791, 142, expect.closeTo(58.51, 2), 0]);
+    expect(baseInput.paidThisMonthByMerchant.size).toBe(0);
+    expect(baseInput.dailyVariable.get(5)).toBe(2556);
+  });
+
+  it('leaves variable spend alone when the only near match is a flight', () => {
+    const reconciled = reconcileRecurringSeries({
+      ...baseInput,
+      unmatchedExpenses: [{ day: 4, amount: 2300, merchantName: 'Delta Air Lines' }],
+      dailyVariable: new Map([[1, 0], [2, 0], [3, 0], [4, 2300], [5, 0], [6, 0]]),
+    });
+
+    expect(reconciled.paidThisMonthByMerchant.size).toBe(0);
+    expect(reconciled.dailyVariableSpending[3]).toBe(2300);
+  });
+
+  it('drops an unpaid alias once the renamed series has paid, counting rent once', () => {
+    const oldName = 'Old Rent Name';
+    const newName = 'New Rent Name';
+    const reconciled = reconcileRecurringSeries({
+      charges: [
+        { merchantDisplayName: oldName, averageAmount: 2404.99, frequency: 'monthly' },
+        { merchantDisplayName: newName, averageAmount: 2497.49, frequency: 'monthly' },
+      ],
+      paidThisMonthByMerchant: new Map([[newName, 2497.49]]),
+      lastExpenseDateByMerchant: new Map([[oldName, '2026-09-03'], [newName, '2026-10-05']]),
+      chargeMonthsByMerchant: new Map([
+        [oldName, new Set(['2026-08', '2026-09'])],
+        [newName, new Set(['2026-10'])],
+      ]),
+      unmatchedExpenses: [],
+      dailyVariable: new Map([[1, 0]]),
+      today: '2026-10-06',
+      daysInMonth: 31,
+    });
+
+    expect(reconciled.charges.map(c => c.merchantDisplayName)).toEqual([newName]);
+  });
+
+  it('keeps both series when two similar looking bills charge in the same months', () => {
+    const months = new Set(['2026-08', '2026-09']);
+    const reconciled = reconcileRecurringSeries({
+      charges: [
+        { merchantDisplayName: 'Internet Co', averageAmount: 120, frequency: 'monthly' },
+        { merchantDisplayName: 'Phone Co', averageAmount: 125, frequency: 'monthly' },
+      ],
+      paidThisMonthByMerchant: new Map([['Internet Co', 120]]),
+      lastExpenseDateByMerchant: new Map([['Internet Co', '2026-10-02'], ['Phone Co', '2026-09-05']]),
+      chargeMonthsByMerchant: new Map([
+        ['Internet Co', new Set([...months, '2026-10'])],
+        ['Phone Co', months],
+      ]),
+      unmatchedExpenses: [],
+      dailyVariable: new Map([[1, 0]]),
+      today: '2026-10-06',
+      daysInMonth: 31,
+    });
+
+    expect(reconciled.charges).toHaveLength(2);
   });
 });

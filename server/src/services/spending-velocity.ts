@@ -335,6 +335,80 @@ export const findSupersededSeries = (
   return superseded;
 };
 
+export interface ReconcileRecurringInput {
+  /** All recurring series rows, live or not. */
+  charges: RecurringChargeRow[];
+  /** Current-month spend already attributed to a series by merchant name. */
+  paidThisMonthByMerchant: ReadonlyMap<string, number>;
+  lastExpenseDateByMerchant: ReadonlyMap<string, string>;
+  chargeMonthsByMerchant: ReadonlyMap<string, ReadonlySet<string>>;
+  /** Current-month expenses not matched to a series by name. */
+  unmatchedExpenses: UnmatchedExpense[];
+  /** Current-month variable spend by day of month (1 based). */
+  dailyVariable: ReadonlyMap<number, number>;
+  /** YYYY-MM-DD */
+  today: string;
+  daysInMonth: number;
+}
+
+export interface ReconcileRecurringResult {
+  /** Series to project as fixed costs, with superseded aliases removed. */
+  charges: RecurringChargeRow[];
+  paidThisMonthByMerchant: Map<string, number>;
+  /** Index i is day i + 1, length equal to the day of month of `today`. */
+  dailyVariableSpending: number[];
+}
+
+// Moves renamed recurring payments out of variable spend and onto their
+// series, then drops series that are unpaid aliases of a renamed one. Pure:
+// inputs are not mutated.
+export const reconcileRecurringSeries = (
+  input: ReconcileRecurringInput,
+): ReconcileRecurringResult => {
+  const { charges, lastExpenseDateByMerchant, chargeMonthsByMerchant, daysInMonth, today } = input;
+  const paid = new Map(input.paidThisMonthByMerchant);
+  const dailyVariable = new Map(input.dailyVariable);
+
+  const liveCharges = filterLiveCharges(charges, lastExpenseDateByMerchant, today);
+  const renamedPayments = matchRenamedRecurringPayments(
+    liveCharges,
+    paid,
+    lastExpenseDateByMerchant,
+    input.unmatchedExpenses,
+    daysInMonth,
+  );
+  for (const payment of renamedPayments) {
+    paid.set(
+      payment.merchantDisplayName,
+      (paid.get(payment.merchantDisplayName) || 0) + payment.amount,
+    );
+    dailyVariable.set(
+      payment.day,
+      Math.max(0, (dailyVariable.get(payment.day) || 0) - payment.amount),
+    );
+  }
+
+  const superseded = findSupersededSeries(
+    liveCharges,
+    paid,
+    lastExpenseDateByMerchant,
+    chargeMonthsByMerchant,
+    daysInMonth,
+  );
+
+  const dayOfMonth = parseInt(today.split('-')[2], 10);
+  const dailyVariableSpending: number[] = [];
+  for (let d = 1; d <= dayOfMonth; d++) {
+    dailyVariableSpending.push(dailyVariable.get(d) || 0);
+  }
+
+  return {
+    charges: charges.filter(c => !superseded.has(c.merchantDisplayName)),
+    paidThisMonthByMerchant: paid,
+    dailyVariableSpending,
+  };
+};
+
 export const buildFixedCostSeries = (
   charges: RecurringChargeRow[],
   lastExpenseDateByMerchant: ReadonlyMap<string, string>,
