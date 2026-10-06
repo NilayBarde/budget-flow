@@ -17,6 +17,13 @@ export const INVESTMENT_PATTERNS = [
   /betterment/i,
 ];
 
+// Wording used when paying a bill to a merchant (utility, phone, insurance). Plaid's
+// spending category is more reliable than these, so they yield to it. Every other
+// transfer pattern (card payments, autopay, Zelle, ACH pmt, ...) describes money moving
+// between accounts, and Plaid sometimes mislabels those (e.g. a "Bilt Card - PMT" card
+// payment comes back as RENT_AND_UTILITIES), so those keep winning over Plaid.
+const BILL_PAY_PATTERNS = [/bill\s*pay/i, /billpay/i, /direct\s*debit/i];
+
 // Transfer detection patterns
 export const TRANSFER_PATTERNS = [
   /credit\s*card[- ]?auto[- ]?pay/i,
@@ -32,9 +39,7 @@ export const TRANSFER_PATTERNS = [
   /\btransfer\b/i,
   /wire\s*transfer/i,
   /^payment$/i,
-  /bill\s*pay/i,
-  /billpay/i,
-  /direct\s*debit/i,
+  ...BILL_PAY_PATTERNS,
   /loan\s*payment/i,
   /mortgage\s*payment/i,
   /\bpmt\b/i,
@@ -56,10 +61,31 @@ const TRANSFER_CATEGORIES = ['Transfer', 'Payment', 'Credit Card', 'Loan Payment
 // Plaid personal_finance_category primary values that indicate transfers
 const TRANSFER_PFC_PRIMARY = ['TRANSFER_IN', 'TRANSFER_OUT', 'LOAN_PAYMENTS', 'BANK_FEES'];
 
+// Plaid PFC primaries that unambiguously describe spending. When Plaid reports one of
+// these, bill-pay wording must not reclassify the row (e.g. "CONED BILL PAYMENT" is a
+// utility bill, not a transfer). Vague primaries (OTHER, TRANSFER_*, LOAN_PAYMENTS,
+// BANK_FEES, INCOME) are deliberately excluded and still go through the patterns.
+// Card payment and other account-to-account patterns still win over these categories.
+// Only the bill-pay patterns are skipped when a spending category is present.
+export const SPENDING_PFC_PRIMARY = [
+  'FOOD_AND_DRINK',
+  'GENERAL_MERCHANDISE',
+  'TRANSPORTATION',
+  'ENTERTAINMENT',
+  'GENERAL_SERVICES',
+  'TRAVEL',
+  'RENT_AND_UTILITIES',
+  'MEDICAL',
+  'PERSONAL_CARE',
+  'GOVERNMENT_AND_NON_PROFIT',
+  'HOME_IMPROVEMENT',
+];
+
 /**
  * Detect transaction type based on amount and patterns.
  *
- * Priority: transfers > investments > Plaid PFC > amount sign
+ * Priority: transfers (bill-pay wording yields to a Plaid spending category) > investments >
+ * Plaid PFC > amount sign
  *
  * @param amount - Transaction amount (positive = expense, negative = money in)
  * @param texts - Array of text strings to check against patterns (merchant name, full name, description, etc.)
@@ -72,11 +98,22 @@ export const detectTransactionType = (
   plaidPFC?: PlaidPFC | null,
   plaidCategories?: string[] | null,
 ): TransactionType => {
-  // Check for TRANSFERS FIRST
+  const hasSpendingCategory = Boolean(
+    plaidPFC?.primary && SPENDING_PFC_PRIMARY.includes(plaidPFC.primary),
+  );
+  const transferPatterns = hasSpendingCategory
+    ? TRANSFER_PATTERNS.filter((pattern) => !BILL_PAY_PATTERNS.includes(pattern))
+    : TRANSFER_PATTERNS;
+
+  // Check for TRANSFERS before investments
   const matchesTransferPattern = texts.some((text) =>
-    TRANSFER_PATTERNS.some((pattern) => pattern.test(text)),
+    transferPatterns.some((pattern) => pattern.test(text)),
   );
   if (matchesTransferPattern) return 'transfer';
+
+  // Plaid says it's spending and nothing says money moved between accounts. Money coming
+  // in against a spending category is a refund.
+  if (hasSpendingCategory) return amount < 0 ? 'return' : 'expense';
 
   // Check for INVESTMENTS (after transfers ruled out)
   const matchesInvestmentPattern = texts.some((text) =>
