@@ -70,7 +70,8 @@ export const SyncHealthBanner = () => {
                 {stale.length} account{stale.length > 1 ? "s haven't" : " hasn't"} synced recently
               </p>
               <p className="mt-0.5 text-sm text-amber-200/70">
-                No successful sync in over {health.staleDays} days. They may just be quiet, or might need a reconnect.
+                No successful sync in over {health.staleDays} days ({health.investmentStaleDays} for investment accounts).
+                They may just be quiet, or might need a reconnect.
               </p>
               <ul className="mt-2 space-y-1 text-sm text-amber-100/90">
                 {stale.map(a => (
