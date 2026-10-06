@@ -13,7 +13,7 @@ const db = {
   /** How many splits each posted row already has, for example from an interrupted earlier attempt. */
   splitCountByParent: {} as Record<string, number>,
   /** Calls that should fail, by name. */
-  fail: new Set<'split_count' | 'mark_split' | 'insert_splits' | 'upsert_tags'>(),
+  fail: new Set<'lookup' | 'carry_fields' | 'split_count' | 'mark_split' | 'insert_splits' | 'tags_select' | 'upsert_tags' | 'delete'>(),
 };
 const error = { code: 'XX000', message: 'boom' };
 
@@ -35,7 +35,7 @@ const makeBuilder = (table: string) => {
       entry.filters.push([column, value]);
       return builder;
     },
-    maybeSingle: async () => ({ data: db.pending, error: null }),
+    maybeSingle: async () => (db.fail.has('lookup') ? { data: null, error } : { data: db.pending, error: null }),
     then: (resolve: (value: unknown) => unknown) => {
       if (table === 'transaction_splits' && entry.op === 'select') {
         if (db.fail.has('split_count')) return resolve({ data: null, count: null, error });
@@ -44,10 +44,15 @@ const makeBuilder = (table: string) => {
         return resolve({ data: null, count: db.splitCountByParent[parent] ?? 0, error: null });
       }
       if (table === 'transaction_splits' && entry.op === 'insert') return resolve({ data: null, error: db.fail.has('insert_splits') ? error : null });
-      if (table === 'transactions' && entry.op === 'update' && (entry.payload as { is_split?: boolean }).is_split) {
-        return resolve({ data: null, error: db.fail.has('mark_split') ? error : null });
+      if (table === 'transactions' && entry.op === 'update') {
+        // The update that marks the row as split is told apart from the one that carries fields over.
+        const markingSplit = Boolean((entry.payload as { is_split?: boolean }).is_split);
+        return resolve({ data: null, error: db.fail.has(markingSplit ? 'mark_split' : 'carry_fields') ? error : null });
       }
-      if (table === 'transaction_tags' && entry.op === 'select') return resolve({ data: [{ tag_id: 'tag-1' }], error: null });
+      if (table === 'transactions' && entry.op === 'delete') return resolve({ data: null, error: db.fail.has('delete') ? error : null });
+      if (table === 'transaction_tags' && entry.op === 'select') {
+        return resolve(db.fail.has('tags_select') ? { data: null, error } : { data: [{ tag_id: 'tag-1' }], error: null });
+      }
       if (table === 'transaction_tags' && entry.op === 'upsert') return resolve({ data: null, error: db.fail.has('upsert_tags') ? error : null });
       return resolve({ data: null, error: null });
     },
@@ -123,6 +128,25 @@ describe('reconcilePendingTransaction', () => {
       expect(opsOf('transactions', 'delete')).toHaveLength(0);
     };
 
+    it('when the pending row cannot be looked up, which must not read as "no pending row"', async () => {
+      db.pending = splitPending;
+      db.fail.add('lookup');
+      await expect(reconcilePendingTransaction('posted-row', 50, 'plaid-pending')).rejects.toBeTruthy();
+      expect(db.ops.filter(o => o.op !== 'select')).toEqual([]);
+    });
+
+    it('when the user fields cannot be carried over', async () => {
+      db.pending = splitPending;
+      db.fail.add('carry_fields');
+      await expectKeptAndThrown();
+    });
+
+    it('when the pending row\'s tags cannot be read', async () => {
+      db.pending = splitPending;
+      db.fail.add('tags_select');
+      await expectKeptAndThrown();
+    });
+
     it('when the split count cannot be read', async () => {
       db.pending = splitPending;
       db.fail.add('split_count');
@@ -148,6 +172,13 @@ describe('reconcilePendingTransaction', () => {
       db.fail.add('upsert_tags');
       await expectKeptAndThrown();
     });
+  });
+
+  it('reports a failed final delete instead of claiming success, so the retry removes the pending row', async () => {
+    db.pending = splitPending;
+    db.fail.add('delete');
+
+    await expect(reconcilePendingTransaction('posted-row', 50, 'plaid-pending')).rejects.toBeTruthy();
   });
 
   it('does nothing once the pending row is gone, so running it again is harmless', async () => {

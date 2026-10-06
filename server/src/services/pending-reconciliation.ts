@@ -32,16 +32,22 @@ export async function reconcilePendingTransaction(
 ): Promise<boolean> {
   if (!pendingPlaidTxId) return false;
 
-  const { data: pending } = await supabase
+  const { data: pending, error: lookupError } = await supabase
     .from('transactions')
     .select('id, amount, category_id, notes, merchant_display_name, merchant_name, is_split, needs_review, splits:transaction_splits(amount, description, is_my_share)')
     .eq('plaid_transaction_id', pendingPlaidTxId)
     .maybeSingle();
 
+  // A failed lookup must not read as "no pending row": the sync would count it a success and move
+  // on, leaving the pending row to count twice with none of the user's edits on the posted row.
+  if (lookupError) throw lookupError;
   if (!pending) return false;
   const p = pending as unknown as PendingRow;
 
-  // 1) Carry user-intent fields onto the posted row.
+  // 1) Carry user-intent fields onto the posted row. A retry after a failure further down applies
+  // these again, so an edit made to the posted row in that window is replaced by the pending
+  // row's. That is accepted: it is one category or note, and the alternative is a pending row that
+  // is never reconciled.
   const updates: Record<string, unknown> = {};
   if (p.category_id) {
     updates.category_id = p.category_id;
