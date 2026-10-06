@@ -4,6 +4,7 @@ import { RefreshCw, Trash2, Upload, History, MoreVertical, KeyRound, Users, Eye,
 import { Card, Button } from '../ui';
 import type { Account } from '../../types';
 import { formatDate } from '../../utils/formatters';
+import { ReconnectNotice } from './ReconnectNotice';
 import { useSyncAccount, useDeleteAccount, useRefreshAccounts, useCreatePlaidUpdateLinkToken, useToggleAccountInvestmentExclusion } from '../../hooks';
 
 
@@ -260,6 +261,11 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: Acc
       )}
 
       <Card className="hover:border-midnight-500 transition-colors" padding="sm">
+        {/* The bank login expired: offer the reconnect flow right on the card */}
+        {account.needs_reauth && !isManual && (
+          <ReconnectNotice onReconnect={handleOpenUpdateLink} isLoading={createUpdateLinkToken.isPending} />
+        )}
+
         {/* Refresh accounts result message */}
         {refreshResult && (
           <div className="mb-3 p-2 bg-accent-500/10 border border-accent-500/30 rounded-lg text-sm text-accent-400">
