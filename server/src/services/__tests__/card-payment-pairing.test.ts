@@ -170,6 +170,24 @@ describe('findCardPaymentCounterparts', () => {
       }
     });
 
+    it('accepts an issuer named Rewards followed by Payment, but still rejects a singular reward payment', () => {
+      for (const description of ['Wells Fargo Rewards Payment', 'Bilt Rewards Payment']) {
+        const card = cardInflow({ transaction_type: 'return', plaid_primary: 'OTHER', description });
+        const bank = bankOutflow();
+        expect(sorted(findCardPaymentCounterparts([card, bank]))).toEqual(sorted([bank.id, card.id]));
+      }
+      const reward = cardInflow({ transaction_type: 'return', plaid_primary: 'OTHER', description: 'Reward Payment', amount: -5 });
+      expect(findCardPaymentCounterparts([reward, bankOutflow({ amount: 5 })])).toEqual([]);
+    });
+
+    it('recognizes run together payment wording such as CRCARDPMT and DIRECTPAY', () => {
+      for (const description of ['CAPITAL ONE CRCARDPMT', 'DIRECTPAY FULL BALANCE Acme', 'ACME MOBILE PYMT']) {
+        const card = cardInflow({ transaction_type: 'return', plaid_primary: 'OTHER', description });
+        const bank = bankOutflow();
+        expect(sorted(findCardPaymentCounterparts([card, bank]))).toEqual(sorted([bank.id, card.id]));
+      }
+    });
+
     it('recognizes PYMT as payment wording', () => {
       const card = cardInflow({ transaction_type: 'return', plaid_primary: 'OTHER', description: 'ACME MOBILE PYMT' });
       const bank = bankOutflow();
@@ -188,6 +206,13 @@ describe('findCardPaymentCounterparts', () => {
       const credit = cardInflow({ transaction_type: 'return', plaid_primary: 'OTHER', description: 'Payment Protection Credit', amount: -9.99 });
       const plan = bankOutflow({ amount: 9.99, description: 'PROTECTION PLAN SUBSCRIPTION' });
       expect(findCardPaymentCounterparts([credit, plan])).toEqual([]);
+    });
+
+    it('does not pair a mortgage payment even when it was already typed as a transfer', () => {
+      // Detection types any "mortgage payment" text as a transfer, which must not count as card evidence.
+      const card = cardInflow({ amount: -412, transaction_type: 'return', plaid_primary: 'OTHER', description: 'PAYMENT THANK YOU' });
+      const mortgage = bankOutflow({ amount: 412, transaction_type: 'transfer', description: 'Home Mortgage Payment' });
+      expect(findCardPaymentCounterparts([card, mortgage])).toEqual([]);
     });
 
     it('does not pair a mortgage, loan or insurance payment to the card issuer', () => {

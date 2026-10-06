@@ -133,6 +133,15 @@ describe('reconcileCardPayments', () => {
     expect(state.updates).toEqual([]);
   });
 
+  it('finds a merchant rule keyed on the raw bank description, not only the merchant name', async () => {
+    withPaymentPair();
+    (state.transactions as Record<string, unknown>[])[1].original_description = 'ACME RAW DESCRIPTOR';
+    state.mappings = [{ id: 'm1', original_name: 'ACME RAW DESCRIPTOR', display_name: 'Rent', default_category_id: null, default_transaction_type: 'expense' }];
+
+    expect(await reconcileCardPayments()).toEqual([]);
+    expect(state.updates).toEqual([]);
+  });
+
   it('reports what would change without writing when apply is false', async () => {
     withPaymentPair();
 

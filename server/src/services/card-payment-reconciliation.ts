@@ -116,7 +116,8 @@ export const reconcileCardPayments = async ({
       date: t.date,
       transaction_type: t.transaction_type,
       // A merchant rule that sets the type is the user's decision, exactly like a hand typed row.
-      type_manually_set: Boolean(t.type_manually_set) || Boolean(mappings.find(t.merchant_name)?.default_transaction_type),
+      type_manually_set:
+        Boolean(t.type_manually_set) || Boolean(mappings.find(t.merchant_name, t.original_description)?.default_transaction_type),
       is_credit_card: isCreditCardAccount(account?.account_type),
       is_cash_account: isCashAccount(account?.account_type),
       plaid_primary: t.plaid_category?.primary ?? null,
@@ -149,7 +150,7 @@ export const retypeInvestmentsReadingAsCardBills = async ({
     t =>
       !t.type_manually_set &&
       // A merchant rule that sets the type is the user's decision, so it wins over detection.
-      !mappings.find(t.merchant_name)?.default_transaction_type &&
+      !mappings.find(t.merchant_name, t.original_description)?.default_transaction_type &&
       detectTransactionType(t.amount, [t.merchant_name ?? '', t.original_description ?? ''], t.plaid_category as PlaidPFC | null) ===
         'transfer',
   );

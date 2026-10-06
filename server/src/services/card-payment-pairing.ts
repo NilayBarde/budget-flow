@@ -41,14 +41,16 @@ const isLockedNonTransfer = (row: PairingRow): boolean =>
 // ── Card leg ─────────────────────────────────────────────────────────────
 
 // How a card statement words a payment, whichever bank it came from.
-const PAYMENT_WORDS = /\b(payment|pmt|pymt|epay(?:ment)?|autopay|auto[- ]?pay|thank\s*you)\b/i;
+// Includes run together forms such as CRCARDPMT and DIRECTPAY.
+const PAYMENT_WORDS = /\b(payment|epay(?:ment)?|autopay|auto[- ]?pay|direct\s*pay|thank\s*you)\b|\w*(?:pmt|pymt)\b/i;
 
 // Wording of a credit that is not a payment, even when it also says "payment" ("Payment
 // Protection Credit", "Reward Payment"). A bare "credit" counts, but "credit card", "credit crd",
 // "credit union", "Credit One" and "credit payment" name the card or the payment itself, and an
-// issuer called "Rewards" is only a refund when it says reward payment, points or a redemption.
+// issuer called "Rewards" is only a refund when it says reward payment (singular), points, a
+// redemption or a credit.
 const NOT_A_PAYMENT_WORDS =
-  /\b(refund|reversal|cashback|bonus|adjustment|adj|protection|dispute)\b|\breward(?:s)?\s+(?:payment|points|redemption|credit|statement)\b|\bstatement\s+credit\b|\bcredit\b(?!\s*-?\s*(?:card|crd|union|one|bank|payment|pmt|autopay)\b)/i;
+  /\b(refund|reversal|cashback|bonus|adjustment|adj|protection|dispute)\b|\breward\s+payment\b|\brewards?\s+(?:points?|redemption|credit|statement)\b|\bstatement\s+credit\b|\bcredit\b(?!\s*-?\s*(?:card|crd|union|one|bank|payment|pmt|autopay)\b)/i;
 
 // Money arriving on a card is not necessarily a payment: refunds and statement credits also
 // look like that. Plaid's loan payment category settles it in favor of a payment, and so does a
@@ -98,9 +100,11 @@ const distinctiveWords = (text?: string | null): Set<string> =>
 // loan payment, or text that names the card's issuer or the same thing the card row names.
 // Without this, an unrelated purchase that happens to match an amount would be hidden.
 const looksLikeFundingForCard = (bank: PairingRow, card: PairingRow): boolean => {
-  if (bank.transaction_type === 'transfer') return true;
   if (bank.plaid_detailed === BANK_CARD_PAYMENT_PFC_DETAILED) return true;
+  // Checked before the transfer type: detection also types "mortgage payment" text as a transfer,
+  // and that says nothing about a card.
   if (NOT_A_CARD_PAYMENT_WORDS.test(bank.description ?? '')) return false;
+  if (bank.transaction_type === 'transfer') return true;
 
   const bankWords = distinctiveWords(bank.description);
   if (bankWords.size === 0) return false;
