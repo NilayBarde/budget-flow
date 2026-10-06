@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { Card, CardHeader, Button, Modal, Input } from '../components/ui';
 import { useCategories, useCreateCategory, useUpdateCategory, useDeleteCategory } from '../hooks';
+import { MerchantRules } from '../components/settings/MerchantRules';
 import { exportAllData } from '../services/api';
 import type { Category } from '../types';
 
@@ -179,6 +180,9 @@ export const Settings = () => {
           ))}
         </div>
       </Card>
+
+      {/* Rules the app learned from the user's corrections */}
+      <MerchantRules />
 
       {/* Create Category Modal */}
       <Modal
