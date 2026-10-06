@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
+import { toPublicAccount } from '../services/account-redaction.js';
 
 const router = Router();
 
@@ -21,9 +22,6 @@ const fetchAllRows = async (table: string) => {
   return rows;
 };
 
-// Plaid credentials must never appear in a downloadable file.
-const REDACTED_ACCOUNT_FIELDS = ['plaid_access_token', 'plaid_cursor'];
-
 const EXPORT_TABLES = [
   'accounts',
   'categories',
@@ -43,10 +41,7 @@ router.get('/', asyncHandler(async (_req, res) => {
   const data: Record<string, unknown[]> = {};
   for (const table of EXPORT_TABLES) {
     const rows = await fetchAllRows(table);
-    if (table === 'accounts') {
-      rows.forEach(row => REDACTED_ACCOUNT_FIELDS.forEach(f => delete row[f]));
-    }
-    data[table] = rows;
+    data[table] = table === 'accounts' ? rows.map(toPublicAccount) : rows;
   }
 
   res.setHeader('Content-Disposition', 'attachment; filename="budgetflow-export.json"');

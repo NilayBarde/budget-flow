@@ -4,6 +4,7 @@ import * as plaidService from '../services/plaid.js';
 import { categorizeWithPlaid, cleanMerchantName, PlaidPFC } from '../services/categorizer.js';
 import { buildAccountResolver } from '../services/sync-attribution.js';
 import { reconcilePendingTransaction } from '../services/pending-reconciliation.js';
+import { redactError } from '../services/plaid-errors.js';
 import { v4 as uuidv4 } from 'uuid';
 
 import { detectTransactionType } from '../services/transaction-type.js';
@@ -312,7 +313,7 @@ router.post('/plaid', async (req, res) => {
     // Always return 200 to acknowledge receipt
     res.status(200).json({ received: true });
   } catch (error) {
-    console.error('Webhook error:', error);
+    console.error('Webhook error:', redactError(error));
     // Still return 200 to prevent Plaid from retrying
     res.status(200).json({ received: true, error: 'Processing error' });
   }
