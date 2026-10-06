@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
 import { isInvestmentAccountType } from '../services/account-types.js';
+import { toPublicAccount } from '../services/account-redaction.js';
 
 const router = Router();
 
@@ -111,7 +112,7 @@ router.patch('/accounts/:accountId/exclude', async (req, res) => {
 
     if (error) throw error;
 
-    res.json(data);
+    res.json(toPublicAccount(data));
   } catch (error) {
     console.error('Error updating account exclusion:', error);
     res.status(500).json({ message: 'Failed to update account' });

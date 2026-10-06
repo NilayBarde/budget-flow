@@ -4,6 +4,7 @@ import * as plaidService from '../services/plaid.js';
 import { categorizeWithPlaid, cleanMerchantName, PlaidPFC } from '../services/categorizer.js';
 import { buildAccountResolver } from '../services/sync-attribution.js';
 import { reconcilePendingTransaction } from '../services/pending-reconciliation.js';
+import { redactError } from '../services/plaid-errors.js';
 import { v4 as uuidv4 } from 'uuid';
 
 import { detectTransactionType } from '../services/transaction-type.js';
@@ -72,7 +73,7 @@ const processSyncedTransactions = async (
     const mapping = merchantMappings.find(tx.merchant_name, tx.name);
     const displayName = mapping?.display_name || cleanMerchantName(tx.merchant_name || tx.name);
     const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
-    const detectedType = detectTransactionType(tx.amount, texts, plaidPFC, null, accountTypeById.get(targetAccountId));
+    const detectedType = detectTransactionType(tx.amount, texts, plaidPFC, accountTypeById.get(targetAccountId));
     const transactionType = resolveTransactionType(detectedType, mapping);
 
     // Auto-assign category based on type with Plaid-first approach
@@ -139,7 +140,6 @@ const processSyncedTransactions = async (
       tx.amount,
       texts,
       plaidPFC,
-      null,
       accountTypeById.get(resolveAccountId(tx.account_id)),
     );
 
@@ -312,7 +312,7 @@ router.post('/plaid', async (req, res) => {
     // Always return 200 to acknowledge receipt
     res.status(200).json({ received: true });
   } catch (error) {
-    console.error('Webhook error:', error);
+    console.error('Webhook error:', redactError(error));
     // Still return 200 to prevent Plaid from retrying
     res.status(200).json({ received: true, error: 'Processing error' });
   }

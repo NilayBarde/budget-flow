@@ -6,9 +6,10 @@ import { detectTransactionType } from '../services/transaction-type.js';
 import { loadManuallyTypedIds, loadMerchantMappings, resolveTransactionType } from '../services/merchant-mappings.js';
 import { getCategoryIdForType } from '../services/category-lookup.js';
 import { buildAccountResolver } from '../services/sync-attribution.js';
-import { getPlaidErrorCode, needsReconnect } from '../services/plaid-errors.js';
+import { getPlaidErrorCode, needsReconnect, redactError } from '../services/plaid-errors.js';
 import { classifySyncHealth, DEFAULT_STALE_DAYS, INVESTMENT_STALE_DAYS, parseStaleDaysOverride } from '../services/sync-health.js';
 import { isHoldingsAccountType } from '../services/account-types.js';
+import { toPublicAccount } from '../services/account-redaction.js';
 import { reconcilePendingTransaction } from '../services/pending-reconciliation.js';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -46,7 +47,7 @@ router.get('/', async (req, res) => {
     // Merge last import dates into accounts
     // Use csv_imports table first, fall back to account's own last_csv_import_at (set by holdings import)
     const accountsWithLastImport = accounts?.map(account => ({
-      ...account,
+      ...toPublicAccount(account),
       last_csv_import_at: lastImportMap.get(account.id) || account.last_csv_import_at || null,
     }));
 
@@ -125,7 +126,7 @@ router.post('/manual', async (req, res) => {
     if (error) throw error;
 
     console.log(`Created manual account: ${institution_name} - ${account_name}`);
-    res.status(201).json(data);
+    res.status(201).json(toPublicAccount(data));
   } catch (error) {
     console.error('Error creating manual account:', error);
     res.status(500).json({ message: 'Failed to create manual account' });
@@ -183,7 +184,7 @@ router.post('/:id/sync', async (req, res) => {
             }
           }
         } catch (holdingsError) {
-          console.warn(`[Sync] getInvestmentHoldings failed for ${id}, attempting fallback to getAccounts...`, holdingsError);
+          console.warn(`[Sync] getInvestmentHoldings failed for ${id}, attempting fallback to getAccounts...`, redactError(holdingsError));
           const plaidData = await plaidService.getAccounts(account.plaid_access_token);
           const fallbackAccount = plaidData.accounts.find(a => a.account_id === account.plaid_account_id);
           if (fallbackAccount) {
@@ -201,7 +202,7 @@ router.post('/:id/sync', async (req, res) => {
         }
       }
     } catch (balanceError) {
-      console.warn(`[Sync] Final balance fetch failure for account ${id}:`, balanceError);
+      console.warn(`[Sync] Final balance fetch failure for account ${id}:`, redactError(balanceError));
       // Continue with transaction sync even if balance fetch fails
     }
 
@@ -214,7 +215,7 @@ router.post('/:id/sync', async (req, res) => {
         account.plaid_cursor
       );
     } catch (syncError) {
-      console.error(`Transaction sync failed for account ${id}:`, syncError);
+      console.error(`Transaction sync failed for account ${id}:`, redactError(syncError));
       // If balance was updated, we can still return success for the balance part
       if (latestBalance !== account.current_balance) {
         await supabase.from('accounts').update({ current_balance: latestBalance }).eq('id', id);
@@ -287,7 +288,7 @@ router.post('/:id/sync', async (req, res) => {
       const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
 
       // Detect transaction type with Plaid PFC, unless the user already corrected this merchant
-      const detectedType = detectTransactionType(tx.amount, texts, plaidPFC, null, accountTypeById.get(targetAccountId));
+      const detectedType = detectTransactionType(tx.amount, texts, plaidPFC, accountTypeById.get(targetAccountId));
       const transactionType = resolveTransactionType(detectedType, mapping);
 
       // Auto-assign category only for expenses and returns
@@ -354,7 +355,6 @@ router.post('/:id/sync', async (req, res) => {
         tx.amount,
         texts,
         plaidPFC,
-        null,
         accountTypeById.get(resolveAccountId(tx.account_id)),
       );
 
@@ -448,8 +448,8 @@ router.post('/:id/sync', async (req, res) => {
     });
   } catch (error) {
     const plaidErrorCode = getPlaidErrorCode(error);
-    // Log the code only: the raw axios error carries the request headers, including the Plaid secret.
-    console.error('Error syncing account:', plaidErrorCode ?? (error instanceof Error ? error.message : error));
+    // redactError, not the raw error: an axios error carries the request headers, including the Plaid secret.
+    console.error('Error syncing account:', redactError(error));
 
     if (needsReconnect(plaidErrorCode)) {
       // Webhooks are the only other place that flags this, and they can be missed. Flag every
@@ -496,7 +496,7 @@ router.post('/:id/update-webhook', async (req, res) => {
 
     res.json({ message: 'Webhook updated', webhook_url: webhookUrl });
   } catch (error) {
-    console.error('Error updating webhook:', error);
+    console.error('Error updating webhook:', redactError(error));
     res.status(500).json({ message: 'Failed to update webhook' });
   }
 });
@@ -518,7 +518,7 @@ router.delete('/:id', async (req, res) => {
       try {
         await plaidService.removeItem(account.plaid_access_token);
       } catch (plaidError) {
-        console.warn('Could not remove item from Plaid:', plaidError);
+        console.warn('Could not remove item from Plaid:', redactError(plaidError));
         // Continue with local deletion even if Plaid removal fails
       }
     }
@@ -637,7 +637,7 @@ router.post('/:id/refresh-accounts', async (req, res) => {
         .insert(account);
 
       if (insertError) {
-        console.error(`Failed to create account ${plaidAccount.name}:`, insertError);
+        console.error(`Failed to create account ${plaidAccount.name}:`, redactError(insertError));
         continue;
       }
 
@@ -657,7 +657,7 @@ router.post('/:id/refresh-accounts', async (req, res) => {
       total_updated: updatedAccounts.length,
     });
   } catch (error) {
-    console.error('Error refreshing accounts:', error);
+    console.error('Error refreshing accounts:', redactError(error));
     res.status(500).json({ message: 'Failed to refresh accounts from Plaid' });
   }
 });
@@ -693,7 +693,7 @@ router.patch('/:id', async (req, res) => {
     }
 
     console.log(`Updated account ${id}`);
-    res.json(data);
+    res.json(toPublicAccount(data));
   } catch (error) {
     console.error('Error updating account:', error);
     res.status(500).json({ message: 'Failed to update account' });
