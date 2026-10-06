@@ -14,12 +14,17 @@ interface SyncHealthAccount {
   last_synced_at: string | null;
 }
 
-// The ?staleDays= override must be a positive, finite number. Zero, negatives, Infinity and
-// non numeric values would otherwise flag every account as stale or none of them.
+// The ?staleDays= override is a debugging aid. It must be a plain decimal number inside a sane
+// range: hex, exponents, negatives and huge values would flag every account as stale or none of
+// them (1e308 days overflows the cutoff to -Infinity).
+const MIN_STALE_DAYS = 0.01;
+const MAX_STALE_DAYS = 3650;
+
 export const parseStaleDaysOverride = (value: unknown): number | undefined => {
-  if (typeof value !== 'number' && typeof value !== 'string') return undefined;
-  const days = Number(value);
-  return Number.isFinite(days) && days > 0 ? days : undefined;
+  const text = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim() : null;
+  if (text === null || !/^\d+(\.\d+)?$/.test(text)) return undefined;
+  const days = Number(text);
+  return days >= MIN_STALE_DAYS && days <= MAX_STALE_DAYS ? days : undefined;
 };
 
 export const staleDaysFor = (accountType?: string | null, override?: number): number => {

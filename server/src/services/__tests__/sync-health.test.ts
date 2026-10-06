@@ -127,4 +127,19 @@ describe('parseStaleDaysOverride', () => {
       expect(parseStaleDaysOverride(bad)).toBeUndefined();
     }
   });
+
+  it('only accepts plain decimal numbers, not hex, exponents or booleans', () => {
+    for (const bad of ['0x10', '1e3', '1e308', '0b11', '5px', true, false, ' ', '1,5', '+5']) {
+      expect(parseStaleDaysOverride(bad)).toBeUndefined();
+    }
+    expect(parseStaleDaysOverride(' 5 ')).toBe(5);
+  });
+
+  it('rejects values so large that no account could ever be stale, or so small that all would be', () => {
+    expect(parseStaleDaysOverride(3650)).toBe(3650);
+    expect(parseStaleDaysOverride(3651)).toBeUndefined();
+    expect(parseStaleDaysOverride('99999999')).toBeUndefined();
+    expect(parseStaleDaysOverride(0.5)).toBe(0.5);
+    expect(parseStaleDaysOverride(0.001)).toBeUndefined();
+  });
 });
