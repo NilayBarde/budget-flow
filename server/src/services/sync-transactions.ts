@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { supabase } from '../db/supabase.js';
-import { categorizeWithPlaid, cleanMerchantName, resolveCategoryId, type PlaidPFC } from './categorizer.js';
+import { categorizeForSpending, cleanMerchantName, type PlaidPFC } from './categorizer.js';
 import { detectTransactionType, type TransactionType } from './transaction-type.js';
 import { loadManuallyTypedIds, loadMerchantMappings, resolveTransactionType, type MerchantMapping } from './merchant-mappings.js';
 import { reconcilePendingTransaction } from './pending-reconciliation.js';
@@ -42,15 +42,12 @@ export const buildNewTransactionRow = (tx: PlaidTransaction, { accountId, accoun
     if (mapping?.default_category_id) {
       categoryId = mapping.default_category_id;
     } else {
-      const result = categorizeWithPlaid(tx.merchant_name || tx.name, tx.original_description || tx.name, plaidPFC);
-      categoryId = resolveCategoryId(result.categoryName, categoryMap);
-      needsReview = result.needsReview;
-      // Income and Investment are for rows typed that way. Spending Plaid tags as income (a merchant the user
-      // typed as an expense, say) is left for the user rather than filed where it would count as earnings.
-      if (categoryId && (categoryId === categoryMap.get('Income') || categoryId === categoryMap.get('Investment'))) {
-        categoryId = null;
-        needsReview = true;
-      }
+      ({ categoryId, needsReview } = categorizeForSpending(
+        tx.merchant_name || tx.name,
+        tx.original_description || tx.name,
+        plaidPFC,
+        categoryMap,
+      ));
     }
   } else if (transactionType === 'income') {
     categoryId = categoryMap.get('Income') || null;
@@ -83,15 +80,25 @@ interface UpdateContext {
   mapping: MerchantMapping | undefined;
   /** True when the user set this row's type by hand, so it must not be re-detected. */
   typeLocked: boolean;
-  /** The stored row, used to tell whether the user customized its display name. */
-  existing: { merchant_name: string; merchant_display_name: string | null } | null;
+  categoryMap: ReadonlyMap<string, string>;
+  /**
+   * The stored row. It shows whether the user customized the display name, and whether they changed the
+   * category: any field left out is treated as unknown and left alone.
+   */
+  existing: {
+    merchant_name: string;
+    merchant_display_name: string | null;
+    transaction_type?: string | null;
+    category_id?: string | null;
+    plaid_category?: PlaidPFC | null;
+  } | null;
 }
 
 /**
  * The fields to refresh on a transaction Plaid reports as modified. It keeps what the user set:
  * a hand typed type is never overwritten, and a customized display name is left alone.
  */
-export const buildTransactionUpdate = (tx: PlaidTransaction, { accountId, accountType, mapping, typeLocked, existing }: UpdateContext) => {
+export const buildTransactionUpdate = (tx: PlaidTransaction, { accountId, accountType, mapping, typeLocked, categoryMap, existing }: UpdateContext) => {
   const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
   const texts = [tx.merchant_name || '', tx.name || '', tx.original_description || ''];
   const merchantName = tx.merchant_name || tx.name;
@@ -115,6 +122,26 @@ export const buildTransactionUpdate = (tx: PlaidTransaction, { accountId, accoun
     !!existing?.merchant_display_name && existing.merchant_display_name !== cleanMerchantName(existing.merchant_name);
   if (!userCustomizedDisplayName) {
     update.merchant_display_name = mapping?.display_name || cleanMerchantName(merchantName);
+  }
+
+  // Plaid sometimes improves a transaction's category after the fact. Keep the newer data on the row, and
+  // move the category with it unless the user has already decided it.
+  if (plaidPFC) {
+    update.plaid_category = plaidPFC;
+
+    const effectiveType = (update.transaction_type as string | undefined) ?? existing?.transaction_type;
+    const isSpending = effectiveType === 'expense' || effectiveType === 'return';
+    if (existing && existing.category_id !== undefined && isSpending && !mapping?.default_category_id) {
+      // The category is untouched when it is still what Plaid's previous data gave. That is the only record
+      // of whether the user changed it, so it errs toward leaving the category alone: a row stored under an
+      // older version of the category map no longer matches and keeps what it has.
+      const before = categorizeForSpending(existing.merchant_name, null, existing.plaid_category, categoryMap);
+      if (existing.category_id === before.categoryId) {
+        const after = categorizeForSpending(merchantName, tx.original_description || tx.name, plaidPFC, categoryMap);
+        update.category_id = after.categoryId;
+        update.needs_review = after.needsReview;
+      }
+    }
   }
 
   return update;
@@ -283,7 +310,7 @@ export const applySyncResult = async ({
 
     const { data: existing, error: lookupError } = await supabase
       .from('transactions')
-      .select('merchant_name, merchant_display_name')
+      .select('merchant_name, merchant_display_name, transaction_type, category_id, plaid_category')
       .eq('plaid_transaction_id', tx.transaction_id)
       .single();
 
@@ -299,6 +326,7 @@ export const applySyncResult = async ({
       accountType: accountTypeById.get(accountId),
       mapping: mappings.find(tx.merchant_name, tx.name),
       typeLocked: manuallyTypedIds.has(tx.transaction_id),
+      categoryMap,
       existing,
     });
     const { error } = await supabase.from('transactions').update(update).eq('plaid_transaction_id', tx.transaction_id);

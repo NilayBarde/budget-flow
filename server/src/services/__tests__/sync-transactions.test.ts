@@ -276,6 +276,7 @@ const update = (t: PlaidTx, overrides: Partial<Parameters<typeof buildTransactio
     accountType: 'checking',
     mapping: undefined,
     typeLocked: false,
+    categoryMap,
     existing: { merchant_name: 'Starbucks', merchant_display_name: 'Starbucks' },
     ...overrides,
   });
@@ -323,6 +324,102 @@ describe('buildTransactionUpdate', () => {
 
   it('treats a missing existing row as not customized', () => {
     expect(update(tx(), { existing: null }).merchant_display_name).toBe('Starbucks');
+  });
+});
+
+describe('refreshing the category of a modified transaction', () => {
+  const richMap = new Map([
+    ['Dining', 'cat-dining'],
+    ['Groceries', 'cat-groceries'],
+    ['Coffee', 'cat-coffee'],
+    ['Income', 'cat-income'],
+    ['Investment', 'cat-invest'],
+  ]);
+  const restaurant = { primary: 'FOOD_AND_DRINK', detailed: 'FOOD_AND_DRINK_RESTAURANT' };
+  const groceries = { primary: 'FOOD_AND_DRINK', detailed: 'FOOD_AND_DRINK_GROCERIES' };
+
+  const stored = (overrides: Record<string, unknown> = {}) => ({
+    merchant_name: 'Whole Foods',
+    merchant_display_name: 'Whole Foods',
+    category_id: 'cat-dining',
+    needs_review: false,
+    plaid_category: restaurant,
+    ...overrides,
+  });
+  const modify = (overrides: Partial<PlaidTx> = {}) =>
+    tx({ merchant_name: 'Whole Foods', name: 'WHOLE FOODS', original_description: 'WHOLE FOODS', personal_finance_category: groceries, ...overrides });
+  const refresh = (t: PlaidTx, existing: Record<string, unknown>, overrides: Partial<Parameters<typeof buildTransactionUpdate>[1]> = {}) =>
+    update(t, { categoryMap: richMap, existing: existing as never, ...overrides });
+
+  it('moves a row to Plaid\'s improved category when the user never changed it', () => {
+    // Plaid first said restaurant (stored as Dining, which is what that gives) and now says groceries.
+    const result = refresh(modify(), stored());
+
+    expect(result.category_id).toBe('cat-groceries');
+    expect(result.needs_review).toBe(false);
+    expect(result.plaid_category).toEqual(groceries);
+  });
+
+  it('leaves the category alone when the user changed it, but still keeps the newer Plaid data', () => {
+    const result = refresh(modify(), stored({ category_id: 'cat-coffee' }));
+
+    expect(result).not.toHaveProperty('category_id');
+    expect(result).not.toHaveProperty('needs_review');
+    expect(result.plaid_category).toEqual(groceries);
+  });
+
+  it('gives a category to a row that was blank because Plaid had nothing before', () => {
+    const result = refresh(modify(), stored({ category_id: null, needs_review: true, plaid_category: null }));
+
+    expect(result.category_id).toBe('cat-groceries');
+    expect(result.needs_review).toBe(false);
+  });
+
+  it('does not override a merchant rule, which already decides the category', () => {
+    const result = refresh(modify(), stored(), { mapping: mapping({ default_category_id: 'cat-coffee' }) });
+
+    expect(result).not.toHaveProperty('category_id');
+  });
+
+  it('judges "untouched" by Plaid\'s old data, so a user\'s deliberate Dining stays when Plaid now says Coffee', () => {
+    // Plaid first said coffee (auto: Coffee), the user moved it to Dining, then Plaid changes its mind again.
+    const result = refresh(
+      modify({ personal_finance_category: groceries }),
+      stored({ category_id: 'cat-dining', plaid_category: { primary: 'FOOD_AND_DRINK', detailed: 'FOOD_AND_DRINK_COFFEE' } }),
+    );
+
+    expect(result).not.toHaveProperty('category_id');
+  });
+
+  it('keeps the stored Plaid data when the modification carries none', () => {
+    const result = refresh(modify({ personal_finance_category: undefined }), stored());
+
+    expect(result).not.toHaveProperty('plaid_category');
+    expect(result).not.toHaveProperty('category_id');
+  });
+
+  it('leaves the category alone when the row is no longer spending', () => {
+    const result = refresh(modify({ amount: -3000, merchant_name: 'Employer', name: 'Employer', personal_finance_category: { primary: 'INCOME', detailed: 'INCOME_WAGES' } }), stored());
+
+    expect(result.transaction_type).toBe('income');
+    expect(result).not.toHaveProperty('category_id');
+  });
+
+  it('never moves spending into Income or Investment', () => {
+    const result = refresh(
+      modify({ personal_finance_category: { primary: 'INCOME', detailed: 'INCOME_WAGES' } }),
+      stored(),
+      { mapping: mapping({ default_transaction_type: 'expense' }) },
+    );
+
+    expect(result.category_id).toBeNull();
+    expect(result.needs_review).toBe(true);
+  });
+
+  it('does nothing about the category when the stored row has no category fields to compare', () => {
+    const result = refresh(modify(), { merchant_name: 'Whole Foods', merchant_display_name: 'Whole Foods' });
+
+    expect(result).not.toHaveProperty('category_id');
   });
 });
 
