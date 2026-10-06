@@ -4,7 +4,7 @@ export type TransactionType = 'income' | 'expense' | 'transfer' | 'investment' |
 
 // Investment detection patterns (checked AFTER transfers)
 export const INVESTMENT_PATTERNS = [
-  /robinhood[- ]?debits?/i,
+  /robinhood[\s\-–—]*debits?/i,
   /fidelity/i,
   /vanguard/i,
   /schwab/i,
@@ -28,7 +28,11 @@ const BILL_PAY_PATTERNS = [/bill\s*pay/i, /billpay/i, /direct\s*debit/i];
 export const TRANSFER_PATTERNS = [
   /credit\s*card[- ]?auto[- ]?pay/i,
   /credit\s*card[- ]?payment/i,
-  /card[- ]?payment/i,
+  // "Card Payment", "Card-Payment" and "Card - Payment" (banks use all three), plus the
+  // abbreviation CCB (credit card bill). Plaid shortens these to the issuer's name, so a card
+  // bill from a brokerage like Robinhood otherwise looks like a contribution.
+  /\bcard[\s\-–—]*(payment|pmt)/i,
+  /\bccb\b/i,
   /payment.*thank\s*you/i,
   /autopay/i,
   /auto[- ]?pay/i,
@@ -79,8 +83,16 @@ export const SPENDING_PFC_PRIMARY = [
   'HOME_IMPROVEMENT',
 ];
 
-const isCreditCardAccount = (accountType?: string | null): boolean =>
+export const isCreditCardAccount = (accountType?: string | null): boolean =>
   Boolean(accountType && /credit/i.test(accountType));
+
+// Accounts that hold spendable cash. Only these can fund a card payment; a brokerage can carry
+// card purchases but is not where payments come from.
+const CASH_ACCOUNT_TYPES = ['checking', 'savings', 'money market', 'cash', 'prepaid'];
+export const isCashAccount = (accountType?: string | null): boolean => {
+  const type = (accountType ?? '').toLowerCase();
+  return CASH_ACCOUNT_TYPES.some(cashType => type.includes(cashType));
+};
 
 /**
  * Detect transaction type based on amount and patterns.
