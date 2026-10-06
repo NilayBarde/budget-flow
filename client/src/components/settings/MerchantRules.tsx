@@ -33,7 +33,7 @@ export const MerchantRules = () => {
     setDeleteFailed(false);
     deleteRule.mutate(id, {
       onError: () => setDeleteFailed(true),
-      onSettled: () => setConfirmingId(null),
+      onSettled: () => setConfirmingId(current => (current === id ? null : current)),
     });
   };
 
@@ -74,6 +74,8 @@ export const MerchantRules = () => {
                 onChange={event => {
                   setQuery(event.target.value);
                   setVisible(PAGE_SIZE);
+                  setConfirmingId(null);
+                  setDeleteFailed(false);
                 }}
               />
 

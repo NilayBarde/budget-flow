@@ -122,6 +122,33 @@ describe('MerchantRules', () => {
     expect(screen.getByRole('alert').textContent).toContain('Could not delete');
   });
 
+  it('drops a pending confirmation when the search changes', () => {
+    render(<MerchantRules />);
+    const search = screen.getByRole('searchbox', { name: 'Search rules' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete rule for Uber' }));
+    fireEvent.change(search, { target: { value: 'dining' } });
+    fireEvent.change(search, { target: { value: '' } });
+
+    const row = screen.getByRole('listitem', { name: 'Uber' });
+    expect(within(row).queryByRole('button', { name: 'Confirm delete' })).toBeNull();
+    expect(within(row).getByRole('button', { name: 'Delete rule for Uber' })).toBeTruthy();
+  });
+
+  it('keeps another row\'s confirmation open when an earlier delete settles', () => {
+    render(<MerchantRules />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete rule for Uber' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm delete' }));
+    const [, options] = state.mutate.mock.calls[0] as [string, { onSettled: () => void }];
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete rule for Uber Eats' }));
+    act(() => options.onSettled());
+
+    const eats = screen.getByRole('listitem', { name: 'Uber Eats' });
+    expect(within(eats).getByRole('button', { name: 'Confirm delete' })).toBeTruthy();
+  });
+
   it('explains what deleting does not do', () => {
     render(<MerchantRules />);
 
