@@ -267,7 +267,7 @@ router.post('/exchange-token', async (req, res) => {
         // Check for existing merchant mapping (user's previous corrections)
         const mapping = merchantMappings.find(tx.merchant_name, tx.name);
 
-        const detectedType = detectTransactionType(tx.amount, texts, plaidPFC, null, accountTypeById.get(accountId));
+        const detectedType = detectTransactionType(tx.amount, texts, plaidPFC, accountTypeById.get(accountId));
         const transactionType = resolveTransactionType(detectedType, mapping);
 
         // Auto-assign category based on type and Plaid's categorization

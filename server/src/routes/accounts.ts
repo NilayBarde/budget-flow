@@ -291,7 +291,7 @@ router.post('/:id/sync', async (req, res) => {
       const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
 
       // Detect transaction type with Plaid PFC, unless the user already corrected this merchant
-      const detectedType = detectTransactionType(tx.amount, texts, plaidPFC, null, accountTypeById.get(targetAccountId));
+      const detectedType = detectTransactionType(tx.amount, texts, plaidPFC, accountTypeById.get(targetAccountId));
       const transactionType = resolveTransactionType(detectedType, mapping);
 
       // Auto-assign category only for expenses and returns
@@ -358,7 +358,6 @@ router.post('/:id/sync', async (req, res) => {
         tx.amount,
         texts,
         plaidPFC,
-        null,
         accountTypeById.get(resolveAccountId(tx.account_id)),
       );
 

@@ -73,7 +73,7 @@ const processSyncedTransactions = async (
     const mapping = merchantMappings.find(tx.merchant_name, tx.name);
     const displayName = mapping?.display_name || cleanMerchantName(tx.merchant_name || tx.name);
     const plaidPFC = tx.personal_finance_category as PlaidPFC | undefined;
-    const detectedType = detectTransactionType(tx.amount, texts, plaidPFC, null, accountTypeById.get(targetAccountId));
+    const detectedType = detectTransactionType(tx.amount, texts, plaidPFC, accountTypeById.get(targetAccountId));
     const transactionType = resolveTransactionType(detectedType, mapping);
 
     // Auto-assign category based on type with Plaid-first approach
@@ -140,7 +140,6 @@ const processSyncedTransactions = async (
       tx.amount,
       texts,
       plaidPFC,
-      null,
       accountTypeById.get(resolveAccountId(tx.account_id)),
     );
 
