@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { buildFixedCostSeries, computeSpendingVelocity } from '../spending-velocity.js';
+import {
+  buildFixedCostSeries,
+  circularDayDistance,
+  computeSpendingVelocity,
+  findSupersededSeries,
+  matchRenamedRecurringPayments,
+  reconcileRecurringSeries,
+} from '../spending-velocity.js';
 
 /** Shorthand: a single fixed-cost series fully described by two numbers. */
 const series = (expectedAmount: number, paidThisMonth: number) => ({
@@ -449,5 +456,455 @@ describe('buildFixedCostSeries', () => {
       expect(result.projectedTotal).toBeCloseTo(7962.07, 1);
       expect(result.projectedTotal).toBeLessThan(8000);
     });
+  });
+});
+
+describe('matchRenamedRecurringPayments', () => {
+  const rent = { merchantDisplayName: 'Landlord Co', averageAmount: 2400, frequency: 'monthly' as const };
+  // Rent usually posts on the 3rd.
+  const lastSeen = new Map([['Landlord Co', '2026-09-03']]);
+
+  it('attributes a renamed rent payment near the usual day and amount', () => {
+    const matches = matchRenamedRecurringPayments(
+      [rent],
+      new Map(),
+      lastSeen,
+      [{ day: 5, amount: 2497.49, merchantName: 'Landlord Co Rent' }],
+      31,
+    );
+
+    expect(matches).toEqual([
+      { merchantDisplayName: 'Landlord Co', day: 5, amount: 2497.49 },
+    ]);
+  });
+
+  it('skips a series that has already been paid by name this month', () => {
+    const matches = matchRenamedRecurringPayments(
+      [rent],
+      new Map([['Landlord Co', 2400]]),
+      lastSeen,
+      [{ day: 5, amount: 2400, merchantName: 'Landlord Co Rent' }],
+      31,
+    );
+
+    expect(matches).toEqual([]);
+  });
+
+  it('ignores a charge outside the amount tolerance', () => {
+    const matches = matchRenamedRecurringPayments(
+      [rent],
+      new Map(),
+      lastSeen,
+      [{ day: 4, amount: 1800, merchantName: 'Landlord Co Rent' }],
+      31,
+    );
+
+    expect(matches).toEqual([]);
+  });
+
+  it('ignores a charge far from the usual billing day (a one-off purchase)', () => {
+    const matches = matchRenamedRecurringPayments(
+      [rent],
+      new Map(),
+      lastSeen,
+      [{ day: 20, amount: 2350, merchantName: 'Landlord Co Rent' }],
+      31,
+    );
+
+    expect(matches).toEqual([]);
+  });
+
+  it('never matches small series, where amount coincidences are common', () => {
+    const gym = { merchantDisplayName: 'Gym', averageAmount: 75, frequency: 'monthly' as const };
+
+    const matches = matchRenamedRecurringPayments(
+      [gym],
+      new Map(),
+      new Map([['Gym', '2026-09-03']]),
+      [{ day: 4, amount: 74, merchantName: 'Gym Membership' }],
+      31,
+    );
+
+    expect(matches).toEqual([]);
+  });
+
+  it('only matches monthly series', () => {
+    const matches = matchRenamedRecurringPayments(
+      [{ ...rent, frequency: 'weekly' as const }, { ...rent, merchantDisplayName: 'Annual', frequency: 'yearly' as const }],
+      new Map(),
+      new Map([['Landlord Co', '2026-09-03'], ['Annual', '2026-09-03']]),
+      [{ day: 5, amount: 2400, merchantName: 'Landlord Co Rent' }],
+      31,
+    );
+
+    expect(matches).toEqual([]);
+  });
+
+  it('gives a charge that fits two series to the largest series first', () => {
+    const other = { merchantDisplayName: 'Other Bill', averageAmount: 2300, frequency: 'monthly' as const };
+
+    const matches = matchRenamedRecurringPayments(
+      [rent, other],
+      new Map(),
+      new Map([['Landlord Co', '2026-09-03'], ['Other Bill', '2026-09-03']]),
+      [{ day: 4, amount: 2410, merchantName: 'Landlord Other Bill' }],
+      31,
+    );
+
+    expect(matches).toEqual([
+      { merchantDisplayName: 'Landlord Co', day: 4, amount: 2410 },
+    ]);
+  });
+
+  it('does not let a flight sized one-off absorb the rent slot', () => {
+    const matches = matchRenamedRecurringPayments(
+      [rent],
+      new Map(),
+      lastSeen,
+      [{ day: 4, amount: 2300, merchantName: 'Delta Air Lines' }],
+      31,
+    );
+
+    expect(matches).toEqual([]);
+  });
+
+  it('matches the renamed payee even when a flight is also near the amount and day', () => {
+    const matches = matchRenamedRecurringPayments(
+      [rent],
+      new Map(),
+      lastSeen,
+      [
+        { day: 4, amount: 2410, merchantName: 'Delta Air Lines' },
+        { day: 5, amount: 2497.49, merchantName: 'Landlord Co Housing Payment' },
+      ],
+      31,
+    );
+
+    expect(matches).toEqual([
+      { merchantDisplayName: 'Landlord Co', day: 5, amount: 2497.49 },
+    ]);
+  });
+
+  it('ignores generic payment words when comparing merchant names', () => {
+    const matches = matchRenamedRecurringPayments(
+      [rent],
+      new Map(),
+      lastSeen,
+      [{ day: 4, amount: 2400, merchantName: 'Online Payment Transfer' }],
+      31,
+    );
+
+    expect(matches).toEqual([]);
+  });
+
+  it('skips a series with no known billing day', () => {
+    const matches = matchRenamedRecurringPayments(
+      [rent],
+      new Map(),
+      new Map(),
+      [{ day: 5, amount: 2400, merchantName: 'Landlord Co Rent' }],
+      31,
+    );
+
+    expect(matches).toEqual([]);
+  });
+
+  describe('month boundary wraparound', () => {
+    const matchOn = (lastDate: string, day: number, daysInMonth: number) =>
+      matchRenamedRecurringPayments(
+        [rent],
+        new Map(),
+        new Map([['Landlord Co', lastDate]]),
+        [{ day, amount: 2400, merchantName: 'Landlord Co Rent' }],
+        daysInMonth,
+      );
+
+    it('matches rent that last posted on the 31st and now posts on the 1st', () => {
+      expect(matchOn('2026-08-31', 1, 31)).toHaveLength(1);
+    });
+
+    it('matches rent that last posted on the 1st and now posts on the 31st', () => {
+      expect(matchOn('2026-09-01', 31, 31)).toHaveLength(1);
+    });
+
+    it.each([28, 29, 30, 31])('wraps correctly in a %i day month', daysInMonth => {
+      expect(matchOn(`2026-01-${daysInMonth}`, 2, daysInMonth)).toHaveLength(1);
+      expect(matchOn('2026-01-02', daysInMonth, daysInMonth)).toHaveLength(1);
+    });
+
+    it('still rejects days that are far apart even with wraparound', () => {
+      expect(matchOn('2026-09-10', 25, 30)).toHaveLength(0);
+    });
+  });
+});
+
+describe('findSupersededSeries', () => {
+  const monthly = (merchantDisplayName: string, averageAmount: number) => ({
+    merchantDisplayName,
+    averageAmount,
+    frequency: 'monthly' as const,
+  });
+  const oldRent = monthly('Old Rent Name', 2404.99);
+  const newRent = monthly('New Rent Name', 2497.49);
+  const lastSeen = new Map([
+    ['Old Rent Name', '2026-09-03'],
+    ['New Rent Name', '2026-10-05'],
+  ]);
+
+  // Old name charged through September, new name started in October.
+  const months = new Map([
+    ['Old Rent Name', new Set(['2026-07', '2026-08', '2026-09'])],
+    ['New Rent Name', new Set(['2026-10'])],
+  ]);
+
+  it('drops an unpaid series when a same-sized sibling already paid near its billing day', () => {
+    const superseded = findSupersededSeries(
+      [oldRent, newRent],
+      new Map([['New Rent Name', 2497.49]]),
+      lastSeen,
+      months,
+      31,
+    );
+
+    expect([...superseded]).toEqual(['Old Rent Name']);
+  });
+
+  it('keeps an unpaid series when no sibling has paid', () => {
+    expect(findSupersededSeries([oldRent, newRent], new Map(), lastSeen,
+      months,
+      31,
+    ).size).toBe(0);
+  });
+
+  it('keeps a series that has itself paid this month', () => {
+    const superseded = findSupersededSeries(
+      [oldRent, newRent],
+      new Map([['Old Rent Name', 2404.99], ['New Rent Name', 2497.49]]),
+      lastSeen,
+      months,
+      31,
+    );
+
+    expect(superseded.size).toBe(0);
+  });
+
+  it('keeps an unpaid series whose amount differs from the paid sibling', () => {
+    const superseded = findSupersededSeries(
+      [monthly('Old Rent Name', 1500), newRent],
+      new Map([['New Rent Name', 2497.49]]),
+      lastSeen,
+      months,
+      31,
+    );
+
+    expect(superseded.size).toBe(0);
+  });
+
+  it('keeps an unpaid series with a different billing day', () => {
+    const superseded = findSupersededSeries(
+      [oldRent, newRent],
+      new Map([['New Rent Name', 2497.49]]),
+      new Map([['Old Rent Name', '2026-09-22'], ['New Rent Name', '2026-10-05']]),
+      months,
+      31,
+    );
+
+    expect(superseded.size).toBe(0);
+  });
+
+  it('never drops small series', () => {
+    const superseded = findSupersededSeries(
+      [monthly('Gym A', 75), monthly('Gym B', 76)],
+      new Map([['Gym B', 76]]),
+      new Map([['Gym A', '2026-09-03'], ['Gym B', '2026-10-03']]),
+      months,
+      31,
+    );
+
+    expect(superseded.size).toBe(0);
+  });
+
+  it('ignores non-monthly series', () => {
+    const superseded = findSupersededSeries(
+      [{ ...oldRent, frequency: 'yearly' as const }, newRent],
+      new Map([['New Rent Name', 2497.49]]),
+      lastSeen,
+      months,
+      31,
+    );
+
+    expect(superseded.size).toBe(0);
+  });
+
+  describe('similar looking bills that are not the same series', () => {
+    const internet = monthly('Internet Co', 120);
+    const phone = monthly('Phone Co', 125);
+
+    it('keeps an unpaid phone bill when internet of a similar size and day already paid', () => {
+      // Both charge every month, so neither is a rename of the other.
+      const superseded = findSupersededSeries(
+        [internet, phone],
+        new Map([['Internet Co', 120]]),
+        new Map([['Internet Co', '2026-10-02'], ['Phone Co', '2026-09-05']]),
+        new Map([
+          ['Internet Co', new Set(['2026-07', '2026-08', '2026-09', '2026-10'])],
+          ['Phone Co', new Set(['2026-07', '2026-08', '2026-09'])],
+        ]),
+        31,
+      );
+
+      expect(superseded.size).toBe(0);
+    });
+
+    it('keeps the unpaid series when either side has no charge history', () => {
+      const superseded = findSupersededSeries(
+        [oldRent, newRent],
+        new Map([['New Rent Name', 2497.49]]),
+        lastSeen,
+        new Map([['Old Rent Name', new Set(['2026-09'])]]),
+        31,
+      );
+
+      expect(superseded.size).toBe(0);
+    });
+
+    it('supersedes a genuine rename that wraps across the month boundary', () => {
+      const superseded = findSupersededSeries(
+        [oldRent, newRent],
+        new Map([['New Rent Name', 2497.49]]),
+        new Map([['Old Rent Name', '2026-08-31'], ['New Rent Name', '2026-10-01']]),
+        new Map([
+          ['Old Rent Name', new Set(['2026-07', '2026-08'])],
+          ['New Rent Name', new Set(['2026-10'])],
+        ]),
+        31,
+      );
+
+      expect([...superseded]).toEqual(['Old Rent Name']);
+    });
+  });
+});
+
+describe('circularDayDistance', () => {
+  it('is the plain difference inside the month', () => {
+    expect(circularDayDistance(3, 6, 31)).toBe(3);
+  });
+
+  it.each([28, 29, 30, 31])('treats the last and first day as 1 apart in a %i day month', n => {
+    expect(circularDayDistance(n, 1, n)).toBe(1);
+    expect(circularDayDistance(1, n, n)).toBe(1);
+  });
+
+  it('is 0 for the same day', () => {
+    expect(circularDayDistance(15, 15, 30)).toBe(0);
+  });
+});
+
+describe('reconcileRecurringSeries', () => {
+  const biltName = 'Bilt Card - Housing Withdrawal Withdrawal';
+  const biltRent = { merchantDisplayName: biltName, averageAmount: 2404.99, frequency: 'monthly' as const };
+  const baseInput = {
+    charges: [biltRent],
+    paidThisMonthByMerchant: new Map<string, number>(),
+    lastExpenseDateByMerchant: new Map([[biltName, '2026-09-03']]),
+    chargeMonthsByMerchant: new Map([[biltName, new Set(['2026-08', '2026-09'])]]),
+    unmatchedExpenses: [{ day: 5, amount: 2497.49, merchantName: 'Bilt Housing Payment' }],
+    dailyVariable: new Map([[1, 38], [2, 53], [3, 791], [4, 142], [5, 2556], [6, 0]]),
+    today: '2026-10-06',
+    daysInMonth: 31,
+  };
+
+  describe('regression: October 2026 rent posted under a new merchant name', () => {
+    it('stops double counting rent as both variable spend and an unpaid fixed cost', () => {
+      // Day 6 of 31. Rent ($2,497.49) posted on day 5 as "Bilt Housing
+      // Payment" while the series is "Bilt Card - Housing Withdrawal
+      // Withdrawal" ($2,404.99). It landed in the variable bucket AND stayed
+      // unpaid as a fixed cost, projecting ~$21k against a $5,500 budget.
+      const reconciled = reconcileRecurringSeries(baseInput);
+
+      const result = computeSpendingVelocity({
+        daysElapsed: 6,
+        daysInMonth: 31,
+        spentSoFar: 3579.83,
+        fixedCostSeries: buildFixedCostSeries(
+          reconciled.charges,
+          baseInput.lastExpenseDateByMerchant,
+          reconciled.paidThisMonthByMerchant,
+          baseInput.today,
+        ),
+        lastMonthTotal: 0,
+        dailyVariableSpending: reconciled.dailyVariableSpending,
+      });
+
+      expect(result.recurringSpent).toBeCloseTo(2497.49, 2);
+      expect(result.variableSpent).toBeCloseTo(1082.51, 2);
+      // 2497.49 rent + (1082.51 / 6) * 31 projected variable, nowhere near $21k.
+      expect(result.projectedTotal).toBeLessThan(9000);
+    });
+  });
+
+  it('moves the renamed payment out of the day it posted on and does not mutate inputs', () => {
+    const reconciled = reconcileRecurringSeries(baseInput);
+
+    expect(reconciled.paidThisMonthByMerchant.get(biltName)).toBeCloseTo(2497.49, 2);
+    expect(reconciled.dailyVariableSpending).toEqual([38, 53, 791, 142, expect.closeTo(58.51, 2), 0]);
+    expect(baseInput.paidThisMonthByMerchant.size).toBe(0);
+    expect(baseInput.dailyVariable.get(5)).toBe(2556);
+  });
+
+  it('leaves variable spend alone when the only near match is a flight', () => {
+    const reconciled = reconcileRecurringSeries({
+      ...baseInput,
+      unmatchedExpenses: [{ day: 4, amount: 2300, merchantName: 'Delta Air Lines' }],
+      dailyVariable: new Map([[1, 0], [2, 0], [3, 0], [4, 2300], [5, 0], [6, 0]]),
+    });
+
+    expect(reconciled.paidThisMonthByMerchant.size).toBe(0);
+    expect(reconciled.dailyVariableSpending[3]).toBe(2300);
+  });
+
+  it('drops an unpaid alias once the renamed series has paid, counting rent once', () => {
+    const oldName = 'Old Rent Name';
+    const newName = 'New Rent Name';
+    const reconciled = reconcileRecurringSeries({
+      charges: [
+        { merchantDisplayName: oldName, averageAmount: 2404.99, frequency: 'monthly' },
+        { merchantDisplayName: newName, averageAmount: 2497.49, frequency: 'monthly' },
+      ],
+      paidThisMonthByMerchant: new Map([[newName, 2497.49]]),
+      lastExpenseDateByMerchant: new Map([[oldName, '2026-09-03'], [newName, '2026-10-05']]),
+      chargeMonthsByMerchant: new Map([
+        [oldName, new Set(['2026-08', '2026-09'])],
+        [newName, new Set(['2026-10'])],
+      ]),
+      unmatchedExpenses: [],
+      dailyVariable: new Map([[1, 0]]),
+      today: '2026-10-06',
+      daysInMonth: 31,
+    });
+
+    expect(reconciled.charges.map(c => c.merchantDisplayName)).toEqual([newName]);
+  });
+
+  it('keeps both series when two similar looking bills charge in the same months', () => {
+    const months = new Set(['2026-08', '2026-09']);
+    const reconciled = reconcileRecurringSeries({
+      charges: [
+        { merchantDisplayName: 'Internet Co', averageAmount: 120, frequency: 'monthly' },
+        { merchantDisplayName: 'Phone Co', averageAmount: 125, frequency: 'monthly' },
+      ],
+      paidThisMonthByMerchant: new Map([['Internet Co', 120]]),
+      lastExpenseDateByMerchant: new Map([['Internet Co', '2026-10-02'], ['Phone Co', '2026-09-05']]),
+      chargeMonthsByMerchant: new Map([
+        ['Internet Co', new Set([...months, '2026-10'])],
+        ['Phone Co', months],
+      ]),
+      unmatchedExpenses: [],
+      dailyVariable: new Map([[1, 0]]),
+      today: '2026-10-06',
+      daysInMonth: 31,
+    });
+
+    expect(reconciled.charges).toHaveLength(2);
   });
 });

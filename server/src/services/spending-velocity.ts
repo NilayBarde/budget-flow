@@ -145,22 +145,277 @@ export interface RecurringChargeRow {
   frequency: RecurringFrequency;
 }
 
+export const filterLiveCharges = (
+  charges: RecurringChargeRow[],
+  lastExpenseDateByMerchant: ReadonlyMap<string, string>,
+  today: string,
+): RecurringChargeRow[] => {
+  const cutoffDate = new Date(today);
+  cutoffDate.setUTCDate(cutoffDate.getUTCDate() - LIVE_SERIES_MAX_AGE_DAYS);
+  const cutoff = cutoffDate.toISOString().split('T')[0];
+
+  return charges.filter(c => {
+    if (livenessWindowDays[c.frequency] === null) return true;
+    const lastSeen = lastExpenseDateByMerchant.get(c.merchantDisplayName);
+    return !!lastSeen && lastSeen >= cutoff;
+  });
+};
+
+// A recurring bill can post under a different merchant name than the one the
+// series was detected with (a payment processor rename, "Bilt Housing Payment"
+// vs "Bilt Card - Housing Withdrawal Withdrawal"). Name matching then misses
+// it, so the charge is projected as variable spend while the series stays
+// unpaid. As a fallback an unmatched charge is attributed to a live monthly
+// series that has not paid yet when BOTH hold:
+//   - the amount is within FUZZY_MATCH_TOLERANCE of the series average, and
+//   - it posted within FUZZY_MATCH_DAY_WINDOW days of the series' usual day, AND
+//   - the merchant names share a meaningful token ("bilt", "housing").
+// The text signal keeps a similarly sized one-off (a $2,300 flight on the 4th)
+// from absorbing the rent slot, which would push the real rent into variable
+// spend. Small series are excluded because similar amounts are common
+// coincidences (a $75 gym vs any $75 dinner).
+export const FUZZY_MATCH_TOLERANCE = 0.1;
+export const FUZZY_MATCH_DAY_WINDOW = 7;
+export const FUZZY_MATCH_MIN_AMOUNT = 100;
+
+// Day of month distance that wraps around the month boundary, so rent that
+// last posted on the 31st and now posts on the 1st is 1 day apart, not 30.
+export const circularDayDistance = (a: number, b: number, daysInMonth: number): number => {
+  const diff = Math.abs(a - b);
+  return Math.min(diff, Math.max(0, daysInMonth - diff));
+};
+
+export interface UnmatchedExpense {
+  day: number;
+  amount: number;
+  /** Display name of the charge's merchant, '' when unknown. */
+  merchantName: string;
+}
+
+export interface RenamedPaymentMatch {
+  merchantDisplayName: string;
+  day: number;
+  amount: number;
+}
+
+// Words that appear in most bill payment descriptors and say nothing about
+// who is being paid.
+const GENERIC_NAME_TOKENS = new Set([
+  'payment', 'pay', 'withdrawal', 'card', 'bill', 'autopay', 'online', 'debit',
+  'ach', 'transfer', 'the', 'and', 'inc', 'llc',
+]);
+
+const nameTokens = (name: string): Set<string> =>
+  new Set(
+    name
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter(t => t.length >= 3 && !GENERIC_NAME_TOKENS.has(t)),
+  );
+
+const sharesNameToken = (a: string, b: string): boolean => {
+  const tokensA = nameTokens(a);
+  for (const token of nameTokens(b)) {
+    if (tokensA.has(token)) return true;
+  }
+  return false;
+};
+
+export const matchRenamedRecurringPayments = (
+  liveCharges: RecurringChargeRow[],
+  paidThisMonthByMerchant: ReadonlyMap<string, number>,
+  lastExpenseDateByMerchant: ReadonlyMap<string, string>,
+  unmatchedExpenses: UnmatchedExpense[],
+  daysInMonth: number,
+): RenamedPaymentMatch[] => {
+  const candidates = liveCharges
+    .filter(
+      c =>
+        c.frequency === 'monthly' &&
+        c.averageAmount >= FUZZY_MATCH_MIN_AMOUNT &&
+        !(paidThisMonthByMerchant.get(c.merchantDisplayName) || 0),
+    )
+    // Largest first so the biggest bill (rent) claims its charge before a
+    // smaller series with an overlapping tolerance band can.
+    .sort((a, b) => b.averageAmount - a.averageAmount);
+
+  const used = new Set<number>();
+  const matches: RenamedPaymentMatch[] = [];
+
+  for (const charge of candidates) {
+    const lastSeen = lastExpenseDateByMerchant.get(charge.merchantDisplayName);
+    if (!lastSeen) continue;
+    const usualDay = parseInt(lastSeen.split('-')[2], 10);
+
+    let bestIndex = -1;
+    let bestDiff = Infinity;
+    unmatchedExpenses.forEach((expense, i) => {
+      if (used.has(i)) return;
+      const relativeDiff = Math.abs(expense.amount - charge.averageAmount) / charge.averageAmount;
+      if (relativeDiff > FUZZY_MATCH_TOLERANCE) return;
+      if (circularDayDistance(expense.day, usualDay, daysInMonth) > FUZZY_MATCH_DAY_WINDOW) return;
+      if (!sharesNameToken(expense.merchantName, charge.merchantDisplayName)) return;
+      if (relativeDiff < bestDiff) {
+        bestDiff = relativeDiff;
+        bestIndex = i;
+      }
+    });
+
+    if (bestIndex >= 0) {
+      used.add(bestIndex);
+      const { day, amount } = unmatchedExpenses[bestIndex];
+      matches.push({ merchantDisplayName: charge.merchantDisplayName, day, amount });
+    }
+  }
+
+  return matches;
+};
+
+// Once detection catches up, the same bill can exist as two live series (the
+// old merchant name and the new one). The new name pays, the old one stays
+// unpaid, and the bill would be projected twice. An unpaid monthly series is
+// a superseded alias when a sibling monthly series already paid this month
+// with a similar average and a similar billing day (same thresholds as the
+// renamed payment match) AND the history shows a rename: the old series' last
+// charging month is before the sibling's first one. Two bills that merely look
+// alike (internet $120 on the 2nd, phone $125 on the 5th) charge in the same
+// months, so they are never merged. Returns the merchant names to drop from
+// the fixed-cost projection.
+export const findSupersededSeries = (
+  liveCharges: RecurringChargeRow[],
+  paidThisMonthByMerchant: ReadonlyMap<string, number>,
+  lastExpenseDateByMerchant: ReadonlyMap<string, string>,
+  chargeMonthsByMerchant: ReadonlyMap<string, ReadonlySet<string>>,
+  daysInMonth: number,
+): Set<string> => {
+  const billingDay = (charge: RecurringChargeRow): number | null => {
+    const lastSeen = lastExpenseDateByMerchant.get(charge.merchantDisplayName);
+    return lastSeen ? parseInt(lastSeen.split('-')[2], 10) : null;
+  };
+  // Months are YYYY-MM strings, so lexicographic order is chronological.
+  const lastChargeMonth = (charge: RecurringChargeRow): string | null => {
+    const months = chargeMonthsByMerchant.get(charge.merchantDisplayName);
+    return months && months.size > 0 ? [...months].sort().at(-1)! : null;
+  };
+  const firstChargeMonth = (charge: RecurringChargeRow): string | null => {
+    const months = chargeMonthsByMerchant.get(charge.merchantDisplayName);
+    return months && months.size > 0 ? [...months].sort()[0] : null;
+  };
+  const isPaid = (charge: RecurringChargeRow) =>
+    (paidThisMonthByMerchant.get(charge.merchantDisplayName) || 0) > 0;
+
+  const monthly = liveCharges.filter(
+    c => c.frequency === 'monthly' && c.averageAmount >= FUZZY_MATCH_MIN_AMOUNT,
+  );
+  const paidSiblings = monthly.filter(isPaid);
+  const superseded = new Set<string>();
+
+  for (const charge of monthly) {
+    if (isPaid(charge)) continue;
+    const day = billingDay(charge);
+    if (day === null) continue;
+    const oldLastMonth = lastChargeMonth(charge);
+    if (oldLastMonth === null) continue;
+
+    const hasPaidTwin = paidSiblings.some(sibling => {
+      const siblingDay = billingDay(sibling);
+      if (siblingDay === null) return false;
+      const siblingFirstMonth = firstChargeMonth(sibling);
+      if (siblingFirstMonth === null || oldLastMonth >= siblingFirstMonth) return false;
+      const relativeDiff =
+        Math.abs(sibling.averageAmount - charge.averageAmount) / charge.averageAmount;
+      return (
+        relativeDiff <= FUZZY_MATCH_TOLERANCE &&
+        circularDayDistance(siblingDay, day, daysInMonth) <= FUZZY_MATCH_DAY_WINDOW
+      );
+    });
+    if (hasPaidTwin) superseded.add(charge.merchantDisplayName);
+  }
+
+  return superseded;
+};
+
+export interface ReconcileRecurringInput {
+  /** All recurring series rows, live or not. */
+  charges: RecurringChargeRow[];
+  /** Current-month spend already attributed to a series by merchant name. */
+  paidThisMonthByMerchant: ReadonlyMap<string, number>;
+  lastExpenseDateByMerchant: ReadonlyMap<string, string>;
+  chargeMonthsByMerchant: ReadonlyMap<string, ReadonlySet<string>>;
+  /** Current-month expenses not matched to a series by name. */
+  unmatchedExpenses: UnmatchedExpense[];
+  /** Current-month variable spend by day of month (1 based). */
+  dailyVariable: ReadonlyMap<number, number>;
+  /** YYYY-MM-DD */
+  today: string;
+  daysInMonth: number;
+}
+
+export interface ReconcileRecurringResult {
+  /** Series to project as fixed costs, with superseded aliases removed. */
+  charges: RecurringChargeRow[];
+  paidThisMonthByMerchant: Map<string, number>;
+  /** Index i is day i + 1, length equal to the day of month of `today`. */
+  dailyVariableSpending: number[];
+}
+
+// Moves renamed recurring payments out of variable spend and onto their
+// series, then drops series that are unpaid aliases of a renamed one. Pure:
+// inputs are not mutated.
+export const reconcileRecurringSeries = (
+  input: ReconcileRecurringInput,
+): ReconcileRecurringResult => {
+  const { charges, lastExpenseDateByMerchant, chargeMonthsByMerchant, daysInMonth, today } = input;
+  const paid = new Map(input.paidThisMonthByMerchant);
+  const dailyVariable = new Map(input.dailyVariable);
+
+  const liveCharges = filterLiveCharges(charges, lastExpenseDateByMerchant, today);
+  const renamedPayments = matchRenamedRecurringPayments(
+    liveCharges,
+    paid,
+    lastExpenseDateByMerchant,
+    input.unmatchedExpenses,
+    daysInMonth,
+  );
+  for (const payment of renamedPayments) {
+    paid.set(
+      payment.merchantDisplayName,
+      (paid.get(payment.merchantDisplayName) || 0) + payment.amount,
+    );
+    dailyVariable.set(
+      payment.day,
+      Math.max(0, (dailyVariable.get(payment.day) || 0) - payment.amount),
+    );
+  }
+
+  const superseded = findSupersededSeries(
+    liveCharges,
+    paid,
+    lastExpenseDateByMerchant,
+    chargeMonthsByMerchant,
+    daysInMonth,
+  );
+
+  const dayOfMonth = parseInt(today.split('-')[2], 10);
+  const dailyVariableSpending: number[] = [];
+  for (let d = 1; d <= dayOfMonth; d++) {
+    dailyVariableSpending.push(dailyVariable.get(d) || 0);
+  }
+
+  return {
+    charges: charges.filter(c => !superseded.has(c.merchantDisplayName)),
+    paidThisMonthByMerchant: paid,
+    dailyVariableSpending,
+  };
+};
+
 export const buildFixedCostSeries = (
   charges: RecurringChargeRow[],
   lastExpenseDateByMerchant: ReadonlyMap<string, string>,
   paidThisMonthByMerchant: ReadonlyMap<string, number>,
   today: string,
 ): FixedCostSeries[] => {
-  const cutoffDate = new Date(today);
-  cutoffDate.setUTCDate(cutoffDate.getUTCDate() - LIVE_SERIES_MAX_AGE_DAYS);
-  const cutoff = cutoffDate.toISOString().split('T')[0];
-
-  return charges
-    .filter(c => {
-      if (livenessWindowDays[c.frequency] === null) return true;
-      const lastSeen = lastExpenseDateByMerchant.get(c.merchantDisplayName);
-      return !!lastSeen && lastSeen >= cutoff;
-    })
+  return filterLiveCharges(charges, lastExpenseDateByMerchant, today)
     .map(c => ({
       // Weekly and yearly charges are normalized to a monthly equivalent.
       // A yearly charge contributes 1/12 here but its full amount to paid

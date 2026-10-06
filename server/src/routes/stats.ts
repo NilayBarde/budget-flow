@@ -1,7 +1,12 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
-import { buildFixedCostSeries, computeSpendingVelocity } from '../services/spending-velocity.js';
+import {
+  buildFixedCostSeries,
+  computeSpendingVelocity,
+  reconcileRecurringSeries,
+  type UnmatchedExpense,
+} from '../services/spending-velocity.js';
 import {
   rankTopCategories,
   buildCategoryTrends,
@@ -266,6 +271,9 @@ router.get('/insights', asyncHandler(async (req, res) => {
 
     // ── Top Merchants ──────────────────────────────────────────────────
     const merchantMap = new Map<string, MerchantAggregate>();
+    // Calendar months (YYYY-MM) each merchant charged in, used to tell a
+    // renamed recurring series apart from a similar looking separate bill.
+    const chargeMonthsByMerchant = new Map<string, Set<string>>();
 
     // ── Daily variable spend (current month only) ──────────────────────
     // Only covers days elapsed so far (for velocity projection); trailing
@@ -288,6 +296,9 @@ router.get('/insights', asyncHandler(async (req, res) => {
     // ── Spending velocity (current month) ──────────────────────────────
     let currentMonthSpent = 0;
     const recurringPaidByMerchant = new Map<string, number>();
+    // Current-month expenses not matched to a recurring series by name; a
+    // second pass attributes renamed recurring payments (see below).
+    const unmatchedExpenses: UnmatchedExpense[] = [];
     let prevMonthTotalSpent = 0;
 
     // ── Process all transactions ───────────────────────────────────────
@@ -295,7 +306,6 @@ router.get('/insights', asyncHandler(async (req, res) => {
       const transactionType = t.transaction_type || (t.amount > 0 ? 'expense' : 'income');
       if (transactionType === 'transfer') return;
 
-      const txDate = new Date(t.date);
       // Use string parsing for month/year to avoid timezone shifts
       const dateParts = t.date.split('-');
       const txMonth = parseInt(dateParts[1], 10);
@@ -319,6 +329,9 @@ router.get('/insights', asyncHandler(async (req, res) => {
         // Top merchants (all 6 months aggregated)
         const merchant = t.merchant_display_name || t.merchant_name;
         if (merchant && amountToCount > 0) {
+          const months = chargeMonthsByMerchant.get(merchant) ?? new Set<string>();
+          months.add(monthKey);
+          chargeMonthsByMerchant.set(merchant, months);
           const existing = merchantMap.get(merchant);
           if (existing) {
             existing.totalSpent += amountToCount;
@@ -336,7 +349,7 @@ router.get('/insights', asyncHandler(async (req, res) => {
 
         // Current-month velocity tracking
         if (txMonth === currentMonth && txYear === currentYear) {
-          const day = txDate.getDate();
+          const day = parseInt(dateParts[2], 10);
           currentMonthSpent += amountToCount;
 
           // Track recurring vs variable for velocity
@@ -349,6 +362,9 @@ router.get('/insights', asyncHandler(async (req, res) => {
             );
           } else {
             dailyVariable.set(day, (dailyVariable.get(day) || 0) + amountToCount);
+            if (amountToCount > 0) {
+              unmatchedExpenses.push({ day, amount: amountToCount, merchantName: merchantName || '' });
+            }
           }
         }
 
@@ -384,7 +400,7 @@ router.get('/insights', asyncHandler(async (req, res) => {
 
         // Current-month velocity tracking
         if (txMonth === currentMonth && txYear === currentYear) {
-          const day = txDate.getDate();
+          const day = parseInt(dateParts[2], 10);
           dailyVariable.set(day, Math.max(0, (dailyVariable.get(day) || 0) - returnAmount));
           currentMonthSpent = Math.max(0, currentMonthSpent - returnAmount);
         }
@@ -427,11 +443,6 @@ router.get('/insights', asyncHandler(async (req, res) => {
     const topMerchants = buildTopMerchants(merchantMap);
 
     // ── Build spending velocity ────────────────────────────────────────
-    const dailyVariableSpending: number[] = [];
-    for (let d = 1; d <= today; d++) {
-      dailyVariableSpending.push(dailyVariable.get(d) || 0);
-    }
-
     // Only recurring series whose merchant has actually charged recently
     // count as fixed costs; merchantMap already holds each merchant's most
     // recent expense date across the 6-month window.
@@ -439,14 +450,32 @@ router.get('/insights', asyncHandler(async (req, res) => {
       Array.from(merchantMap.values()).map(m => [m.merchantName, m.lastDate]),
     );
     const todayStr = `${currentYear}-${String(currentMonth).padStart(2, '0')}-${String(today).padStart(2, '0')}`;
-    const fixedCostSeries = buildFixedCostSeries(
-      (recurringCharges || []).map(r => ({
-        merchantDisplayName: r.merchant_display_name,
-        averageAmount: r.average_amount,
-        frequency: r.frequency as RecurringFrequency,
-      })),
+    const recurringChargeRows = (recurringCharges || []).map(r => ({
+      merchantDisplayName: r.merchant_display_name,
+      averageAmount: r.average_amount,
+      frequency: r.frequency as RecurringFrequency,
+    }));
+
+    // A recurring bill that posted under a different merchant name than its
+    // series (rent via a payment processor) was counted as variable spend
+    // above. Move it to its series so it is neither extrapolated across the
+    // month nor projected a second time as an unpaid fixed cost.
+    const reconciled = reconcileRecurringSeries({
+      charges: recurringChargeRows,
+      paidThisMonthByMerchant: recurringPaidByMerchant,
       lastExpenseDateByMerchant,
-      recurringPaidByMerchant,
+      chargeMonthsByMerchant,
+      unmatchedExpenses,
+      dailyVariable,
+      today: todayStr,
+      daysInMonth,
+    });
+    const dailyVariableSpending = reconciled.dailyVariableSpending;
+
+    const fixedCostSeries = buildFixedCostSeries(
+      reconciled.charges,
+      lastExpenseDateByMerchant,
+      reconciled.paidThisMonthByMerchant,
       todayStr,
     );
 
