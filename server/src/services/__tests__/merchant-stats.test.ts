@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
+  addMerchantSpend,
   buildTopMerchants,
+  merchantKey,
+  subtractMerchantReturn,
   type MerchantAggregate,
 } from '../merchant-stats.js';
 
@@ -62,5 +65,40 @@ describe('buildTopMerchants', () => {
     const top = buildTopMerchants(map);
 
     expect(top[0].avgTransaction).toBe(0);
+  });
+});
+
+describe('merchantKey', () => {
+  it('prefers the display name, then the Plaid name, then null', () => {
+    expect(merchantKey({ merchant_display_name: 'Bilt Housing Payment', merchant_name: 'Bps*bilt' })).toBe('Bilt Housing Payment');
+    expect(merchantKey({ merchant_display_name: null, merchant_name: 'Amazon' })).toBe('Amazon');
+    expect(merchantKey({ merchant_display_name: '', merchant_name: null })).toBeNull();
+    expect(merchantKey({})).toBeNull();
+  });
+});
+
+describe('addMerchantSpend and subtractMerchantReturn', () => {
+  it('accumulates spend, counts transactions and keeps the latest date', () => {
+    const map = new Map<string, MerchantAggregate>();
+    addMerchantSpend(map, 'Amazon', 20, '2026-05-10');
+    addMerchantSpend(map, 'Amazon', 30, '2026-03-01');
+
+    expect(map.get('Amazon')).toEqual({
+      merchantName: 'Amazon',
+      totalSpent: 50,
+      transactionCount: 2,
+      lastDate: '2026-05-10',
+    });
+  });
+
+  it('nets a return off the total but never below zero, and ignores unknown merchants', () => {
+    const map = new Map<string, MerchantAggregate>();
+    addMerchantSpend(map, 'Amazon', 20, '2026-05-10');
+
+    subtractMerchantReturn(map, 'Amazon', 50);
+    subtractMerchantReturn(map, 'Unknown', 10);
+
+    expect(map.get('Amazon')?.totalSpent).toBe(0);
+    expect(map.has('Unknown')).toBe(false);
   });
 });

@@ -8,6 +8,8 @@ interface Row {
   is_split: boolean;
   category: { id: string; name: string; color: string; icon: string } | null;
   splits: { amount: number; is_my_share: boolean }[] | null;
+  merchant_name?: string | null;
+  merchant_display_name?: string | null;
 }
 
 // A fake table that behaves like PostgREST: it returns at most 1000 rows, and only a different slice
@@ -92,6 +94,61 @@ describe('buildYearlyStats', () => {
     expect(stats.monthly_totals[4].spent).toBe(70);
     expect(stats.monthly_totals[5].spent).toBe(0);
     expect(stats.category_totals[0].amount).toBe(0);
+  });
+
+  it('ranks merchants across the whole year, preferring the display name and netting returns', () => {
+    const stats = buildYearlyStats(2026, [
+      row({ amount: 2375, date: '2026-01-02', merchant_name: 'Bps*bilt Rent', merchant_display_name: 'Bilt Housing Payment' }),
+      row({ amount: 1247.5, date: '2026-09-03', merchant_display_name: 'Bilt Housing Payment' }),
+      row({ amount: 40, date: '2026-03-04', merchant_name: 'Trader Joe\'s' }),
+      row({ amount: 25, date: '2026-03-05', merchant_name: 'Amazon' }),
+      row({ amount: -25, date: '2026-03-06', transaction_type: 'return', merchant_name: 'Amazon' }),
+      row({ amount: 5000, transaction_type: 'transfer', merchant_name: 'Payment' }),
+    ]);
+
+    expect(stats.top_merchants.map(m => m.merchantName)).toEqual(['Bilt Housing Payment', 'Trader Joe\'s']);
+    expect(stats.top_merchants[0]).toMatchObject({ totalSpent: 3622.5, transactionCount: 2, lastDate: '2026-09-03' });
+  });
+
+  it('counts only my share of a split expense toward a merchant', () => {
+    const stats = buildYearlyStats(2026, [
+      row({
+        amount: 4640,
+        is_split: true,
+        merchant_display_name: 'Bilt Housing Payment',
+        splits: [{ amount: 2402.5, is_my_share: true }, { amount: 2237.5, is_my_share: false }],
+      }),
+    ]);
+
+    expect(stats.top_merchants).toHaveLength(1);
+    expect(stats.top_merchants[0].totalSpent).toBe(2402.5);
+  });
+
+  it('drops a merchant that was fully refunded, even when the refund lands in a later month', () => {
+    const stats = buildYearlyStats(2026, [
+      row({ amount: 80, date: '2026-02-03', merchant_name: 'Turo' }),
+      row({ amount: -80, date: '2026-07-20', transaction_type: 'return', merchant_name: 'Turo' }),
+      row({ amount: 12, merchant_name: 'Hyprn Cafe' }),
+    ]);
+
+    expect(stats.top_merchants.map(m => m.merchantName)).toEqual(['Hyprn Cafe']);
+  });
+
+  it('keeps only the 10 biggest merchants of the year', () => {
+    const stats = buildYearlyStats(
+      2026,
+      Array.from({ length: 12 }, (_, i) => row({ amount: 100 + i, merchant_name: `Merchant ${i}` })),
+    );
+
+    expect(stats.top_merchants).toHaveLength(10);
+    expect(stats.top_merchants[0].merchantName).toBe('Merchant 11');
+    expect(stats.top_merchants.map(m => m.merchantName)).not.toContain('Merchant 0');
+  });
+
+  it('ignores a merchant name on a row that has none', () => {
+    const stats = buildYearlyStats(2026, [row({ amount: 20 }), row({ amount: -5, transaction_type: 'return' })]);
+
+    expect(stats.top_merchants).toEqual([]);
   });
 
   it('ignores transfers', () => {

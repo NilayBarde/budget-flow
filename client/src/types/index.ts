@@ -195,6 +195,7 @@ export interface YearlyStats {
   year: number;
   monthly_totals: { month: number; spent: number; income: number; invested: number }[];
   category_totals: { category: Category; amount: number }[];
+  top_merchants: InsightsTopMerchant[];
   total_spent: number;
   total_income: number;
   total_invested: number;
@@ -251,7 +252,6 @@ export interface InsightsTopCategory {
 export interface InsightsData {
   categoryTrends: InsightsCategoryTrend[];
   topCategories: InsightsTopCategory[];
-  topMerchants: InsightsTopMerchant[];
   spendingVelocity: InsightsSpendingVelocity;
   monthOverMonth: InsightsMonthOverMonth;
 }

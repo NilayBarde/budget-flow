@@ -1,6 +1,14 @@
 import { supabase } from '../db/supabase.js';
 import { fetchAllRows } from '../utils/paginate.js';
 import { getMyShareAmount } from './category-spend.js';
+import {
+  addMerchantSpend,
+  buildTopMerchants,
+  merchantKey,
+  subtractMerchantReturn,
+  type MerchantAggregate,
+  type TopMerchant,
+} from './merchant-stats.js';
 import type { CategoryData } from '../types/stats.js';
 
 export interface YearlyRow {
@@ -9,6 +17,8 @@ export interface YearlyRow {
   date: string;
   transaction_type: string | null;
   is_split: boolean;
+  merchant_name?: string | null;
+  merchant_display_name?: string | null;
   category: CategoryData | null;
   splits: { amount: number; is_my_share: boolean }[] | null;
 }
@@ -24,6 +34,7 @@ export interface YearlyStats {
   year: number;
   monthly_totals: MonthlyTotals[];
   category_totals: { category: CategoryData; amount: number }[];
+  top_merchants: TopMerchant[];
   total_spent: number;
   total_income: number;
   total_invested: number;
@@ -44,7 +55,13 @@ export const buildYearlyStats = (year: number, transactions: YearlyRow[]): Yearl
   let totalIncome = 0;
   let totalInvested = 0;
   const categoryTotals = new Map<string, { category: CategoryData; amount: number }>();
-  const returns: { amount: number; month: number; category: CategoryData | null }[] = [];
+  const merchantMap = new Map<string, MerchantAggregate>();
+  const returns: {
+    amount: number;
+    month: number;
+    category: CategoryData | null;
+    merchant: string | null;
+  }[] = [];
 
   // Pass 1: accumulate expenses, income, investments
   for (const t of transactions) {
@@ -71,11 +88,21 @@ export const buildYearlyStats = (year: number, transactions: YearlyRow[]): Yearl
           categoryTotals.set(t.category.id, { category: t.category, amount: amountToCount });
         }
       }
+
+      const merchant = merchantKey(t);
+      if (merchant && amountToCount > 0) {
+        addMerchantSpend(merchantMap, merchant, amountToCount, t.date);
+      }
     } else if (transactionType === 'return') {
       // Returns respect splits like everywhere else (only my share nets out)
       const returnAmount = getMyShareAmount(t);
       totalReturns += returnAmount;
-      returns.push({ amount: returnAmount, month, category: t.category });
+      returns.push({
+        amount: returnAmount,
+        month,
+        category: t.category,
+        merchant: merchantKey(t),
+      });
     } else if (transactionType === 'income') {
       const incomeAmount = Math.abs(t.amount);
       totalIncome += incomeAmount;
@@ -91,6 +118,7 @@ export const buildYearlyStats = (year: number, transactions: YearlyRow[]): Yearl
         existing.amount = Math.max(0, existing.amount - ret.amount);
       }
     }
+    if (ret.merchant) subtractMerchantReturn(merchantMap, ret.merchant, ret.amount);
     monthlyTotals[ret.month].spent = Math.max(0, monthlyTotals[ret.month].spent - ret.amount);
   }
 
@@ -98,6 +126,7 @@ export const buildYearlyStats = (year: number, transactions: YearlyRow[]): Yearl
     year,
     monthly_totals: monthlyTotals,
     category_totals: Array.from(categoryTotals.values()).sort((a, b) => b.amount - a.amount),
+    top_merchants: buildTopMerchants(merchantMap),
     // Total spent = gross expenses - returns (same formula as the transactions page)
     total_spent: Math.max(0, grossExpenses - totalReturns),
     total_income: totalIncome,
@@ -121,6 +150,8 @@ export const loadYearlyStats = async (year: number): Promise<YearlyStats> => {
           date,
           transaction_type,
           is_split,
+          merchant_name,
+          merchant_display_name,
           category:categories(id, name, color, icon),
           splits:transaction_splits(amount, is_my_share)
         `)
