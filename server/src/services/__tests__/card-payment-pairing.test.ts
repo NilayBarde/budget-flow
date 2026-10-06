@@ -215,6 +215,13 @@ describe('findCardPaymentCounterparts', () => {
       expect(findCardPaymentCounterparts([card, mortgage])).toEqual([]);
     });
 
+    it('trusts a transfer the user typed by hand even if its text mentions a loan', () => {
+      // "Chase Card Services Loan Payment" is a real card payment the user confirmed as a transfer.
+      const card = cardInflow({ amount: -250, transaction_type: 'return', plaid_primary: 'OTHER', description: 'PAYMENT THANK YOU' });
+      const bank = bankOutflow({ amount: 250, transaction_type: 'transfer', type_manually_set: true, description: 'Chase Card Services Loan Payment' });
+      expect(findCardPaymentCounterparts([card, bank])).toEqual([card.id]);
+    });
+
     it('does not pair a mortgage, loan or insurance payment to the card issuer', () => {
       // Same bank, same cents: a card payment with payment wording, and an unrelated mortgage payment.
       const card = cardInflow({ amount: -412, description: 'PAYMENT THANK YOU', account_label: 'Wells Fargo Visa Signature' });

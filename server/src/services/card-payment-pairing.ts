@@ -101,8 +101,10 @@ const distinctiveWords = (text?: string | null): Set<string> =>
 // Without this, an unrelated purchase that happens to match an amount would be hidden.
 const looksLikeFundingForCard = (bank: PairingRow, card: PairingRow): boolean => {
   if (bank.plaid_detailed === BANK_CARD_PAYMENT_PFC_DETAILED) return true;
-  // Checked before the transfer type: detection also types "mortgage payment" text as a transfer,
-  // and that says nothing about a card.
+  // A transfer the user typed by hand is their decision, whatever the text says.
+  if (bank.type_manually_set && bank.transaction_type === 'transfer') return true;
+  // Checked before the automatic transfer type: detection also types "mortgage payment" text as a
+  // transfer, and that says nothing about a card.
   if (NOT_A_CARD_PAYMENT_WORDS.test(bank.description ?? '')) return false;
   if (bank.transaction_type === 'transfer') return true;
 
