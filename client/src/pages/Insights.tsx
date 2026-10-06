@@ -9,10 +9,13 @@ import {
 import { Card, CardHeader, Spinner, EmptyState, ErrorState, YearSelector } from '../components/ui';
 import { useInsights, useYearlyStats } from '../hooks';
 import { SpendingTrend } from '../components/dashboard/SpendingTrend';
+import { DailySpending } from '../components/dashboard/DailySpending';
+import { SpendingPace } from '../components/dashboard/SpendingPace';
 import { SubscriptionOverview } from '../components/insights/SubscriptionOverview';
 import { formatCurrency } from '../utils/formatters';
 
 const CURRENT_YEAR = new Date().getFullYear();
+const CURRENT_MONTH = new Date().getMonth() + 1;
 
 export const Insights = () => {
   const [year, setYear] = useState(CURRENT_YEAR);
@@ -107,6 +110,14 @@ export const Insights = () => {
           className="flex-1 md:flex-initial md:w-fit"
         />
       </div>
+
+      {/* ── This month: how today's spending is tracking ─────────────── */}
+      {isCurrentYear && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+          <DailySpending month={CURRENT_MONTH} year={CURRENT_YEAR} />
+          <SpendingPace />
+        </div>
+      )}
 
       {/* ── Yearly Overview Cards ───────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
