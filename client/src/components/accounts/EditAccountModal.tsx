@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useUpdateAccount } from '../../hooks';
 import { Modal, Button, Input, Select } from '../ui';
 import type { Account } from '../../types';
+import { isManualAccount } from '../../utils/account-types';
 
 interface EditAccountModalProps {
     isOpen: boolean;
@@ -25,7 +26,7 @@ const ACCOUNT_TYPES = [
 
 export const EditAccountModal = ({ isOpen, onClose, account }: EditAccountModalProps) => {
     const updateAccount = useUpdateAccount();
-    const isManual = account.plaid_access_token === 'manual' || account.plaid_item_id.startsWith('manual-');
+    const isManual = isManualAccount(account);
     const [name, setName] = useState(account.account_name);
     const [type, setType] = useState(account.account_type);
     const [balance, setBalance] = useState(account.current_balance?.toString() || '0');

@@ -1,6 +1,8 @@
 import { useMonthlyStats } from './useBudget';
 import { useExpectedIncome } from './useAppSettings';
 import { useInvestmentSummary } from './useInvestments';
+import { computeCashFlow } from '../utils/cash-flow';
+import { isCurrentMonth } from '../utils/month';
 
 export const useFinancialHealth = (month: number, year: number) => {
     const { data: stats, isLoading: statsLoading } = useMonthlyStats(month, year);
@@ -15,8 +17,15 @@ export const useFinancialHealth = (month: number, year: number) => {
     // Estimated Savings: Money remaining after expenses, available for saving or investing
     const estimatedSavings = expectedIncome - totalSpent;
 
-    // Net Position: Cash flow remaining after expenses AND investments
-    const netPosition = expectedIncome - totalSpent - totalInvested;
+    // Cash flow remaining after expenses AND investments, from income actually received
+    const viewingCurrentMonth = isCurrentMonth(month, year);
+    const { cashFlow: netPosition, projectedCashFlow } = computeCashFlow({
+        actualIncome,
+        expectedIncome,
+        totalSpent,
+        totalInvested,
+        isCurrentMonth: viewingCurrentMonth,
+    });
 
     // Savings Rate: Percentage of income saved (before investments)
     const savingsRate = expectedIncome > 0
@@ -31,6 +40,8 @@ export const useFinancialHealth = (month: number, year: number) => {
         pendingSpent,
         estimatedSavings,
         netPosition,
+        projectedCashFlow,
+        isCurrentMonth: viewingCurrentMonth,
         savingsRate,
         netWorth: investmentSummary?.netWorth ?? 0,
         isLoading: statsLoading || incomeLoading || investmentLoading,
