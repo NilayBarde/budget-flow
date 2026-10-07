@@ -78,6 +78,16 @@ describe('Transactions month', () => {
     expect(await screen.findByText('shared month 2/2025')).toBeTruthy();
   });
 
+  it.each(['month=13&year=2026', 'month=abc&year=2026', 'date=garbage'])(
+    'ignores the invalid link ?%s and keeps the shared month',
+    async (query) => {
+      visit(`/transactions?${query}`, { month: 8, year: 2025 });
+
+      expect(screen.getByText('filter month 8/2025')).toBeTruthy();
+      expect(await screen.findByText('shared month 8/2025')).toBeTruthy();
+    },
+  );
+
   it('opens a ?month=&year= link on that month and makes it the shared month', async () => {
     visit('/transactions?month=6&year=2024');
 

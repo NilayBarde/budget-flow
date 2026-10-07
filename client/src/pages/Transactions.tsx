@@ -6,6 +6,7 @@ import { Button, ErrorState } from '../components/ui';
 import { useTransactions, useAccounts, useCategories, useTags, useBulkAddTagToTransactions, useDeleteTransaction, useBulkDeleteTransactions, useExpectedIncome, useDebouncedValue, usePrefetchAdjacentMonths, useMonthNavigation } from '../hooks';
 import type { Transaction, TransactionFilters as Filters, TransactionType } from '../types';
 import { computeTransactionTotals, filterByType } from '../utils/transactionTotals';
+import { monthFromSearchParams } from '../utils/month';
 import { sortTransactions, filterByAmountRange, type TransactionSortOption } from '../utils/transactionSort';
 
 type TypeFilter = TransactionType | 'all';
@@ -27,20 +28,8 @@ export const Transactions = () => {
   // Build initial filters from URL search params (e.g. ?date=2026-02-07),
   // falling back to the month selected on the other pages.
   const [filters, setFilters] = useState<Filters>(() => {
-    const dateParam = searchParams.get('date');
-    if (dateParam) {
-      const d = new Date(dateParam + 'T00:00:00');
-      return { month: d.getMonth() + 1, year: d.getFullYear(), date: dateParam };
-    }
-
-    // Check for explicit month/year params
-    const monthParam = searchParams.get('month');
-    const yearParam = searchParams.get('year');
-    if (monthParam && yearParam) {
-      return { month: parseInt(monthParam), year: parseInt(yearParam) };
-    }
-
-    return { month, year };
+    // An invalid link yields null and falls back to the selected month.
+    return monthFromSearchParams(searchParams) ?? { month, year };
   });
   // Keep the shared month in step with this page (month arrows, a picked date, or a
   // ?date= link), so the other pages open on the month you were last looking at.
