@@ -44,11 +44,14 @@ export const Transactions = () => {
   });
   // Keep the shared month in step with this page (month arrows, a picked date, or a
   // ?date= link), so the other pages open on the month you were last looking at.
+  const filterMonth = filters.month;
+  const filterYear = filters.year;
   useEffect(() => {
-    if (!filters.month || !filters.year) return;
-    const { month: m, year: y } = filters;
-    setCurrentDate((prev) => (prev.month === m && prev.year === y ? prev : { month: m, year: y }));
-  }, [filters.month, filters.year, setCurrentDate]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!filterMonth || !filterYear) return;
+    setCurrentDate((prev) => (
+      prev.month === filterMonth && prev.year === filterYear ? prev : { month: filterMonth, year: filterYear }
+    ));
+  }, [filterMonth, filterYear, setCurrentDate]);
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [sort, setSort] = useState<TransactionSortOption>('date_desc');
   // Amount range filter, kept as raw input strings so partial typing works

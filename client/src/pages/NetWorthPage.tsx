@@ -13,7 +13,7 @@ import { getMonthYear } from '../utils/formatters';
 export const NetWorthPage = () => {
     // No month selector here, so the projection always starts from the current month
     // rather than whatever month is selected on the other pages.
-    const currentDate = useMemo(() => getMonthYear(), []);
+    const currentDate = getMonthYear();
     const { data: appSettings } = useAppSettings();
     const updateSetting = useUpdateAppSetting();
 
