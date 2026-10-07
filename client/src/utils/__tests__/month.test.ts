@@ -1,5 +1,50 @@
 import { describe, it, expect } from 'vitest';
-import { isCurrentMonth } from '../month';
+import { isCurrentMonth, monthFromSearchParams } from '../month';
+
+describe('monthFromSearchParams', () => {
+  const parse = (query: string) => monthFromSearchParams(new URLSearchParams(query));
+
+  it('reads the month of a ?date= link and keeps the date', () => {
+    expect(parse('date=2025-02-07')).toEqual({ month: 2, year: 2025, date: '2025-02-07' });
+  });
+
+  it('reads ?month=&year=', () => {
+    expect(parse('month=6&year=2024')).toEqual({ month: 6, year: 2024 });
+  });
+
+  it('prefers the date over month and year', () => {
+    expect(parse('date=2025-02-07&month=6&year=2024')).toEqual({ month: 2, year: 2025, date: '2025-02-07' });
+  });
+
+  it('is null when there is nothing to read', () => {
+    expect(parse('')).toBeNull();
+    expect(parse('month=6')).toBeNull();
+  });
+
+  it.each([
+    'month=13&year=2026',
+    'month=0&year=2026',
+    'month=abc&year=2026',
+    'month=6.5&year=2026',
+    'month=6&year=abc',
+    'month=6&year=99999',
+  ])('rejects the invalid link ?%s', (query) => {
+    expect(parse(query)).toBeNull();
+  });
+
+  it.each([
+    'date=garbage',
+    'date=2025-13-01',
+    'date=2025-02-31',
+    'date=2025-2-7',
+  ])('rejects the invalid link ?%s', (query) => {
+    expect(parse(query)).toBeNull();
+  });
+
+  it('does not fall back to month and year when the date is invalid', () => {
+    expect(parse('date=garbage&month=6&year=2024')).toBeNull();
+  });
+});
 
 // Months are 1 based, matching the dashboard and the stats API.
 const NOW = new Date(2026, 9, 6); // October 6, 2026

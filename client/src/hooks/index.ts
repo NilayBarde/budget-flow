@@ -8,6 +8,7 @@ export * from './useRecurring';
 export * from './useInvestments';
 export * from './useInsights';
 export * from './useAppSettings';
+export { MonthProvider } from './MonthProvider';
 export * from './useMonthNavigation';
 export * from './usePrefetchAdjacentMonths';
 export * from './useModalState';

@@ -6,12 +6,14 @@ import {
     useAppSettings,
     useFinancialHealth,
     useInvestmentSummary,
-    useMonthNavigation,
 } from '../hooks';
 import { Spinner } from '../components/ui';
+import { getMonthYear } from '../utils/formatters';
 
 export const NetWorthPage = () => {
-    const { currentDate } = useMonthNavigation();
+    // No month selector here, so the projection always starts from the current month
+    // rather than whatever month is selected on the other pages.
+    const { month, year } = getMonthYear();
     const { data: appSettings } = useAppSettings();
     const updateSetting = useUpdateAppSetting();
 
@@ -21,7 +23,7 @@ export const NetWorthPage = () => {
         totalInvested,
         netWorth,
         isLoading: healthLoading,
-    } = useFinancialHealth(currentDate.month, currentDate.year);
+    } = useFinancialHealth(month, year);
 
     const { data: investmentSummary } = useInvestmentSummary();
     const totalInvestmentValue = investmentSummary?.investments.totalValue ?? 0;

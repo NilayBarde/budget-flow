@@ -1,13 +1,14 @@
-import { useState, useCallback } from 'react';
-import { getMonthYear } from '../utils/formatters';
+import { useCallback, useContext } from 'react';
+import { MonthContext, type MonthYear } from './MonthContext';
 
-export interface MonthYear {
-  month: number;
-  year: number;
-}
+export type { MonthYear };
 
-export const useMonthNavigation = (initial?: MonthYear) => {
-  const [currentDate, setCurrentDate] = useState<MonthYear>(initial ?? getMonthYear());
+export const useMonthNavigation = () => {
+  const context = useContext(MonthContext);
+  if (!context) {
+    throw new Error('useMonthNavigation must be used inside a MonthProvider');
+  }
+  const { currentDate, setCurrentDate } = context;
 
   const handlePrevMonth = useCallback(() => {
     setCurrentDate((prev) => {
@@ -19,7 +20,7 @@ export const useMonthNavigation = (initial?: MonthYear) => {
       }
       return { month: newMonth, year: newYear };
     });
-  }, []);
+  }, [setCurrentDate]);
 
   const handleNextMonth = useCallback(() => {
     setCurrentDate((prev) => {
@@ -31,7 +32,7 @@ export const useMonthNavigation = (initial?: MonthYear) => {
       }
       return { month: newMonth, year: newYear };
     });
-  }, []);
+  }, [setCurrentDate]);
 
   return { currentDate, setCurrentDate, handlePrevMonth, handleNextMonth };
 };
