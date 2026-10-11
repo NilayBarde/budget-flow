@@ -36,6 +36,17 @@ const PlaidLinkUpdate = ({ token, onSuccess, onExit, institutionName }: PlaidLin
   return null; // This component doesn't render anything visible
 };
 
+// Marks an account that was disconnected from Plaid (Disconnect, keeps history)
+const DisconnectedPill = () => (
+  <span
+    className="inline-flex items-center gap-1 text-xs font-medium text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/30 flex-shrink-0"
+    title="Disconnected from Plaid. Its transaction history is kept; add new activity with CSV imports."
+  >
+    <Unlink className="h-3 w-3" />
+    Disconnected
+  </span>
+);
+
 interface RemoveMenuItemsProps {
   isManual: boolean;
   onDisconnect: () => void;
@@ -117,9 +128,10 @@ export const AccountCard = ({ account, connectionAccountNames, onImportCsv, onVi
   const desktopMenuRef = useRef<HTMLDivElement>(null);
 
   const isManual = isManualAccount(account);
+  const isDisconnected = isDisconnectedAccount(account);
   // A manual account with no imports is a warning, unless it was disconnected from Plaid with its history kept
   const importStatus = [
-    isDisconnectedAccount(account) && 'Disconnected from Plaid, history kept',
+    isDisconnected && 'History kept',
     account.last_csv_import_at && `Last imported: ${formatDate(account.last_csv_import_at)}`,
   ].filter(Boolean).join(' · ') || 'No imports yet';
   const importStatusWarns = importStatus === 'No imports yet';
@@ -323,7 +335,13 @@ export const AccountCard = ({ account, connectionAccountNames, onImportCsv, onVi
         />
       )}
 
-      <Card className="hover:border-midnight-500 transition-colors" padding="sm">
+      <Card
+        className={clsx(
+          'transition-colors',
+          isDisconnected ? 'border-dashed border-amber-500/50! hover:border-amber-500/70!' : 'hover:border-midnight-500',
+        )}
+        padding="sm"
+      >
         {/* The bank login expired: offer the reconnect flow right on the card */}
         {account.needs_reauth && !isManual && (
           <ReconnectNotice onReconnect={handleOpenUpdateLink} isLoading={createUpdateLinkToken.isPending} />
@@ -345,7 +363,10 @@ export const AccountCard = ({ account, connectionAccountNames, onImportCsv, onVi
         <div className="md:hidden">
           <div className="flex items-start gap-3">
             <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold flex-shrink-0"
+              className={clsx(
+                'w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold flex-shrink-0',
+                isDisconnected && 'opacity-50 grayscale',
+              )}
               style={{ backgroundColor: institutionColor }}
             >
               {account.institution_name.charAt(0).toUpperCase()}
@@ -353,7 +374,10 @@ export const AccountCard = ({ account, connectionAccountNames, onImportCsv, onVi
 
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between gap-2">
-                <h3 className="font-semibold text-slate-100 truncate">{account.institution_name}</h3>
+                <div className="flex items-center gap-2 min-w-0">
+                  <h3 className="font-semibold text-slate-100 truncate">{account.institution_name}</h3>
+                  {isDisconnected && <DisconnectedPill />}
+                </div>
                 <BalanceDisplay />
               </div>
               <p className="text-sm text-slate-400 truncate">
@@ -505,7 +529,10 @@ export const AccountCard = ({ account, connectionAccountNames, onImportCsv, onVi
         {/* Desktop Layout */}
         <div className="hidden md:flex items-center gap-4">
           <div
-            className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold"
+            className={clsx(
+              'w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold',
+              isDisconnected && 'opacity-50 grayscale',
+            )}
             style={{ backgroundColor: institutionColor }}
           >
             {account.institution_name.charAt(0).toUpperCase()}
@@ -514,6 +541,7 @@ export const AccountCard = ({ account, connectionAccountNames, onImportCsv, onVi
           <div className="flex-1">
             <div className="flex items-center gap-3">
               <h3 className="font-semibold text-slate-100">{account.institution_name}</h3>
+              {isDisconnected && <DisconnectedPill />}
               <BalanceDisplay />
             </div>
             <p className="text-sm text-slate-400">
