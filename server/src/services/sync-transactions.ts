@@ -7,6 +7,7 @@ import { reconcilePendingTransaction } from './pending-reconciliation.js';
 import { reconcileCardPaymentsAfterSync } from './card-payment-reconciliation.js';
 import { redactError } from './plaid-errors.js';
 import type { SyncResult } from './plaid.js';
+import { adoptionKey, pickAdoptableTransaction, type AdoptionCandidate } from './relink.js';
 
 // Every way a Plaid sync reaches the database (manual sync, webhook, first link) goes through
 // here, so a transaction is typed, categorized and saved the same way whichever path delivered it.
@@ -176,12 +177,50 @@ const recordSuccessfulSync = async (plaidItemId: string, nextCursor: string, his
   if (error) throw error;
 
   if (historicalComplete) {
+    // The whole history has arrived, so a re-linked account has nothing left to adopt.
     const { error: historyError } = await supabase
       .from('accounts')
-      .update({ historical_sync_complete: true })
+      .update({ historical_sync_complete: true, relinked_at: null })
       .eq('plaid_item_id', plaidItemId);
     if (historyError) throw historyError;
   }
+};
+
+const PAGE_SIZE = 1000;
+
+/**
+ * The stored rows a re-linked Item's transactions may already be, grouped by account, date and
+ * amount. Only rows stored before the re-link count, so rows the new Item has just inserted never
+ * adopt each other. Accounts stay in this state (relinked_at is set) until Plaid has delivered the
+ * whole history, however many syncs that takes. Loaded once per sync, not once per transaction.
+ */
+const loadAdoptionCandidates = async (plaidItemId: string): Promise<Map<string, AdoptionCandidate[]>> => {
+  const index = new Map<string, AdoptionCandidate[]>();
+  const { data: relinked, error } = await supabase
+    .from('accounts')
+    .select('id, relinked_at')
+    .eq('plaid_item_id', plaidItemId)
+    .not('relinked_at', 'is', null);
+  if (error) throw error;
+
+  for (const account of relinked ?? []) {
+    for (let from = 0; ; from += PAGE_SIZE) {
+      const { data: rows, error: rowsError } = await supabase
+        .from('transactions')
+        .select('id, date, amount, plaid_transaction_id, original_description')
+        .eq('account_id', account.id)
+        .lt('created_at', account.relinked_at)
+        .not('plaid_transaction_id', 'is', null)
+        .range(from, from + PAGE_SIZE - 1);
+      if (rowsError) throw rowsError;
+      for (const row of rows ?? []) {
+        const key = adoptionKey(account.id, row.date, row.amount);
+        index.set(key, [...(index.get(key) ?? []), row]);
+      }
+      if (!rows || rows.length < PAGE_SIZE) break;
+    }
+  }
+  return index;
 };
 
 export interface SyncCounts {
@@ -194,6 +233,8 @@ export interface SyncCounts {
   reconciled: number;
   /** Transactions whose Plaid account could not be matched to one of ours. */
   skipped: number;
+  /** Stored rows from a re-linked bank's old Item that took on the new Item's transaction id. */
+  adopted: number;
 }
 
 interface ApplySyncOptions {
@@ -226,7 +267,9 @@ export const applySyncResult = async ({
   const categoryMap = new Map<string, string>((categories ?? []).map(c => [c.name, c.id]));
   const mappings = await loadMerchantMappings();
 
-  const counts: SyncCounts = { added: 0, modified: 0, removed: 0, reattributed: 0, reconciled: 0, skipped: 0 };
+  const counts: SyncCounts = { added: 0, modified: 0, removed: 0, reattributed: 0, reconciled: 0, skipped: 0, adopted: 0 };
+  const adoptionCandidates = syncResult.added.length > 0 ? await loadAdoptionCandidates(plaidItemId) : new Map<string, AdoptionCandidate[]>();
+  const adoptedRowIds = new Set<string>();
   let failures = 0;
   // Names the transaction and logs only the error code and message, never the row, so a row that
   // keeps failing can be found without writing financial data to the log.
@@ -274,6 +317,26 @@ export const applySyncResult = async ({
         } catch (error) {
           fail('replace a pending transaction', tx.transaction_id, error);
         }
+      }
+      continue;
+    }
+
+    // A re-linked bank sends its history again under new ids. Re-key the stored copy instead of
+    // inserting a second one, which keeps every user edit (splits, category, notes) on it.
+    const match = pickAdoptableTransaction(
+      tx.original_description || tx.name,
+      adoptionCandidates.get(adoptionKey(accountId, tx.date, tx.amount)) ?? [],
+      adoptedRowIds,
+    );
+    if (match) {
+      const { error } = await supabase
+        .from('transactions')
+        .update({ plaid_transaction_id: tx.transaction_id, pending: tx.pending })
+        .eq('id', match.id);
+      if (error) fail('re-key a re-linked transaction', tx.transaction_id, error);
+      else {
+        adoptedRowIds.add(match.id);
+        counts.adopted++;
       }
       continue;
     }

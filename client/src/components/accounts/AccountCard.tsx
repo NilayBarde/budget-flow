@@ -380,7 +380,6 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: Acc
                       >
                         <KeyRound className="h-4 w-4 text-accent-400" />
                         Update Connection
-                        <span className="text-xs text-slate-500 ml-auto">Investments</span>
                       </button>
                       <button
                         onClick={() => handleMenuAction(handleRefreshAccounts)}
@@ -542,7 +541,6 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: Acc
                       >
                         <KeyRound className="h-4 w-4 text-accent-400" />
                         Update Connection
-                        <span className="text-xs text-slate-500 ml-auto">Investments</span>
                       </button>
                       <button
                         onClick={() => handleMenuAction(handleRefreshAccounts)}

@@ -5,8 +5,9 @@ import { buildAccountResolver } from '../services/sync-attribution.js';
 import { applySyncResult } from '../services/sync-transactions.js';
 import { getPlaidErrorCode, needsReconnect, redactError } from '../services/plaid-errors.js';
 import { recordSyncFailure } from '../services/sync-error.js';
+import { removeItemIfUnused } from '../services/plaid-items.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
 import { classifySyncHealth, DEFAULT_STALE_DAYS, INVESTMENT_STALE_DAYS, parseStaleDaysOverride } from '../services/sync-health.js';
-import { isHoldingsAccountType } from '../services/account-types.js';
 import { toPublicAccount } from '../services/account-redaction.js';
 import { randomUUID } from 'node:crypto';
 
@@ -160,45 +161,16 @@ router.post('/:id/sync', async (req, res) => {
     // Record sync timestamp before making Plaid calls
     lastSyncByAccount.set(id, Date.now());
 
-    // 1. Fetch Latest Balances (Concurrently if possible)
+    // 1. Fetch latest balance (works for investment accounts too)
     let latestBalance: number | null = account.current_balance;
-    const isInvestment = isHoldingsAccountType(account.account_type);
-
     try {
-      if (isInvestment) {
-        console.log(`[Sync] Attempting investment holdings balance for ${account.institution_name} (${id})...`);
-        try {
-          const holdings = await plaidService.getInvestmentHoldings(account.plaid_access_token);
-          const plaidAccount = holdings.accounts.find(a => a.account_id === account.plaid_account_id);
-          if (plaidAccount && plaidAccount.balances.current !== null) {
-            latestBalance = plaidAccount.balances.current;
-            console.log(`[Sync] Success via getInvestmentHoldings: ${latestBalance}`);
-          } else {
-            console.log(`[Sync] No balance found in holdings for ${id}, falling back to getAccounts...`);
-            const plaidData = await plaidService.getAccounts(account.plaid_access_token);
-            const fallbackAccount = plaidData.accounts.find(a => a.account_id === account.plaid_account_id);
-            if (fallbackAccount) {
-              latestBalance = fallbackAccount.balances.current;
-              console.log(`[Sync] Success via getAccounts (fallback): ${latestBalance}`);
-            }
-          }
-        } catch (holdingsError) {
-          console.warn(`[Sync] getInvestmentHoldings failed for ${id}, attempting fallback to getAccounts...`, redactError(holdingsError));
-          const plaidData = await plaidService.getAccounts(account.plaid_access_token);
-          const fallbackAccount = plaidData.accounts.find(a => a.account_id === account.plaid_account_id);
-          if (fallbackAccount) {
-            latestBalance = fallbackAccount.balances.current;
-            console.log(`[Sync] Success via getAccounts (after holdings error): ${latestBalance}`);
-          }
-        }
-      } else {
-        console.log(`[Sync] Fetching regular account balance for ${account.institution_name} (${id})...`);
-        const plaidData = await plaidService.getAccounts(account.plaid_access_token);
-        const plaidAccount = plaidData.accounts.find(a => a.account_id === account.plaid_account_id);
-        if (plaidAccount) {
-          latestBalance = plaidAccount.balances.current;
-          console.log(`[Sync] Success via getAccounts: ${latestBalance}`);
-        }
+      console.log(`[Sync] Fetching account balance for ${account.institution_name} (${id})...`);
+      const plaidData = await plaidService.getAccounts(account.plaid_access_token);
+      const plaidAccount = plaidData.accounts.find(a => a.account_id === account.plaid_account_id);
+      // Some institutions report no current balance; keep the last known one instead of blanking it
+      if (plaidAccount && plaidAccount.balances.current !== null) {
+        latestBalance = plaidAccount.balances.current;
+        console.log(`[Sync] Success via getAccounts: ${latestBalance}`);
       }
     } catch (balanceError) {
       console.warn(`[Sync] Final balance fetch failure for account ${id}:`, redactError(balanceError));
@@ -324,27 +296,16 @@ router.post('/:id/update-webhook', async (req, res) => {
   }
 });
 
-// Delete an account (also removes from Plaid to keep things clean)
-router.delete('/:id', async (req, res) => {
+// Delete an account (and its Plaid Item once no other account uses it)
+router.delete('/:id', asyncHandler(async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Get the access token to remove from Plaid
     const { data: account } = await supabase
       .from('accounts')
       .select('plaid_access_token')
       .eq('id', id)
       .single();
-
-    // Remove from Plaid (optional - helps keep Plaid dashboard clean)
-    if (account?.plaid_access_token) {
-      try {
-        await plaidService.removeItem(account.plaid_access_token);
-      } catch (plaidError) {
-        console.warn('Could not remove item from Plaid:', redactError(plaidError));
-        // Continue with local deletion even if Plaid removal fails
-      }
-    }
 
     // Delete all transactions for this account first
     await supabase.from('transactions').delete().eq('account_id', id);
@@ -352,12 +313,16 @@ router.delete('/:id', async (req, res) => {
     const { error } = await supabase.from('accounts').delete().eq('id', id);
 
     if (error) throw error;
+
+    // Stop Plaid billing for the connection, unless another account (the same bank's card, say) still uses it
+    if (account?.plaid_access_token) await removeItemIfUnused(account.plaid_access_token);
+
     res.status(204).send();
   } catch (error) {
     console.error('Error deleting account:', error);
     res.status(500).json({ message: 'Failed to delete account' });
   }
-});
+}));
 
 // Refresh accounts from Plaid - fetches any missing accounts from an existing Plaid Item
 // This is useful when the original link only stored one account but Plaid has multiple

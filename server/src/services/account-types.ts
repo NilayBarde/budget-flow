@@ -17,9 +17,8 @@ const INVESTMENT_ACCOUNT_TYPES = [
   'crypto exchange',
 ];
 
-// Accounts that hold invested funds and report their balance through Plaid's investments
-// product. An HSA and a 529 belong here but are deliberately not net worth investments:
-// the HSA is tracked as cash.
+// Accounts that hold invested funds, whose balances move less often than a bank's. An HSA and a
+// 529 belong here but are deliberately not net worth investments: the HSA is tracked as cash.
 const HOLDINGS_ACCOUNT_TYPES = [...INVESTMENT_ACCOUNT_TYPES, 'hsa', '529'];
 
 const matchesAny = (types: string[]) => (accountType?: string | null): boolean => {
@@ -29,3 +28,7 @@ const matchesAny = (types: string[]) => (accountType?: string | null): boolean =
 
 export const isInvestmentAccountType = matchesAny(INVESTMENT_ACCOUNT_TYPES);
 export const isHoldingsAccountType = matchesAny(HOLDINGS_ACCOUNT_TYPES);
+
+// Manual accounts are stored with the access token "manual" (and a plaid_item_id of "manual-<id>"),
+// so a token like that must never be sent to Plaid.
+export const isManualToken = (accessToken?: string | null): boolean => !accessToken || accessToken.startsWith('manual');
