@@ -1,7 +1,7 @@
 # Multi-User Support with Google Sign-In
 
 **Date:** 2026-10-11
-**Status:** Draft, reviewed 2026-10-11, awaiting user approval
+**Status:** Draft, reviewed and rebased on main (PRs #60–#67) 2026-10-11, awaiting user approval
 
 ## Goal
 
@@ -63,7 +63,10 @@ Let more than one person use BudgetFlow, each with their own completely separate
 
 ## 2. Data model and migration
 
-One file, `migrations/028_multi_user.sql`, wrapped in `BEGIN; … COMMIT;` so it applies fully or not at all.
+Two files, each wrapped in `BEGIN; … COMMIT;` so it applies fully or not at all (`028` and `029` are taken on main as of 2026-10-11; re-check `ls migrations | tail -1` before creating them):
+
+- **`030_multi_user.sql` (expand):** run **before** deploying, per CLAUDE.md. It is written so the code currently on main keeps working on top of it: it adds columns, policies, grants and the new composite unique constraints, but keeps the old single-column unique constraints and gives `user_id` a default of `COALESCE(auth.uid(), '<owner uuid>')`, so service-role inserts from the old code still get an owner. Everything below describes 030 unless marked otherwise.
+- **`031_multi_user_cleanup.sql` (contract):** run **after** the new code is deployed and you've signed in. It drops the old single-column unique constraints and sets each `user_id` default to plain `auth.uid()`. Until 031 runs, a second user can't create a category or tag whose name the owner already uses, so invite people only after it.
 
 ### Owner lookup
 
@@ -79,7 +82,7 @@ BEGIN
 END $$;
 ```
 
-Later statements read the owner with `current_setting('budgetflow.owner_id')::uuid`.
+Later statements read the owner with `current_setting('budgetflow.owner_id')::uuid`; the `COALESCE` defaults embed it as a literal through `EXECUTE format(...)`, since a column default can't read a transaction-local setting later.
 
 ### New table
 
@@ -92,12 +95,14 @@ Tables: `accounts`, `categories`, `csv_imports`, `transactions`, `budget_goals`,
 For each:
 1. `ADD COLUMN user_id uuid` (for `accounts`, rename the old text column to `legacy_user_id` first, then drop it after backfill).
 2. `UPDATE … SET user_id = owner_id`.
-3. `ALTER COLUMN user_id SET NOT NULL, SET DEFAULT auth.uid()`, `ADD FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE`. Deleting a user in Supabase Auth therefore deletes all of their data; that is the intended way to remove someone.
+3. `ALTER COLUMN user_id SET NOT NULL, SET DEFAULT COALESCE(auth.uid(), '<owner uuid>')` (031 changes it to `auth.uid()`), `ADD FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE`. Deleting a user in Supabase Auth therefore deletes all of their data; that is the intended way to remove someone.
 4. `CREATE INDEX idx_<table>_user_id ON <table>(user_id)`.
 
 Child tables (`transactions`, `transaction_splits`, `transaction_tags`, `csv_imports`) get their own `user_id` rather than relying on a join to `accounts`, so every policy is a plain column check and every index is direct.
 
 ### Per-user uniqueness
+
+030 adds the composite constraints alongside the old ones; 031 drops the old ones.
 
 | Table | Before | After |
 |---|---|---|
@@ -131,17 +136,27 @@ GRANT SELECT (<every column except plaid_access_token, plaid_cursor>) ON account
 GRANT UPDATE (<every column except id, user_id, plaid_access_token, plaid_cursor>) ON accounts TO authenticated;
 ```
 
+`accounts` also gets a readable generated column, because routes decide "is this a manual or disconnected account?" by reading the token today (`isManualToken(...)`, `.neq('plaid_access_token', 'manual')` at `accounts.ts:92`; Disconnect sets the token to `'manual'` at `accounts.ts:365`). Filtering on or selecting a column needs `SELECT` on it, so those would fail with permission denied:
+
+```sql
+ALTER TABLE accounts ADD COLUMN is_manual boolean GENERATED ALWAYS AS
+  (plaid_access_token IS NULL OR plaid_access_token = '' OR plaid_access_token LIKE 'manual%') STORED;
+```
+
+It mirrors `isManualToken` in `services/account-types.ts`. Routes and `idle-connections.ts` switch to `is_manual`; `isManualToken` stays only for code running under `supabaseAdmin` (relink, `plaid-items.ts`). `is_manual` is excluded from the `UPDATE` grant (Postgres rejects updates to generated columns anyway).
+
 `INSERT` and `DELETE` stay table-level. The `UPDATE` grant deliberately covers sync bookkeeping (`current_balance`, `last_synced_at`, `needs_reauth`, `last_sync_error*`) as well as user-editable fields, so routes keep updating those through `req.db`. `user_id` is not updatable, so a row can never change owner.
 
 Consequences for the server:
 - No `select('*')` on `accounts` through `req.db`. A shared `ACCOUNT_COLUMNS` constant in `server/src/db/columns.ts` lists the readable columns.
-- Reading or writing `plaid_access_token` / `plaid_cursor` goes through `supabaseAdmin` only, via `services/plaid-secrets.ts` (section 3). This includes the cursor reset at `accounts.ts:549`.
-- Manual account creation (`accounts.ts:106`) drops its `user_id: 'default-user'` (the column is now a uuid filled by the default) and keeps writing the `'manual'` token sentinel, which the table-level `INSERT` grant allows.
-- Future migrations that add a column to `accounts` must also `GRANT SELECT (new_col)`; this is added to CLAUDE.md.
+- Reading or writing `plaid_access_token` / `plaid_cursor` goes through `supabaseAdmin` only, via `services/plaid-secrets.ts` (section 3). This includes the cursor reset at `accounts.ts:628`, Disconnect's token write at `accounts.ts:365`, the relink path that reads old tokens to retire the previous Item (`plaid.ts:166-182`), and `plaid-items.ts` `removeItemIfUnused`, which counts accounts by token.
+- Manual account creation (`accounts.ts:130`) drops its `user_id: 'default-user'` (the column is now a uuid filled by the default) and keeps writing the `'manual'` token sentinel, which the table-level `INSERT` grant allows.
+- Future migrations that add a column to `accounts` must also `GRANT SELECT (new_col)` (and `UPDATE` if routes write it); this is added to CLAUDE.md. `relinked_at` (028) and `idle_snoozed_until` (029) are included in 030's grants.
+- Between running 030 and deploying, the old code's two account inserts (linking a bank, adding a manual account) fail because they write `user_id: 'default-user'` into the now-uuid column. Everything else keeps working. Run 030 shortly before deploying to keep that window small.
 
 ### Baseline and docs
 
-- `supabase-schema.sql` stays the 023 baseline; fresh projects run it then 024–028. On a fresh project the baseline's default categories have no owner until 028 assigns them to the owner like every other row, so 028 works the same on an existing or fresh database (either way the owner must exist in Auth first). Defaults for later users come from the `DEFAULT_CATEGORIES` constant via `ensureUserSetup`.
+- `supabase-schema.sql` stays the 023 baseline; fresh projects run it then 024–031. On a fresh project the baseline's default categories have no owner until 030 assigns them to the owner like every other row, so 030 works the same on an existing or fresh database (either way the owner must exist in Auth first). Defaults for later users come from the `DEFAULT_CATEGORIES` constant via `ensureUserSetup`.
 - CLAUDE.md "Database" and "RLS" sections are rewritten: routes use `req.db`; RLS enforces ownership; `supabaseAdmin` only for webhooks, scripts and Plaid secrets, always with an explicit `user_id` filter.
 
 ## 3. Server refactor
@@ -164,7 +179,7 @@ export interface DbContext { db: Db; userId: string }
 
 Rule: **every service query filters `.eq('user_id', userId)` and every service insert sets `user_id: userId` explicitly.** Under `req.db` this is redundant with RLS; under `supabaseAdmin` (webhook path) it is what keeps users apart. One rule for both paths, so a service is safe no matter who calls it.
 
-Affected: `sync-transactions.ts` (`applySyncResult`, including the `categories` lookup at line 225 that is currently unscoped), `pending-reconciliation.ts`, `card-payment-reconciliation.ts`, `category-lookup.ts`, `merchant-mappings.ts`, `sync-error.ts`, `yearly-stats.ts`, `plaid.ts`.
+Affected: `sync-transactions.ts` (`applySyncResult`, including the `categories` lookup at line 271 that is currently unscoped, and the relink adoption added in PR #65), `pending-reconciliation.ts`, `card-payment-reconciliation.ts`, `category-lookup.ts`, `merchant-mappings.ts`, `sync-error.ts`, `yearly-stats.ts`, `plaid.ts`, `plaid-items.ts` (moves to `supabaseAdmin`, since it reads tokens). `relink.ts` and `idle-connections.ts` are pure functions over rows passed in; `idle-connections.ts` takes `is_manual` instead of the token.
 
 ### Plaid secrets
 
@@ -178,8 +193,8 @@ New `server/src/services/plaid-secrets.ts`, the only code that reads or writes `
 
 ### Plaid link and sync
 
-- `plaid.ts` route: `createLinkToken` passes `client_user_id: req.userId` (replacing `DEFAULT_USER_ID`). Exchange inserts new accounts via `supabaseAdmin` (token column is not writable by `authenticated`) with `user_id: req.userId` set explicitly.
-- Duplicate-account detection by `plaid_account_id` (plaid.ts:160) is scoped to `user_id = req.userId`. Plaid account IDs are per Item, so two people linking the same joint account get different IDs and this rarely matters; if the same `plaid_account_id` does exist under a different user, the exchange returns `409 { message: 'This bank account is already linked by another user.' }` rather than reassigning it.
+- `plaid.ts` route: `createLinkToken` passes `client_user_id: req.userId` (replacing `DEFAULT_USER_ID` at `plaid.ts:16`, used at `plaid.ts:235`). Exchange inserts new accounts via `supabaseAdmin` (token column is not writable by `authenticated`) with `user_id: req.userId` set explicitly.
+- Duplicate-account detection by `plaid_account_id` (`plaid.ts:166`) is scoped to `user_id = req.userId`. Plaid account IDs are per Item, so two people linking the same joint account get different IDs and this rarely matters; if the same `plaid_account_id` does exist under a different user, the exchange returns `409 { message: 'This bank account is already linked by another user.' }` rather than reassigning it.
 - User-triggered sync (accounts/transactions routes) reads secrets with `getItemSecrets(req.userId, id)` and calls `applySyncResult({ db: req.db, userId: req.userId, … })`.
 - Webhook sync: `getItemAccountsByPlaidItem(item_id)` → owner `userId` from the rows → `applySyncResult({ db: supabaseAdmin, userId, … })`. If the rows for one item somehow have different owners, log and skip (never mix).
 
@@ -236,18 +251,33 @@ SQL to run in the editor after migrating, impersonating two users via `set_confi
 
 ## 6. Rollout
 
-Order matters: after the migration, the old server code (service role, no `user_id` on inserts) would fail inserts because `auth.uid()` is null for the service role. Migration and deploy go out together.
-
-1. Google OAuth client + Supabase Google provider + redirect URLs (section 1).
+1. Google OAuth client, Supabase Google provider, JWT signing keys, redirect URLs (section 1).
 2. Supabase → Authentication → Users → **Add user** with `nilaybarde@gmail.com` (auto-confirm). On first Google sign-in Supabase links the Google identity to this existing user because the verified email matches, so the ID the migration assigns is the one you sign in as.
 3. Set the new env vars on the server host and Vercel.
-4. Run `028_multi_user.sql` in the SQL editor, then run the isolation-check SQL.
-5. Deploy server and client immediately after.
+4. Run `030_multi_user.sql`, then the isolation-check SQL. The app on main keeps working (except the two account inserts noted in section 2).
+5. Merge the feature branch into main and deploy server and client.
 6. Sign in with Google and verify your data.
+7. Run `031_multi_user_cleanup.sql`. Only then add other people to `user_allowlist`.
 
-**If the Google sign-in creates a separate user instead of linking** (visible as two `nilaybarde@gmail.com` rows in Auth → Users), reassign with a one-off script included at the bottom of 028 as a commented block: update `user_id` from the placeholder ID to the Google user's ID on every table, then delete the placeholder user.
+**If the Google sign-in creates a separate user instead of linking** (visible as two `nilaybarde@gmail.com` rows in Auth → Users), run the reassignment block kept commented at the bottom of 030 before step 7: update `user_id` from the placeholder ID to the Google user's ID on every table, then delete the placeholder user.
 
-Plaid webhooks that arrive between steps 4 and 5 fail; the next sync picks the changes up from the stored cursor, so nothing is lost.
+## 7. Delivery
+
+Work happens on a long-lived `feature/multi-user` branch cut from main. Each step below is its own PR into that branch with a code review before merge; the final PR merges the branch into main. Nothing deploys until that last merge, so the half-built states in between never reach production.
+
+| PR | Into | Contents |
+|---|---|---|
+| 1 | feature | Migrations 030 and 031 with the isolation-check SQL; `supabaseAdmin` / `createUserClient` / `Db` in `db/supabase.ts`; `ACCOUNT_COLUMNS`; Express `Request` typing |
+| 2 | feature | `requireAuth` middleware, `user_allowlist` lookup, `ensureUserSetup` + `DEFAULT_CATEGORIES`, mounted in `index.ts`; tests |
+| 3 | feature | Services to `DbContext`; `plaid-secrets.ts`; owner-aware webhook sync; `plaid-items.ts` on `supabaseAdmin`; `is_manual` in `idle-connections.ts`; tests |
+| 4 | feature | Routes, part 1: `accounts`, `plaid`, `transactions`, `csv-import` (the token- and sync-heavy ones) to `req.db`, composite `onConflict` keys, `asyncHandler` wrapping |
+| 5 | feature | Routes, part 2: the remaining nine routers; remove the old `supabase` export so any missed call site fails to compile; scripts take `--user-email` |
+| 6 | feature | Client: Supabase browser client, `AuthProvider`, `RequireAuth`, `/login`, bearer header and `fetchForm` in `api.ts`, user menu, sign-out cleanup |
+| 7 | main | Docs (`ENV_SETUP.md`, CLAUDE.md), one minor version bump (`npm version minor --no-git-tag-version`), end-to-end checks from section 5 |
+
+- The `Version bump` check only runs on PRs into main, so PRs 1–6 don't bump; PR 7 bumps once.
+- Merge main into `feature/multi-user` before opening each PR, and resolve conflicts there, so the final PR has no surprises. `accounts.ts` and `plaid.ts` change often on main.
+- PRs 1–5 leave the server running with the auth middleware live but no client sending tokens, so the app on the feature branch is unusable end-to-end until PR 6. That's expected; it never deploys in that state.
 
 ## Risks
 
