@@ -23,6 +23,8 @@ const db = {
   /** Inserts that hit the unique constraint, because another sync stored the row first. */
   duplicateInsertFor: new Set<string>(),
   failUpdateFor: new Set<string>(),
+  /** Updates that hit the unique constraint, because another sync gave the row that id first. */
+  duplicateUpdateFor: new Set<string>(),
   failDeleteFor: new Set<string>(),
   /** Make every row lookup fail like a dropped connection, instead of "no rows". */
   lookupFails: false,
@@ -51,6 +53,7 @@ const makeBuilder = (table: string) => {
       return { data: null, error: db.failInsertFor.has(plaidId) ? { code: 'P0001', message: 'insert failed' } : null };
     }
     if (entry.op === 'update' && db.failUpdateFor.has(plaidId)) return { data: null, error: { code: 'P0001', message: 'update failed' } };
+    if (entry.op === 'update' && db.duplicateUpdateFor.has(plaidId)) return { data: null, error: { code: '23505', message: 'duplicate key value' } };
     if (entry.op === 'delete' && db.failDeleteFor.has(plaidId)) return { data: null, error: { code: 'P0001', message: 'delete failed' } };
     return { data: null, error: null };
   };
@@ -530,6 +533,7 @@ describe('applySyncResult', () => {
     db.failInsertFor = new Set();
     db.duplicateInsertFor = new Set();
     db.failUpdateFor = new Set();
+    db.duplicateUpdateFor = new Set();
     db.failDeleteFor = new Set();
     db.lookupFails = false;
     db.relinkedAccounts = [];
@@ -620,6 +624,35 @@ describe('applySyncResult', () => {
 
       expect(opsOf('transactions', 'insert')).toHaveLength(1);
       expect(counts).toMatchObject({ added: 1, adopted: 0 });
+    });
+
+    it('never offers a row Plaid is sending under its own id in the same batch', async () => {
+      db.relinkedAccounts = [{ id: 'acct-1', relinked_at: '2026-10-11T00:00:00Z' }];
+      // Two identical fares: one kept its id (and is in the batch), the other's id changed
+      db.adoptCandidates = [
+        { ...stored, id: 'row-kept', plaid_transaction_id: 'kept-id' },
+        { ...stored, id: 'row-changed', plaid_transaction_id: 'old-id' },
+      ];
+      db.existingByPlaidId.set('kept-id', { id: 'row-kept', account_id: 'acct-1' });
+
+      const counts = await apply(emptySync({ added: [tx({ transaction_id: 'new-id' }), tx({ transaction_id: 'kept-id' })] }));
+
+      const rekeys = opsOf('transactions', 'update');
+      expect(rekeys).toHaveLength(1);
+      expect(filterValue(rekeys[0], 'id')).toBe('row-changed');
+      expect(counts).toMatchObject({ added: 0, adopted: 1 });
+    });
+
+    it('treats a re-key that another sync already made as stored, not a failure', async () => {
+      db.relinkedAccounts = [{ id: 'acct-1', relinked_at: '2026-10-11T00:00:00Z' }];
+      db.adoptCandidates = [stored];
+      db.duplicateUpdateFor.add('new-id');
+
+      const counts = await apply(emptySync({ added: [tx({ transaction_id: 'new-id' })] }));
+
+      expect(counts).toMatchObject({ added: 0, adopted: 0 });
+      // The sync still records success, so the cursor moves on
+      expect(opsOf('accounts', 'update').length).toBeGreaterThan(0);
     });
 
     it('stops adopting once the history is complete', async () => {

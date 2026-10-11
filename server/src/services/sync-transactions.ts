@@ -194,7 +194,10 @@ const PAGE_SIZE = 1000;
  * adopt each other. Accounts stay in this state (relinked_at is set) until Plaid has delivered the
  * whole history, however many syncs that takes. Loaded once per sync, not once per transaction.
  */
-const loadAdoptionCandidates = async (plaidItemId: string): Promise<Map<string, AdoptionCandidate[]>> => {
+const loadAdoptionCandidates = async (
+  plaidItemId: string,
+  deliveredIds: ReadonlySet<string>,
+): Promise<Map<string, AdoptionCandidate[]>> => {
   const index = new Map<string, AdoptionCandidate[]>();
   const { data: relinked, error } = await supabase
     .from('accounts')
@@ -213,6 +216,9 @@ const loadAdoptionCandidates = async (plaidItemId: string): Promise<Map<string, 
         .range(from, from + PAGE_SIZE - 1);
       if (rowsError) throw rowsError;
       for (const row of rows ?? []) {
+        // Plaid kept this row's id and is sending it in this batch, so it is matched by id. Offering it
+        // here would let a look-alike (six identical $3 fares on one day) take it and shuffle the ids.
+        if (row.plaid_transaction_id && deliveredIds.has(row.plaid_transaction_id)) continue;
         const key = adoptionKey(account.id, row.date, row.amount);
         index.set(key, [...(index.get(key) ?? []), row]);
       }
@@ -267,7 +273,10 @@ export const applySyncResult = async ({
   const mappings = await loadMerchantMappings();
 
   const counts: SyncCounts = { added: 0, modified: 0, removed: 0, reattributed: 0, reconciled: 0, skipped: 0, adopted: 0 };
-  const adoptionCandidates = syncResult.added.length > 0 ? await loadAdoptionCandidates(plaidItemId) : new Map<string, AdoptionCandidate[]>();
+  const deliveredIds = new Set([...syncResult.added, ...syncResult.modified].map(tx => tx.transaction_id));
+  const adoptionCandidates = syncResult.added.length > 0
+    ? await loadAdoptionCandidates(plaidItemId, deliveredIds)
+    : new Map<string, AdoptionCandidate[]>();
   const adoptedRowIds = new Set<string>();
   let failures = 0;
   // Names the transaction and logs only the error code and message, never the row, so a row that
@@ -332,6 +341,9 @@ export const applySyncResult = async ({
         .from('transactions')
         .update({ plaid_transaction_id: tx.transaction_id, pending: tx.pending })
         .eq('id', match.id);
+      // A duplicate key means another sync (the webhook Plaid sends right after a link races the link's
+      // own sync) already gave this transaction to a row. It is stored, so this is not a failure.
+      if (error?.code === UNIQUE_VIOLATION) continue;
       if (error) fail('re-key a re-linked transaction', tx.transaction_id, error);
       else {
         adoptedRowIds.add(match.id);
