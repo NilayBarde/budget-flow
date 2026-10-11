@@ -26,6 +26,8 @@ const db = {
   failDeleteFor: new Set<string>(),
   /** Make every row lookup fail like a dropped connection, instead of "no rows". */
   lookupFails: false,
+  /** Stored rows a re-linked transaction could be the same as, returned by the date and amount lookup. */
+  adoptCandidates: [] as { id: string; plaid_transaction_id: string | null; original_description: string | null }[],
 };
 
 const makeBuilder = (table: string) => {
@@ -35,6 +37,9 @@ const makeBuilder = (table: string) => {
     (entry.filters.find(([column]) => column === 'plaid_transaction_id')?.[1] as string | undefined);
   const result = () => {
     if (entry.op === 'select' && table === 'categories') return { data: db.categories, error: null };
+    if (entry.op === 'select' && table === 'transactions' && entry.filters.some(([column]) => column === 'date')) {
+      return { data: db.adoptCandidates, error: null };
+    }
     const plaidId = plaidIdOfEntry() ?? '';
     if (entry.op === 'insert') {
       if (db.duplicateInsertFor.has(plaidId)) return { data: null, error: { code: '23505', message: 'duplicate key value' } };
@@ -510,6 +515,7 @@ describe('applySyncResult', () => {
     db.failUpdateFor = new Set();
     db.failDeleteFor = new Set();
     db.lookupFails = false;
+    db.adoptCandidates = [];
     rules.list = [];
     rules.lockedIds = new Set();
     reconcilePending.mockReset().mockResolvedValue(false);
@@ -540,6 +546,37 @@ describe('applySyncResult', () => {
     expect(moves[0].payload).toEqual({ account_id: 'acct-1' });
     expect(filterValue(moves[0], 'id')).toBe('row-2');
     expect(counts).toMatchObject({ added: 0, reattributed: 1 });
+  });
+
+  describe('after a bank is re-linked', () => {
+    it('re-keys the stored copy of a transaction instead of inserting it again', async () => {
+      db.adoptCandidates = [{ id: 'row-old', plaid_transaction_id: 'old-id', original_description: 'STARBUCKS #123 NEW YORK' }];
+
+      const counts = await apply(emptySync({ added: [tx({ transaction_id: 'new-id' })] }), { adoptForAccounts: new Set(['acct-1']) });
+
+      expect(opsOf('transactions', 'insert')).toHaveLength(0);
+      const rekeys = opsOf('transactions', 'update');
+      expect(rekeys).toHaveLength(1);
+      expect(rekeys[0].payload).toEqual({ plaid_transaction_id: 'new-id', pending: false });
+      expect(filterValue(rekeys[0], 'id')).toBe('row-old');
+      expect(counts).toMatchObject({ added: 0, adopted: 1 });
+    });
+
+    it('inserts a transaction that has no stored copy', async () => {
+      const counts = await apply(emptySync({ added: [tx({ transaction_id: 'new-id' })] }), { adoptForAccounts: new Set(['acct-1']) });
+
+      expect(opsOf('transactions', 'insert')).toHaveLength(1);
+      expect(counts).toMatchObject({ added: 1, adopted: 0 });
+    });
+
+    it('does not look for stored copies on accounts that were not re-linked', async () => {
+      db.adoptCandidates = [{ id: 'row-old', plaid_transaction_id: 'old-id', original_description: 'STARBUCKS #123 NEW YORK' }];
+
+      const counts = await apply(emptySync({ added: [tx({ transaction_id: 'new-id' })] }));
+
+      expect(opsOf('transactions', 'insert')).toHaveLength(1);
+      expect(counts).toMatchObject({ added: 1, adopted: 0 });
+    });
   });
 
   it('skips a transaction whose Plaid account cannot be resolved and counts it', async () => {

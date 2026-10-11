@@ -7,6 +7,7 @@ import { reconcilePendingTransaction } from './pending-reconciliation.js';
 import { reconcileCardPaymentsAfterSync } from './card-payment-reconciliation.js';
 import { redactError } from './plaid-errors.js';
 import type { SyncResult } from './plaid.js';
+import { pickAdoptableTransaction, type AdoptionCandidate } from './relink.js';
 
 // Every way a Plaid sync reaches the database (manual sync, webhook, first link) goes through
 // here, so a transaction is typed, categorized and saved the same way whichever path delivered it.
@@ -194,6 +195,8 @@ export interface SyncCounts {
   reconciled: number;
   /** Transactions whose Plaid account could not be matched to one of ours. */
   skipped: number;
+  /** Stored rows from a re-linked bank's old Item that took on the new Item's transaction id. */
+  adopted: number;
 }
 
 interface ApplySyncOptions {
@@ -206,6 +209,12 @@ interface ApplySyncOptions {
   historicalComplete?: boolean;
   /** How far back to pair card payments after the sync. null scans all history (a first link). */
   reconcileSinceDate?: string | null;
+  /**
+   * Accounts carried over from a re-linked bank's old Item. Their history arrives again under new
+   * transaction ids, so a stored row with the same date and amount is re-keyed instead of duplicated,
+   * which keeps every user edit on it.
+   */
+  adoptForAccounts?: ReadonlySet<string>;
 }
 
 /**
@@ -221,12 +230,14 @@ export const applySyncResult = async ({
   accountTypeById,
   historicalComplete = false,
   reconcileSinceDate,
+  adoptForAccounts,
 }: ApplySyncOptions): Promise<SyncCounts> => {
   const { data: categories } = await supabase.from('categories').select('id, name');
   const categoryMap = new Map<string, string>((categories ?? []).map(c => [c.name, c.id]));
   const mappings = await loadMerchantMappings();
 
-  const counts: SyncCounts = { added: 0, modified: 0, removed: 0, reattributed: 0, reconciled: 0, skipped: 0 };
+  const counts: SyncCounts = { added: 0, modified: 0, removed: 0, reattributed: 0, reconciled: 0, skipped: 0, adopted: 0 };
+  const adoptedRowIds = new Set<string>();
   let failures = 0;
   // Names the transaction and logs only the error code and message, never the row, so a row that
   // keeps failing can be found without writing financial data to the log.
@@ -276,6 +287,36 @@ export const applySyncResult = async ({
         }
       }
       continue;
+    }
+
+    if (adoptForAccounts?.has(accountId)) {
+      const { data: candidates, error: candidateError } = await supabase
+        .from('transactions')
+        .select('id, plaid_transaction_id, original_description')
+        .eq('account_id', accountId)
+        .eq('date', tx.date)
+        .eq('amount', tx.amount);
+      if (candidateError) {
+        fail('look for the stored copy of a re-linked transaction', tx.transaction_id, candidateError);
+        continue;
+      }
+      const match = pickAdoptableTransaction(
+        tx.original_description || tx.name,
+        (candidates ?? []) as AdoptionCandidate[],
+        adoptedRowIds,
+      );
+      if (match) {
+        const { error } = await supabase
+          .from('transactions')
+          .update({ plaid_transaction_id: tx.transaction_id, pending: tx.pending })
+          .eq('id', match.id);
+        if (error) fail('re-key a re-linked transaction', tx.transaction_id, error);
+        else {
+          adoptedRowIds.add(match.id);
+          counts.adopted++;
+        }
+        continue;
+      }
     }
 
     const row = {

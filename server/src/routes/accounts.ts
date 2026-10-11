@@ -5,6 +5,7 @@ import { buildAccountResolver } from '../services/sync-attribution.js';
 import { applySyncResult } from '../services/sync-transactions.js';
 import { getPlaidErrorCode, needsReconnect, redactError } from '../services/plaid-errors.js';
 import { recordSyncFailure } from '../services/sync-error.js';
+import { removeItemIfUnused } from '../services/plaid-items.js';
 import { classifySyncHealth, DEFAULT_STALE_DAYS, INVESTMENT_STALE_DAYS, parseStaleDaysOverride } from '../services/sync-health.js';
 import { toPublicAccount } from '../services/account-redaction.js';
 import { randomUUID } from 'node:crypto';
@@ -293,27 +294,16 @@ router.post('/:id/update-webhook', async (req, res) => {
   }
 });
 
-// Delete an account (also removes from Plaid to keep things clean)
+// Delete an account (and its Plaid Item once no other account uses it)
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Get the access token to remove from Plaid
     const { data: account } = await supabase
       .from('accounts')
       .select('plaid_access_token')
       .eq('id', id)
       .single();
-
-    // Remove from Plaid (optional - helps keep Plaid dashboard clean)
-    if (account?.plaid_access_token) {
-      try {
-        await plaidService.removeItem(account.plaid_access_token);
-      } catch (plaidError) {
-        console.warn('Could not remove item from Plaid:', redactError(plaidError));
-        // Continue with local deletion even if Plaid removal fails
-      }
-    }
 
     // Delete all transactions for this account first
     await supabase.from('transactions').delete().eq('account_id', id);
@@ -321,6 +311,10 @@ router.delete('/:id', async (req, res) => {
     const { error } = await supabase.from('accounts').delete().eq('id', id);
 
     if (error) throw error;
+
+    // Stop Plaid billing for the connection, unless another account (the same bank's card, say) still uses it
+    if (account?.plaid_access_token) await removeItemIfUnused(account.plaid_access_token);
+
     res.status(204).send();
   } catch (error) {
     console.error('Error deleting account:', error);

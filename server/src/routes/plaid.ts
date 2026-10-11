@@ -6,6 +6,8 @@ import { redactError } from '../services/plaid-errors.js';
 import { recordSyncFailure } from '../services/sync-error.js';
 import { toPublicAccount } from '../services/account-redaction.js';
 import { randomUUID } from 'node:crypto';
+import { matchRelinkedAccounts, type StoredPlaidAccount } from '../services/relink.js';
+import { removeItemIfUnused } from '../services/plaid-items.js';
 
 const router = Router();
 
@@ -156,17 +158,17 @@ router.post('/exchange-token', async (req, res) => {
 
     console.log(`Found ${plaidAccounts.length} accounts from ${institutionName}`);
 
-    // Check for existing accounts with the same plaid_account_id to prevent duplicates
-    // This handles the case where a user relinks the same bank (new item_id/access_token, same plaid_account_id)
-    const plaidAccountIds = plaidAccounts.map(a => a.account_id);
-    const { data: existingAccounts } = await supabase
+    // A re-link of a bank we already have creates a new Item. Carry this institution's stored
+    // accounts over to it (same Plaid account id, or failing that the same name and type), so their
+    // transactions and edits stay and nothing is duplicated.
+    const { data: storedAccounts } = await supabase
       .from('accounts')
-      .select('id, plaid_account_id')
-      .in('plaid_account_id', plaidAccountIds);
-
-    const existingByPlaidId = new Map(
-      (existingAccounts || []).map(a => [a.plaid_account_id, a.id])
-    );
+      .select('id, plaid_account_id, plaid_item_id, plaid_access_token, account_name, account_type')
+      .eq('institution_name', institutionName)
+      .neq('plaid_item_id', itemId);
+    const relinkable = (storedAccounts || []).filter(a => a.plaid_access_token && !a.plaid_access_token.startsWith('manual'));
+    const relinked = matchRelinkedAccounts(plaidAccounts, relinkable as StoredPlaidAccount[]);
+    const existingByPlaidId = new Map([...relinked].map(([plaidAccountId, stored]) => [plaidAccountId, stored.id]));
 
     // Store or update ALL accounts from this Plaid Item
     for (const plaidAccount of plaidAccounts) {
@@ -179,6 +181,8 @@ router.post('/exchange-token', async (req, res) => {
           .update({
             plaid_item_id: itemId,
             plaid_access_token: accessToken,
+            plaid_account_id: plaidAccount.account_id,
+            plaid_cursor: null,
             institution_name: institutionName,
             account_name: plaidAccount.name || 'Account',
             account_type: plaidAccount.subtype || plaidAccount.type || 'unknown',
@@ -233,6 +237,11 @@ router.post('/exchange-token', async (req, res) => {
       throw new Error('Failed to create any accounts');
     }
 
+    // Plaid bills every Item monthly, so remove each old Item once none of our accounts use it.
+    for (const oldToken of new Set([...relinked.values()].map(a => a.plaid_access_token))) {
+      if (await removeItemIfUnused(oldToken)) console.log(`Removed the replaced Plaid Item for ${institutionName}`);
+    }
+
     // Auto-sync transactions after connecting using /transactions/sync
     console.log('Auto-syncing transactions for new accounts...');
 
@@ -252,9 +261,11 @@ router.post('/exchange-token', async (req, res) => {
         accountTypeById,
         historicalComplete: syncResult.transactionsUpdateStatus === 'HISTORICAL_UPDATE_COMPLETE',
         reconcileSinceDate: null,
+        adoptForAccounts: new Set([...relinked.values()].map(a => a.id)),
       });
 
       console.log(`Auto-synced ${counts.added} transactions across ${createdAccounts.length} accounts`);
+      if (counts.adopted > 0) console.log(`Carried over ${counts.adopted} stored transaction(s) from the re-linked Item`);
       if (counts.skipped > 0) {
         // These belong to an account that failed to link, and the cursor has moved past them.
         console.warn(`Skipped ${counts.skipped} transaction(s) for accounts that could not be linked`);
