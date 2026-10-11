@@ -132,6 +132,7 @@ To run them separately, use `npm run dev --prefix server` and `npm run dev --pre
 
 - Create, edit and delete categories
 - Export all of your data as JSON
+- See the app version
 
 ## Development
 
@@ -142,9 +143,19 @@ npm run dev      # API + client, with reload
 npm test         # server tests, then client tests
 npm run build    # build the client to client/dist
 npm start        # run the compiled server
+npm run bump     # bump the patch version
 ```
 
 Server tests: `npm test --prefix server`. Client tests: `npm test --prefix client`.
+
+### Versioning
+
+The app version is the `version` field in the root `package.json`, and the Settings page displays it. Every PR has to raise it: the `Version bump` GitHub check fails if a PR's version isn't higher than main's.
+
+- Fixes and small changes: `npm run bump` (1.1.0 → 1.1.1)
+- New features: `npm version minor --no-git-tag-version` (1.1.0 → 1.2.0)
+
+Commit both `package.json` and `package-lock.json`. If main gets a new version while your PR is open, bump again.
 
 ### Production
 
