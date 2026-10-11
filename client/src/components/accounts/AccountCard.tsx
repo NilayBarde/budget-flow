@@ -8,7 +8,8 @@ import { formatDate } from '../../utils/formatters';
 import { isDisconnectedAccount, isManualAccount } from '../../utils/account-types';
 import { ReconnectNotice } from './ReconnectNotice';
 import { SyncErrorNotice } from './SyncErrorNotice';
-import { useSyncAccount, useDeleteAccount, useDisconnectAccount, useRefreshAccounts, useCreatePlaidUpdateLinkToken, useToggleAccountInvestmentExclusion } from '../../hooks';
+import { IdleConnectionNotice } from './IdleConnectionNotice';
+import { useSyncAccount, useDeleteAccount, useDisconnectAccount, useSnoozeIdleConnection, useRefreshAccounts, useCreatePlaidUpdateLinkToken, useToggleAccountInvestmentExclusion } from '../../hooks';
 
 
 // Wrapper component for Plaid Link update mode - only renders when we have a token
@@ -117,6 +118,7 @@ export const AccountCard = ({ account, connectionAccountNames, onImportCsv, onVi
   const syncAccount = useSyncAccount();
   const deleteAccount = useDeleteAccount();
   const disconnectAccount = useDisconnectAccount();
+  const snoozeIdle = useSnoozeIdleConnection();
   const refreshAccounts = useRefreshAccounts();
   const createUpdateLinkToken = useCreatePlaidUpdateLinkToken();
   const toggleExclusion = useToggleAccountInvestmentExclusion();
@@ -350,6 +352,23 @@ export const AccountCard = ({ account, connectionAccountNames, onImportCsv, onVi
         {/* The last sync failed for another reason: show it. Reconnect covers the expired login. */}
         {account.last_sync_error && !account.needs_reauth && !isManual && (
           <SyncErrorNotice message={account.last_sync_error} failedAt={account.last_sync_error_at} />
+        )}
+
+        {/* The connection has gone quiet: suggest disconnecting it, since Plaid bills it monthly anyway */}
+        {account.idle && !isManual && (
+          <IdleConnectionNotice
+            institutionName={account.institution_name}
+            lastActivity={account.idle.last_activity}
+            updatesBalances={account.idle.updates_balances}
+            onDisconnect={handleDisconnect}
+            onKeep={() => snoozeIdle.mutate(account.id, {
+              onError: error => {
+                setUpdateError(error.message);
+                setTimeout(() => setUpdateError(null), 8000);
+              },
+            })}
+            busy={disconnectAccount.isPending || snoozeIdle.isPending}
+          />
         )}
 
         {/* Refresh accounts result message */}

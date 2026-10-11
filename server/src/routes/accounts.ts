@@ -7,6 +7,7 @@ import { getPlaidErrorCode, needsReconnect, redactError } from '../services/plai
 import { recordSyncFailure } from '../services/sync-error.js';
 import { removeItemIfUnused } from '../services/plaid-items.js';
 import { isManualToken } from '../services/account-types.js';
+import { findIdleConnections, IDLE_SNOOZE_DAYS, type IdleCheckAccount, type IdleConnection } from '../services/idle-connections.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { classifySyncHealth, DEFAULT_STALE_DAYS, INVESTMENT_STALE_DAYS, parseStaleDaysOverride } from '../services/sync-health.js';
 import { toPublicAccount } from '../services/account-redaction.js';
@@ -20,42 +21,63 @@ const SYNC_COOLDOWN_MS = 30_000; // 30 seconds
 const lastSyncByAccount = new Map<string, number>();
 
 // Get all accounts
-router.get('/', async (req, res) => {
-  try {
-    const { data: accounts, error } = await supabase
-      .from('accounts')
-      .select('*')
-      .order('created_at', { ascending: false });
+router.get('/', asyncHandler(async (req, res) => {
+  const { data: accounts, error } = await supabase
+    .from('accounts')
+    .select('*')
+    .order('created_at', { ascending: false });
 
-    if (error) throw error;
+  if (error) throw error;
 
-    // Get the most recent CSV import date for each account
-    const { data: lastImports } = await supabase
-      .from('csv_imports')
-      .select('account_id, created_at')
-      .order('created_at', { ascending: false });
+  // Get the most recent CSV import date for each account
+  const { data: lastImports } = await supabase
+    .from('csv_imports')
+    .select('account_id, created_at')
+    .order('created_at', { ascending: false });
 
-    // Build a map of account_id -> most recent import date
-    const lastImportMap = new Map<string, string>();
-    for (const imp of lastImports || []) {
-      if (!lastImportMap.has(imp.account_id)) {
-        lastImportMap.set(imp.account_id, imp.created_at);
-      }
+  // Build a map of account_id -> most recent import date
+  const lastImportMap = new Map<string, string>();
+  for (const imp of lastImports || []) {
+    if (!lastImportMap.has(imp.account_id)) {
+      lastImportMap.set(imp.account_id, imp.created_at);
     }
-
-    // Merge last import dates into accounts
-    // Use csv_imports table first, fall back to account's own last_csv_import_at (set by holdings import)
-    const accountsWithLastImport = accounts?.map(account => ({
-      ...toPublicAccount(account),
-      last_csv_import_at: lastImportMap.get(account.id) || account.last_csv_import_at || null,
-    }));
-
-    res.json(accountsWithLastImport);
-  } catch (error) {
-    console.error('Error fetching accounts:', error);
-    res.status(500).json({ message: 'Failed to fetch accounts' });
   }
-});
+
+  const idle = await findIdleAccounts(accounts || []);
+
+  // Merge last import dates into accounts
+  // Use csv_imports table first, fall back to account's own last_csv_import_at (set by holdings import)
+  const accountsWithLastImport = accounts?.map(account => ({
+    ...toPublicAccount(account),
+    last_csv_import_at: lastImportMap.get(account.id) || account.last_csv_import_at || null,
+    idle: idle.get(account.id) ?? null,
+  }));
+
+  res.json(accountsWithLastImport);
+}));
+
+// Plaid connections with no activity in a while, which the Accounts page suggests disconnecting.
+// One "newest transaction" lookup per Plaid account (about 20, run in parallel). It is a nudge, so
+// a failed lookup leaves it out rather than failing the accounts list.
+const findIdleAccounts = async (accounts: IdleCheckAccount[]) => {
+  try {
+    const plaidAccounts = accounts.filter(a => !isManualToken(a.plaid_access_token));
+    const withDates = await Promise.all(plaidAccounts.map(async account => {
+      const { data: newest, error } = await supabase
+        .from('transactions')
+        .select('date')
+        .eq('account_id', account.id)
+        .order('date', { ascending: false })
+        .limit(1);
+      if (error) throw error;
+      return { ...account, last_transaction_date: newest?.[0]?.date ?? null };
+    }));
+    return findIdleConnections(withDates, Date.now());
+  } catch (error) {
+    console.warn('Could not check for idle Plaid connections:', redactError(error));
+    return new Map<string, IdleConnection>();
+  }
+};
 
 // Sync health: which Plaid-linked accounts need attention (re-auth required, or
 // haven't synced successfully in a while). Manual accounts are excluded since
@@ -346,6 +368,7 @@ router.post('/:id/disconnect', asyncHandler(async (req, res) => {
         last_sync_error: null,
         last_sync_error_at: null,
         relinked_at: null,
+        idle_snoozed_until: null,
       })
       .eq('id', row.id);
     if (error) throw error;
@@ -359,6 +382,32 @@ router.post('/:id/disconnect', asyncHandler(async (req, res) => {
   }
 
   res.json({ disconnected: (connection ?? []).map(row => row.account_name) });
+}));
+
+// "Keep" on an idle connection: hide the disconnect suggestion for IDLE_SNOOZE_DAYS. It applies to
+// every account on the connection, since the suggestion is about the connection.
+router.post('/:id/snooze-idle', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const { data: account, error: lookupError } = await supabase
+    .from('accounts')
+    .select('plaid_item_id, plaid_access_token')
+    .eq('id', id)
+    .maybeSingle();
+  if (lookupError) throw lookupError;
+  if (!account) return res.status(404).json({ message: 'Account not found' });
+  if (isManualToken(account.plaid_access_token)) {
+    return res.status(400).json({ message: 'Account is not connected to Plaid' });
+  }
+
+  const snoozedUntil = new Date(Date.now() + IDLE_SNOOZE_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const { error } = await supabase
+    .from('accounts')
+    .update({ idle_snoozed_until: snoozedUntil })
+    .eq('plaid_item_id', account.plaid_item_id);
+  if (error) throw error;
+
+  res.json({ idle_snoozed_until: snoozedUntil });
 }));
 
 // Delete an account (and its Plaid Item once no other account uses it)

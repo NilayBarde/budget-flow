@@ -96,6 +96,18 @@ export const useDisconnectAccount = () => {
   });
 };
 
+// "Keep" on an idle connection: the server hides the suggestion on all its accounts for 90 days
+export const useSnoozeIdleConnection = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (accountId: string) => api.snoozeIdleConnection(accountId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+    },
+  });
+};
+
 // CSV Import hooks
 export const usePreviewCsvImport = () => {
   return useMutation({
