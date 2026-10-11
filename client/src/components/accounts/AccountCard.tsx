@@ -1,10 +1,11 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { usePlaidLink } from 'react-plaid-link';
+import clsx from 'clsx';
 import { RefreshCw, Trash2, Upload, History, MoreVertical, KeyRound, Users, Eye, EyeOff, Pencil, Unlink } from 'lucide-react';
 import { Card, Button } from '../ui';
 import type { Account } from '../../types';
 import { formatDate } from '../../utils/formatters';
-import { isManualAccount } from '../../utils/account-types';
+import { isDisconnectedAccount, isManualAccount } from '../../utils/account-types';
 import { ReconnectNotice } from './ReconnectNotice';
 import { SyncErrorNotice } from './SyncErrorNotice';
 import { useSyncAccount, useDeleteAccount, useDisconnectAccount, useRefreshAccounts, useCreatePlaidUpdateLinkToken, useToggleAccountInvestmentExclusion } from '../../hooks';
@@ -116,6 +117,12 @@ export const AccountCard = ({ account, connectionAccountNames, onImportCsv, onVi
   const desktopMenuRef = useRef<HTMLDivElement>(null);
 
   const isManual = isManualAccount(account);
+  // A manual account with no imports is a warning, unless it was disconnected from Plaid with its history kept
+  const importStatus = [
+    isDisconnectedAccount(account) && 'Disconnected from Plaid, history kept',
+    account.last_csv_import_at && `Last imported: ${formatDate(account.last_csv_import_at)}`,
+  ].filter(Boolean).join(' · ') || 'No imports yet';
+  const importStatusWarns = importStatus === 'No imports yet';
   const isCreditCard = isCreditCardAccount(account.account_type);
   const isInvestment = isInvestmentAccount(account.account_type);
 
@@ -361,10 +368,8 @@ export const AccountCard = ({ account, connectionAccountNames, onImportCsv, onVi
                 Connected {formatDate(account.created_at)}
               </p>
               {isManual && (
-                <p className={`text-xs mt-0.5 ${account.last_csv_import_at ? 'text-slate-500' : 'text-amber-400'}`}>
-                  {account.last_csv_import_at
-                    ? `Last imported: ${formatDate(account.last_csv_import_at)}`
-                    : 'No imports yet'}
+                <p className={clsx('text-xs mt-0.5', importStatusWarns ? 'text-amber-400' : 'text-slate-500')}>
+                  {importStatus}
                 </p>
               )}
             </div>
@@ -524,10 +529,8 @@ export const AccountCard = ({ account, connectionAccountNames, onImportCsv, onVi
                 Connected {formatDate(account.created_at)}
               </p>
               {isManual && (
-                <span className={`text-xs ${account.last_csv_import_at ? 'text-slate-500' : 'text-amber-400'}`}>
-                  • {account.last_csv_import_at
-                    ? `Last imported: ${formatDate(account.last_csv_import_at)}`
-                    : 'No imports yet'}
+                <span className={clsx('text-xs', importStatusWarns ? 'text-amber-400' : 'text-slate-500')}>
+                  • {importStatus}
                 </span>
               )}
             </div>
