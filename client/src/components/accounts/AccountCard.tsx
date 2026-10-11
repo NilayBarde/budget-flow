@@ -1,13 +1,13 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { usePlaidLink } from 'react-plaid-link';
-import { RefreshCw, Trash2, Upload, History, MoreVertical, KeyRound, Users, Eye, EyeOff, Pencil } from 'lucide-react';
+import { RefreshCw, Trash2, Upload, History, MoreVertical, KeyRound, Users, Eye, EyeOff, Pencil, Unlink } from 'lucide-react';
 import { Card, Button } from '../ui';
 import type { Account } from '../../types';
 import { formatDate } from '../../utils/formatters';
 import { isManualAccount } from '../../utils/account-types';
 import { ReconnectNotice } from './ReconnectNotice';
 import { SyncErrorNotice } from './SyncErrorNotice';
-import { useSyncAccount, useDeleteAccount, useRefreshAccounts, useCreatePlaidUpdateLinkToken, useToggleAccountInvestmentExclusion } from '../../hooks';
+import { useAccounts, useSyncAccount, useDeleteAccount, useDisconnectAccount, useRefreshAccounts, useCreatePlaidUpdateLinkToken, useToggleAccountInvestmentExclusion } from '../../hooks';
 
 
 // Wrapper component for Plaid Link update mode - only renders when we have a token
@@ -69,6 +69,8 @@ const getOAuthRedirectUri = () => {
 export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: AccountCardProps) => {
   const syncAccount = useSyncAccount();
   const deleteAccount = useDeleteAccount();
+  const disconnectAccount = useDisconnectAccount();
+  const { data: allAccounts } = useAccounts();
   const refreshAccounts = useRefreshAccounts();
   const createUpdateLinkToken = useCreatePlaidUpdateLinkToken();
   const toggleExclusion = useToggleAccountInvestmentExclusion();
@@ -107,10 +109,36 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: Acc
   }, [syncAccount, account.id]);
 
   const handleDelete = useCallback(() => {
-    if (confirm(`Are you sure you want to disconnect ${account.institution_name}?`)) {
+    const history = isManual ? '' : ' and all of its transaction history (use Disconnect to keep the history)';
+    if (confirm(`Delete ${account.institution_name} ${account.account_name}${history}? This can't be undone.`)) {
       deleteAccount.mutate(account.id);
     }
-  }, [deleteAccount, account.institution_name, account.id]);
+  }, [deleteAccount, isManual, account.institution_name, account.account_name, account.id]);
+
+  // Plaid bills per bank connection, which can hold several accounts (a bank's checking and card)
+  const siblingNames = useMemo(
+    () => (allAccounts ?? []).filter(a => a.id !== account.id && a.plaid_item_id === account.plaid_item_id).map(a => a.account_name),
+    [allAccounts, account.id, account.plaid_item_id],
+  );
+
+  const handleDisconnect = useCallback(() => {
+    const billing = siblingNames.length > 0
+      ? `\n\n${siblingNames.join(', ')} still use this bank connection, so Plaid keeps billing it until they are disconnected too.`
+      : '\n\nThis removes the bank connection from Plaid, which stops its monthly fee.';
+    const message = `Disconnect ${account.institution_name} ${account.account_name} from Plaid?\n\n`
+      + 'Its transaction history is kept. It becomes a manual account: edit the balance by hand and add new activity with CSV imports.'
+      + billing;
+    if (!confirm(message)) return;
+    disconnectAccount.mutate(account.id, {
+      onSuccess: result => {
+        setRefreshResult(result.plaid_item_removed
+          ? 'Disconnected from Plaid. History kept.'
+          : `Disconnected. Plaid still bills this connection for ${result.still_connected.join(', ')}.`);
+        setTimeout(() => setRefreshResult(null), 8000);
+      },
+      onError: error => setUpdateError(error.message),
+    });
+  }, [disconnectAccount, siblingNames, account.institution_name, account.account_name, account.id]);
 
   const handleImportCsv = useCallback(() => {
     onImportCsv?.(account);
@@ -426,13 +454,24 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: Acc
                   )}
 
                   <div className="border-t border-midnight-600 my-1" />
+                  {!isManual && (
+                    <button
+                      onClick={() => handleMenuAction(handleDisconnect)}
+                      disabled={disconnectAccount.isPending}
+                      className="w-full px-3 py-2 text-left text-sm text-amber-400 hover:bg-midnight-700 flex items-center gap-2 disabled:opacity-50"
+                    >
+                      <Unlink className="h-4 w-4" />
+                      Disconnect
+                      <span className="text-xs text-slate-500 ml-auto">Keeps history</span>
+                    </button>
+                  )}
                   <button
                     onClick={() => handleMenuAction(handleDelete)}
                     disabled={deleteAccount.isPending}
                     className="w-full px-3 py-2 text-left text-sm text-rose-400 hover:bg-midnight-700 flex items-center gap-2 disabled:opacity-50"
                   >
                     <Trash2 className="h-4 w-4" />
-                    {isManual ? 'Delete Account' : 'Disconnect Account'}
+                    Delete Account
                   </button>
                 </div>
               )}
@@ -587,13 +626,24 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: Acc
                   )}
 
                   <div className="border-t border-midnight-600 my-1" />
+                  {!isManual && (
+                    <button
+                      onClick={() => handleMenuAction(handleDisconnect)}
+                      disabled={disconnectAccount.isPending}
+                      className="w-full px-3 py-2 text-left text-sm text-amber-400 hover:bg-midnight-700 flex items-center gap-2 disabled:opacity-50"
+                    >
+                      <Unlink className="h-4 w-4" />
+                      Disconnect
+                      <span className="text-xs text-slate-500 ml-auto">Keeps history</span>
+                    </button>
+                  )}
                   <button
                     onClick={() => handleMenuAction(handleDelete)}
                     disabled={deleteAccount.isPending}
                     className="w-full px-3 py-2 text-left text-sm text-rose-400 hover:bg-midnight-700 flex items-center gap-2 disabled:opacity-50"
                   >
                     <Trash2 className="h-4 w-4" />
-                    {isManual ? 'Delete Account' : 'Disconnect Account'}
+                    Delete Account
                   </button>
                 </div>
               )}

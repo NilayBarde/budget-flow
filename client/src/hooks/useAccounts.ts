@@ -84,6 +84,18 @@ export const useDeleteAccount = () => {
   });
 };
 
+export const useDisconnectAccount = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (accountId: string) => api.disconnectAccount(accountId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['sync-health'] });
+    },
+  });
+};
+
 // CSV Import hooks
 export const usePreviewCsvImport = () => {
   return useMutation({

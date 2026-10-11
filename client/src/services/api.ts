@@ -156,6 +156,16 @@ export const syncAccount = (accountId: string) =>
 export const deleteAccount = (accountId: string) =>
   fetchApi<void>(`/accounts/${accountId}`, { method: 'DELETE' });
 
+export interface DisconnectAccountResult {
+  account: Account;
+  /** False while other accounts still use the bank connection, so Plaid keeps billing it */
+  plaid_item_removed: boolean;
+  still_connected: string[];
+}
+
+export const disconnectAccount = (accountId: string) =>
+  fetchApi<DisconnectAccountResult>(`/accounts/${accountId}/disconnect`, { method: 'POST' });
+
 export interface UpdateAccountData {
   account_name?: string;
   account_type?: string;

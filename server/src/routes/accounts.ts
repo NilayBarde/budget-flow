@@ -6,6 +6,7 @@ import { applySyncResult } from '../services/sync-transactions.js';
 import { getPlaidErrorCode, needsReconnect, redactError } from '../services/plaid-errors.js';
 import { recordSyncFailure } from '../services/sync-error.js';
 import { removeItemIfUnused } from '../services/plaid-items.js';
+import { isManualToken } from '../services/account-types.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { classifySyncHealth, DEFAULT_STALE_DAYS, INVESTMENT_STALE_DAYS, parseStaleDaysOverride } from '../services/sync-health.js';
 import { toPublicAccount } from '../services/account-redaction.js';
@@ -295,6 +296,53 @@ router.post('/:id/update-webhook', async (req, res) => {
     res.status(500).json({ message: 'Failed to update webhook' });
   }
 });
+
+// Disconnect an account from Plaid but keep it and its history: it becomes a manual account (balance
+// edited by hand, new activity from CSV imports). The Plaid Item is removed, which stops its monthly
+// fee, once no other account uses it.
+router.post('/:id/disconnect', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const { data: account } = await supabase
+    .from('accounts')
+    .select('plaid_item_id, plaid_access_token')
+    .eq('id', id)
+    .single();
+  if (!account) return res.status(404).json({ message: 'Account not found' });
+  if (isManualToken(account.plaid_access_token)) {
+    return res.status(400).json({ message: 'Account is not connected to Plaid' });
+  }
+
+  const { data: updated, error } = await supabase
+    .from('accounts')
+    .update({
+      plaid_item_id: `manual-${id}`,
+      plaid_access_token: 'manual',
+      plaid_cursor: null,
+      needs_reauth: false,
+      reauth_detected_at: null,
+      last_sync_error: null,
+      last_sync_error_at: null,
+      relinked_at: null,
+    })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+
+  const plaidItemRemoved = await removeItemIfUnused(account.plaid_access_token);
+  // The accounts still on the old connection, so the user knows Plaid keeps billing it
+  const { data: stillConnected } = await supabase
+    .from('accounts')
+    .select('account_name')
+    .eq('plaid_item_id', account.plaid_item_id);
+
+  res.json({
+    account: toPublicAccount(updated),
+    plaid_item_removed: plaidItemRemoved,
+    still_connected: (stillConnected || []).map(a => a.account_name),
+  });
+}));
 
 // Delete an account (and its Plaid Item once no other account uses it)
 router.delete('/:id', asyncHandler(async (req, res) => {
