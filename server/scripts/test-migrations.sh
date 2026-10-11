@@ -66,4 +66,20 @@ check -d app -f "$sql/legacy-writes-check.sql"
 step "isolation after 030"
 check -d app -f "$sql/isolation-check.sql"
 
+step "030 refuses to run twice"
+if run -d app -f "$root/migrations/030_multi_user.sql" 2>"$tmp/err"; then
+  echo "030 should refuse a second run" >&2; exit 1
+fi
+expect_error "already been applied"
+
+step "031 contract migration"
+check -d app -f "$root/migrations/031_multi_user_cleanup.sql"
+
+step "isolation and per-user uniqueness after 031"
+check -d app -f "$sql/isolation-check.sql"
+check -d app -f "$sql/post-cleanup-check.sql"
+
+step "later migrations"
+for f in $(migrations_between 32 1000); do run -d app -f "$f"; done
+
 echo "All migration checks passed."
