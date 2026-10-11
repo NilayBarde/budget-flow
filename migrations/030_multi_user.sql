@@ -43,6 +43,18 @@ ALTER TABLE user_allowlist ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON user_allowlist FROM anon, authenticated;
 INSERT INTO user_allowlist (email) VALUES ('nilaybarde@gmail.com');
 
+-- Supabase Auth hands a session to any Google account, and the anon key is public, so invite-only
+-- is enforced here as well as in the server: the policies below admit only allowlisted emails, and
+-- removing someone from the allowlist cuts off their database access immediately.
+CREATE FUNCTION public.is_allowlisted() RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.user_allowlist WHERE email = lower((SELECT auth.jwt()) ->> 'email')
+  )
+$$;
+REVOKE EXECUTE ON FUNCTION public.is_allowlisted() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.is_allowlisted() TO authenticated;
+
 -- accounts.user_id was TEXT 'default-user'; it becomes a uuid like every other table's.
 ALTER TABLE accounts DROP COLUMN user_id;
 
@@ -64,8 +76,38 @@ BEGIN
     EXECUTE format('CREATE INDEX %I ON %I (user_id)', 'idx_' || t || '_user_id', t);
     EXECUTE format(
       'CREATE POLICY owner_all ON %I FOR ALL TO authenticated '
-      'USING (user_id = (SELECT auth.uid())) WITH CHECK (user_id = (SELECT auth.uid()))',
+      'USING (user_id = (SELECT auth.uid()) AND (SELECT public.is_allowlisted())) '
+      'WITH CHECK (user_id = (SELECT auth.uid()) AND (SELECT public.is_allowlisted()))',
       t);
+  END LOOP;
+END $$;
+
+-- Foreign keys don't check RLS, so without these a user who knew another user's row id could hang
+-- their own rows off it (a split on someone else's transaction, a budget on their category). Each
+-- referenced row must be visible to the writer, which under the policies above means theirs.
+DO $$
+DECLARE
+  refs CONSTANT text[][] := ARRAY[
+    ['transactions',       '(account_id IS NULL OR EXISTS (SELECT 1 FROM accounts r WHERE r.id = account_id))
+                            AND (category_id IS NULL OR EXISTS (SELECT 1 FROM categories r WHERE r.id = category_id))
+                            AND (import_id IS NULL OR EXISTS (SELECT 1 FROM csv_imports r WHERE r.id = import_id))
+                            AND (parent_transaction_id IS NULL
+                                 OR EXISTS (SELECT 1 FROM transactions r WHERE r.id = parent_transaction_id))'],
+    ['csv_imports',        'EXISTS (SELECT 1 FROM accounts r WHERE r.id = account_id)'],
+    ['budget_goals',       'EXISTS (SELECT 1 FROM categories r WHERE r.id = category_id)'],
+    ['transaction_splits', 'EXISTS (SELECT 1 FROM transactions r WHERE r.id = parent_transaction_id)'],
+    ['transaction_tags',   'EXISTS (SELECT 1 FROM transactions r WHERE r.id = transaction_id)
+                            AND EXISTS (SELECT 1 FROM tags r WHERE r.id = tag_id)'],
+    ['merchant_mappings',  '(default_category_id IS NULL
+                             OR EXISTS (SELECT 1 FROM categories r WHERE r.id = default_category_id))']
+  ];
+  i int;
+BEGIN
+  FOR i IN 1 .. array_length(refs, 1) LOOP
+    EXECUTE format('CREATE POLICY owned_refs_insert ON %I AS RESTRICTIVE FOR INSERT TO authenticated WITH CHECK (%s)',
+                   refs[i][1], refs[i][2]);
+    EXECUTE format('CREATE POLICY owned_refs_update ON %I AS RESTRICTIVE FOR UPDATE TO authenticated USING (true) WITH CHECK (%s)',
+                   refs[i][1], refs[i][2]);
   END LOOP;
 END $$;
 
@@ -86,11 +128,13 @@ ALTER TABLE accounts ADD COLUMN is_manual BOOLEAN GENERATED ALWAYS AS (
   plaid_access_token IS NULL OR plaid_access_token = '' OR plaid_access_token LIKE 'manual%'
 ) STORED;
 
--- Plaid secrets stay server-side: signed-in users get every accounts column except the token and
--- cursor, and can't rewrite identity columns. A migration that adds an accounts column must grant
--- it here too and add it to ACCOUNT_COLUMN_LIST in server/src/db/columns.ts.
+-- Plaid credentials and identifiers stay server-side. Signed-in users can read every accounts
+-- column except the token and cursor, and can never write the token, cursor, Plaid item or account
+-- ids (writing someone else's item id would hijack how webhooks find an item's owner). Creating an
+-- account therefore goes through the service-role client. A migration that adds an accounts column
+-- must grant it here too and add it to ACCOUNT_COLUMN_LIST in server/src/db/columns.ts.
 REVOKE ALL ON accounts FROM anon;
-REVOKE SELECT, UPDATE ON accounts FROM authenticated;
+REVOKE SELECT, INSERT, UPDATE ON accounts FROM authenticated;
 
 DO $$
 DECLARE
@@ -105,7 +149,8 @@ BEGIN
   SELECT string_agg(quote_ident(column_name), ', ' ORDER BY ordinal_position) INTO writable
   FROM information_schema.columns
   WHERE table_schema = 'public' AND table_name = 'accounts'
-    AND column_name NOT IN ('id', 'user_id', 'is_manual', 'plaid_access_token', 'plaid_cursor');
+    AND column_name NOT IN ('id', 'user_id', 'is_manual',
+                            'plaid_access_token', 'plaid_cursor', 'plaid_item_id', 'plaid_account_id');
 
   EXECUTE format('GRANT SELECT (%s) ON accounts TO authenticated', readable);
   EXECUTE format('GRANT UPDATE (%s) ON accounts TO authenticated', writable);

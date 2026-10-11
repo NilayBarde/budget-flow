@@ -19,7 +19,7 @@ END $$;
 SET LOCAL ROLE authenticated;
 
 -- 1. The owner sees every row.
-SELECT set_config('request.jwt.claims', json_build_object('sub', current_setting('check.owner'), 'role', 'authenticated')::text, true);
+SELECT set_config('request.jwt.claims', json_build_object('sub', current_setting('check.owner'), 'email', 'nilaybarde@gmail.com', 'role', 'authenticated')::text, true);
 DO $$
 DECLARE t text; n bigint;
 BEGIN

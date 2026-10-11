@@ -2,9 +2,10 @@
 -- A second user can reuse the owner's names, and the new composite upsert keys work.
 BEGIN;
 INSERT INTO auth.users (id, email) VALUES ('00000000-0000-0000-0000-00000000000b', 'second@example.com');
+INSERT INTO user_allowlist (email) VALUES ('second@example.com');
 
 SET LOCAL ROLE authenticated;
-SELECT set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000b","role":"authenticated"}', true);
+SELECT set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000b","email":"second@example.com","role":"authenticated"}', true);
 
 INSERT INTO categories (name, icon, color) VALUES ('Dining', 'utensils', '#f97316');
 INSERT INTO tags (name, color) VALUES ('Trip', '#ff0000');
