@@ -1,7 +1,7 @@
 # Multi-User Support with Google Sign-In
 
 **Date:** 2026-10-11
-**Status:** Draft, awaiting user approval
+**Status:** Draft, reviewed 2026-10-11, awaiting user approval
 
 ## Goal
 
@@ -35,7 +35,7 @@ Let more than one person use BudgetFlow, each with their own completely separate
 - `AuthProvider` + `AuthContext` (`hooks/AuthProvider.tsx`, `hooks/AuthContext.ts`, mirroring `MonthProvider`) hold the session, subscribe to `onAuthStateChange`, and expose `{ session, user, signOut }`.
 - `RequireAuth` wraps the `<Layout />` route in `App.tsx`; with no session it redirects to `/login`. `/login` stays outside it. The Plaid `/oauth-callback` route sits outside `Layout` today and gets its own `RequireAuth` wrapper, because finishing a bank link calls the API.
 - `services/api.ts`: `fetchApi` reads the current access token (`supabase.auth.getSession()`) and adds `Authorization: Bearer <token>`. The three CSV `FormData` calls, which call `fetch` directly today, move onto a shared `fetchForm<T>()` helper in the same file that adds the same header (without `Content-Type`). Any 401 signs out and sends the user to `/login`; 403 surfaces the server message.
-- On sign-out, `queryClient.clear()` so one user's cached data can never render for the next.
+- On sign-out, `queryClient.clear()` and remove the Plaid OAuth link token that `PlaidLinkButton` keeps in `localStorage`, so nothing from one user carries over to the next person on the same browser.
 - A user menu in the nav shows the Google avatar and email with a "Sign out" item (lucide-react icons).
 
 ### Server
@@ -46,18 +46,18 @@ Let more than one person use BudgetFlow, each with their own completely separate
   - `type Db = SupabaseClient`.
 - New `server/src/middleware/requireAuth.ts`, mounted in `index.ts` on `/api` after `express.json()` and before all routers, skipping `/api/health` and `/api/webhooks`:
   1. Missing or malformed bearer token → `401 { message: 'Not signed in' }`.
-  2. `supabaseAdmin.auth.getUser(token)`; error → 401.
-  3. Look up `user.email` (lowercased) in `user_allowlist` via `supabaseAdmin`; not found → `403 { message: "This Google account hasn't been invited." }`.
-  4. `await ensureUserSetup(user.id)`.
-  5. Set `req.userId = user.id` and `req.db = createUserClient(token)`; `next()`.
-  - The allowlist check and `ensureUserSetup` result are cached in an in-memory `Map<userId, expiresAt>` for 5 minutes so they don't run on every request. `getUser` runs every request (it is what proves the token is valid and unrevoked).
+  2. `supabaseAdmin.auth.getClaims(token)` (available in the installed supabase-js 2.89); invalid or expired → 401. With Supabase's asymmetric JWT signing keys enabled this verifies the signature locally against the cached JWKS, so it adds no network call; on a legacy symmetric-key project it falls back to a call to Supabase Auth. Enabling signing keys is part of the one-time setup. PostgREST verifies the same token again on every query, so the database never trusts the middleware alone.
+  3. Look up the `email` claim (lowercased) in `user_allowlist` via `supabaseAdmin`; not found → `403 { message: "This Google account hasn't been invited." }`.
+  4. `await ensureUserSetup(sub)`.
+  5. Set `req.userId = sub` (the claims' user ID) and `req.db = createUserClient(token)`; `next()`.
+  - The allowlist check and `ensureUserSetup` result are cached in an in-memory `Map<userId, expiresAt>` for 5 minutes so they don't run on every request. Consequence: removing someone from the allowlist takes effect within 5 minutes, not instantly. Token verification runs on every request.
   - Express `Request` is augmented in `server/src/types/express.d.ts` with `userId: string` and `db: Db`.
 - New `server/src/services/user-setup.ts` → `ensureUserSetup(userId)`: if the user has no categories, insert the default category set (moved out of `supabase-schema.sql` into a `DEFAULT_CATEGORIES` constant) with `user_id = userId`, using `supabaseAdmin` and `ON CONFLICT (user_id, name) DO NOTHING` so concurrent first requests are safe.
 
 ### One-time external setup (documented in `server/ENV_SETUP.md`)
 
 1. Google Cloud console: create an OAuth client (Web), authorized redirect URI `https://<project>.supabase.co/auth/v1/callback`.
-2. Supabase → Authentication → Providers → Google: paste client ID and secret, enable.
+2. Supabase → Authentication → Providers → Google: paste client ID and secret, enable. Supabase → Settings → JWT Keys: migrate to asymmetric signing keys so `getClaims` verifies locally.
 3. Supabase → Authentication → URL Configuration: add `http://localhost:5173` and the Vercel URL as redirect URLs.
 4. Env: server needs both `SUPABASE_SERVICE_ROLE_KEY` **and** `SUPABASE_ANON_KEY` (the anon-key fallback for the admin client is removed; startup fails loudly if either is missing). Client needs `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
 
@@ -92,7 +92,7 @@ Tables: `accounts`, `categories`, `csv_imports`, `transactions`, `budget_goals`,
 For each:
 1. `ADD COLUMN user_id uuid` (for `accounts`, rename the old text column to `legacy_user_id` first, then drop it after backfill).
 2. `UPDATE … SET user_id = owner_id`.
-3. `ALTER COLUMN user_id SET NOT NULL, SET DEFAULT auth.uid()`, `ADD FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE`.
+3. `ALTER COLUMN user_id SET NOT NULL, SET DEFAULT auth.uid()`, `ADD FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE`. Deleting a user in Supabase Auth therefore deletes all of their data; that is the intended way to remove someone.
 4. `CREATE INDEX idx_<table>_user_id ON <table>(user_id)`.
 
 Child tables (`transactions`, `transaction_splits`, `transaction_tags`, `csv_imports`) get their own `user_id` rather than relying on a join to `accounts`, so every policy is a plain column check and every index is direct.
@@ -128,17 +128,20 @@ Signed-in users must not be able to read Plaid access tokens through PostgREST (
 ```sql
 REVOKE SELECT, UPDATE ON accounts FROM authenticated, anon;
 GRANT SELECT (<every column except plaid_access_token, plaid_cursor>) ON accounts TO authenticated;
-GRANT UPDATE (<user-editable columns>) ON accounts TO authenticated;
+GRANT UPDATE (<every column except id, user_id, plaid_access_token, plaid_cursor>) ON accounts TO authenticated;
 ```
+
+`INSERT` and `DELETE` stay table-level. The `UPDATE` grant deliberately covers sync bookkeeping (`current_balance`, `last_synced_at`, `needs_reauth`, `last_sync_error*`) as well as user-editable fields, so routes keep updating those through `req.db`. `user_id` is not updatable, so a row can never change owner.
 
 Consequences for the server:
 - No `select('*')` on `accounts` through `req.db`. A shared `ACCOUNT_COLUMNS` constant in `server/src/db/columns.ts` lists the readable columns.
-- Reading or writing `plaid_access_token` / `plaid_cursor` goes through `supabaseAdmin` only, via `services/plaid-secrets.ts` (section 3).
+- Reading or writing `plaid_access_token` / `plaid_cursor` goes through `supabaseAdmin` only, via `services/plaid-secrets.ts` (section 3). This includes the cursor reset at `accounts.ts:549`.
+- Manual account creation (`accounts.ts:106`) drops its `user_id: 'default-user'` (the column is now a uuid filled by the default) and keeps writing the `'manual'` token sentinel, which the table-level `INSERT` grant allows.
 - Future migrations that add a column to `accounts` must also `GRANT SELECT (new_col)`; this is added to CLAUDE.md.
 
 ### Baseline and docs
 
-- `supabase-schema.sql` stays the 023 baseline; fresh projects run it then 024–028. Default category inserts in the baseline are removed by 028 (they are now created per user by `ensureUserSetup`); 028 deletes nothing for the owner because the owner's existing categories are backfilled.
+- `supabase-schema.sql` stays the 023 baseline; fresh projects run it then 024–028. On a fresh project the baseline's default categories have no owner until 028 assigns them to the owner like every other row, so 028 works the same on an existing or fresh database (either way the owner must exist in Auth first). Defaults for later users come from the `DEFAULT_CATEGORIES` constant via `ensureUserSetup`.
 - CLAUDE.md "Database" and "RLS" sections are rewritten: routes use `req.db`; RLS enforces ownership; `supabaseAdmin` only for webhooks, scripts and Plaid secrets, always with an explicit `user_id` filter.
 
 ## 3. Server refactor
@@ -176,7 +179,7 @@ New `server/src/services/plaid-secrets.ts`, the only code that reads or writes `
 ### Plaid link and sync
 
 - `plaid.ts` route: `createLinkToken` passes `client_user_id: req.userId` (replacing `DEFAULT_USER_ID`). Exchange inserts new accounts via `supabaseAdmin` (token column is not writable by `authenticated`) with `user_id: req.userId` set explicitly.
-- Duplicate-account detection by `plaid_account_id` (plaid.ts:160) is scoped to `user_id = req.userId`. If the same `plaid_account_id` exists under a different user, the exchange returns `409 { message: 'This bank account is already linked by another user.' }` rather than reassigning it.
+- Duplicate-account detection by `plaid_account_id` (plaid.ts:160) is scoped to `user_id = req.userId`. Plaid account IDs are per Item, so two people linking the same joint account get different IDs and this rarely matters; if the same `plaid_account_id` does exist under a different user, the exchange returns `409 { message: 'This bank account is already linked by another user.' }` rather than reassigning it.
 - User-triggered sync (accounts/transactions routes) reads secrets with `getItemSecrets(req.userId, id)` and calls `applySyncResult({ db: req.db, userId: req.userId, … })`.
 - Webhook sync: `getItemAccountsByPlaidItem(item_id)` → owner `userId` from the rows → `applySyncResult({ db: supabaseAdmin, userId, … })`. If the rows for one item somehow have different owners, log and skip (never mix).
 
@@ -250,4 +253,6 @@ Plaid webhooks that arrive between steps 4 and 5 fail; the next sync picks the c
 
 - **Broad mechanical change** (~170 DB call sites across 22 files). Mitigated by the type change: removing the `supabase` export makes every un-migrated call site a compile error.
 - **Column grants on `accounts`** must be maintained when columns are added. Documented in CLAUDE.md; a forgotten grant fails loudly (permission denied), not silently.
+- **Rows that point at another user's row.** Foreign keys don't check RLS, so a user who somehow knew another user's transaction UUID could attach their own split or tag to it. The row is owned by them and invisible to the other user, so it changes nothing the other user sees. Accepted; UUIDs are not guessable and are never exposed across users.
+- **Plaid webhook is unauthenticated (existing gap).** `/api/webhooks/plaid` doesn't verify Plaid's `Plaid-Verification` JWT today. With several users, a forged webhook could trigger paid syncs for anyone's item (no data exposure, since sync writes only to the item's owner). Follow-up: verify webhook signatures. Not part of this change.
 - **Service-role paths bypass RLS.** Confined to webhooks, scripts, `plaid-secrets.ts` and `ensureUserSetup`, all of which filter or stamp `user_id` explicitly and have tests asserting it.
