@@ -1,7 +1,7 @@
 # Multi-User Support with Google Sign-In
 
 **Date:** 2026-10-11
-**Status:** Draft, reviewed and rebased on main (PRs #60–#67) 2026-10-11, awaiting user approval
+**Status:** Approved 2026-10-11 (third review pass applied)
 
 ## Goal
 
@@ -102,7 +102,7 @@ Child tables (`transactions`, `transaction_splits`, `transaction_tags`, `csv_imp
 
 ### Per-user uniqueness
 
-030 adds the composite constraints alongside the old ones; 031 drops the old ones.
+030 adds the composite constraints alongside the old ones; 031 drops the old ones. `app_settings` can't hold two primary keys, so 030 adds `UNIQUE (user_id, key)` and 031 replaces the primary key with `(user_id, key)`. `ensureUserSetup` would hit the old `UNIQUE (name)` for a second user's default categories, which is one more reason others are invited only after 031.
 
 | Table | Before | After |
 |---|---|---|
@@ -121,8 +121,10 @@ RLS is already enabled on all tables (migration 019). Each data table gets:
 
 ```sql
 CREATE POLICY owner_all ON <table> FOR ALL TO authenticated
-  USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+  USING (user_id = (SELECT auth.uid())) WITH CHECK (user_id = (SELECT auth.uid()));
 ```
+
+`(SELECT auth.uid())` rather than bare `auth.uid()` is Supabase's documented pattern: Postgres evaluates it once per query instead of once per row, which matters for the stats routes that scan a year of transactions.
 
 `anon` gets no policies, so unauthenticated PostgREST access returns nothing.
 
@@ -163,7 +165,7 @@ Consequences for the server:
 
 ### Routes
 
-Every route handler switches from the imported `supabase` to `req.db`. Inserts rely on the `auth.uid()` default, so route code does not set `user_id`. Fetching another user's row by ID returns no rows under RLS, which already flows into the existing 404 paths.
+Every route handler switches from the imported `supabase` to `req.db`. Plain inserts rely on the `user_id` default, so route code does not set it. The exception is the five upserts listed in section 2, which set `user_id: req.userId` because conflict matching needs the value in the row. Fetching another user's row by ID returns no rows under RLS, which already flows into the existing 404 paths.
 
 Files: all 13 routers that query the DB (`accounts`, `app-settings`, `budget-goals`, `categories`, `csv-import`, `export`, `investments`, `merchant-mappings`, `plaid`, `recurring`, `stats`, `tags`, `transactions`). `webhooks.ts` stays on `supabaseAdmin`.
 
@@ -223,6 +225,13 @@ New `server/src/services/plaid-secrets.ts`, the only code that reads or writes `
 
 ## 5. Testing
 
+### Development environment
+
+`server/.env` points at the one production Supabase project, so the feature branch can't be exercised end-to-end there without running 030 on real data early. Two layers instead:
+
+- **Local migration test (PR 1).** `server/scripts/test-migrations.sh` creates a throwaway local Postgres cluster (`initdb` in a temp dir; Postgres is installed locally), loads a small stand-in for Supabase (`auth` schema with `auth.users`, an `auth.uid()` that reads `request.jwt.claims` like the real one, `anon`/`authenticated` roles with Supabase's default table grants), runs `supabase-schema.sql` then every migration from 024 up, then runs the isolation-check SQL below and fails on any unexpected result. It also runs a few inserts as the service role between 030 and 031 to prove the old code keeps working.
+- **Supabase dev project (before PR 6's end-to-end checks).** A free second Supabase project with the Google provider, the baseline plus migrations, and Plaid sandbox. The local client and server point at it through `server/.env` / `client/.env` while developing. The user creates this project; nothing before PR 6 needs it.
+
 ### Server (Vitest, mocks with `vi.fn()`)
 
 - `middleware/__tests__/requireAuth.test.ts`: no header → 401; bad token → 401; valid token, email not allowlisted → 403; allowlisted → sets `req.userId`/`req.db` and calls `next`; allowlist cache hit skips the lookup; `/api/health` and `/api/webhooks` bypass.
@@ -267,7 +276,7 @@ Work happens on a long-lived `feature/multi-user` branch cut from main. Each ste
 
 | PR | Into | Contents |
 |---|---|---|
-| 1 | feature | Migrations 030 and 031 with the isolation-check SQL; `supabaseAdmin` / `createUserClient` / `Db` in `db/supabase.ts`; `ACCOUNT_COLUMNS`; Express `Request` typing |
+| 1 | feature | Migrations 030 and 031 with the isolation-check SQL and `test-migrations.sh`; `supabaseAdmin` / `createUserClient` / `Db` in `db/supabase.ts`; `ACCOUNT_COLUMNS`; Express `Request` typing |
 | 2 | feature | `requireAuth` middleware, `user_allowlist` lookup, `ensureUserSetup` + `DEFAULT_CATEGORIES`, mounted in `index.ts`; tests |
 | 3 | feature | Services to `DbContext`; `plaid-secrets.ts`; owner-aware webhook sync; `plaid-items.ts` on `supabaseAdmin`; `is_manual` in `idle-connections.ts`; tests |
 | 4 | feature | Routes, part 1: `accounts`, `plaid`, `transactions`, `csv-import` (the token- and sync-heavy ones) to `req.db`, composite `onConflict` keys, `asyncHandler` wrapping |
