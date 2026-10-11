@@ -6,6 +6,7 @@ import { applySyncResult } from '../services/sync-transactions.js';
 import { getPlaidErrorCode, needsReconnect, redactError } from '../services/plaid-errors.js';
 import { recordSyncFailure } from '../services/sync-error.js';
 import { removeItemIfUnused } from '../services/plaid-items.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
 import { classifySyncHealth, DEFAULT_STALE_DAYS, INVESTMENT_STALE_DAYS, parseStaleDaysOverride } from '../services/sync-health.js';
 import { toPublicAccount } from '../services/account-redaction.js';
 import { randomUUID } from 'node:crypto';
@@ -166,7 +167,8 @@ router.post('/:id/sync', async (req, res) => {
       console.log(`[Sync] Fetching account balance for ${account.institution_name} (${id})...`);
       const plaidData = await plaidService.getAccounts(account.plaid_access_token);
       const plaidAccount = plaidData.accounts.find(a => a.account_id === account.plaid_account_id);
-      if (plaidAccount) {
+      // Some institutions report no current balance; keep the last known one instead of blanking it
+      if (plaidAccount && plaidAccount.balances.current !== null) {
         latestBalance = plaidAccount.balances.current;
         console.log(`[Sync] Success via getAccounts: ${latestBalance}`);
       }
@@ -295,7 +297,7 @@ router.post('/:id/update-webhook', async (req, res) => {
 });
 
 // Delete an account (and its Plaid Item once no other account uses it)
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', asyncHandler(async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -320,7 +322,7 @@ router.delete('/:id', async (req, res) => {
     console.error('Error deleting account:', error);
     res.status(500).json({ message: 'Failed to delete account' });
   }
-});
+}));
 
 // Refresh accounts from Plaid - fetches any missing accounts from an existing Plaid Item
 // This is useful when the original link only stored one account but Plaid has multiple

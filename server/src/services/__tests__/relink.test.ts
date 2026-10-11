@@ -48,6 +48,26 @@ describe('matchRelinkedAccounts', () => {
     expect(matches.size).toBe(0);
   });
 
+  it('pairs a renamed account by what the old Item reports, including the mask', () => {
+    const old = new Map([['old-acct', { account_id: 'old-acct', name: 'BillPay Account', mask: '1234', type: 'depository', subtype: 'checking' }]]);
+    const matches = matchRelinkedAccounts(
+      [{ account_id: 'new-acct', name: 'BillPay Account', mask: '1234', type: 'depository', subtype: 'checking' }],
+      [stored({ account_name: 'Bilt Checking' })],
+      old,
+    );
+    expect(matches.get('new-acct')?.id).toBe('row-1');
+  });
+
+  it('does not take a look-alike account from another login, told apart by its mask', () => {
+    const old = new Map([['old-acct', { account_id: 'old-acct', name: 'BillPay Account', mask: '1234', type: 'depository', subtype: 'checking' }]]);
+    const matches = matchRelinkedAccounts(
+      [{ account_id: 'new-acct', name: 'BillPay Account', mask: '9999', type: 'depository', subtype: 'checking' }],
+      [stored()],
+      old,
+    );
+    expect(matches.size).toBe(0);
+  });
+
   it('does not reuse a stored account that already matched by id', () => {
     const matches = matchRelinkedAccounts(
       [
@@ -73,8 +93,12 @@ describe('pickAdoptableTransaction', () => {
     expect(picked?.id).toBe('b');
   });
 
-  it('takes a lone candidate even when the description changed', () => {
-    expect(pickAdoptableTransaction('UBER *TRIP', [candidate('a', 'UBER TRIP')], new Set())?.id).toBe('a');
+  it('takes a lone candidate whose description starts the same way', () => {
+    expect(pickAdoptableTransaction('UBER *TRIP 8XK2', [candidate('a', 'UBER TRIP')], new Set())?.id).toBe('a');
+  });
+
+  it('does not take a lone candidate for a different merchant', () => {
+    expect(pickAdoptableTransaction('WHOLE FOODS #10', [candidate('a', 'UBER TRIP')], new Set())).toBeUndefined();
   });
 
   it('does not guess between several candidates with other descriptions', () => {

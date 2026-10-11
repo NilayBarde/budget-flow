@@ -1,6 +1,7 @@
 import { supabase } from '../db/supabase.js';
 import { removeItem } from './plaid.js';
 import { redactError } from './plaid-errors.js';
+import { isManualToken } from './account-types.js';
 
 /**
  * Removes a Plaid Item once none of our accounts use its access token any more. Plaid bills every
@@ -9,7 +10,7 @@ import { redactError } from './plaid-errors.js';
  * A failed removal is logged, not thrown: the local change has already happened.
  */
 export const removeItemIfUnused = async (accessToken: string): Promise<boolean> => {
-  if (!accessToken || accessToken.startsWith('manual')) return false;
+  if (isManualToken(accessToken)) return false;
 
   const { count, error } = await supabase
     .from('accounts')

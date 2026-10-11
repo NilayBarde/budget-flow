@@ -28,6 +28,8 @@ export type Database = {
     last_synced_at: string | null;
     last_sync_error: string | null;
     last_sync_error_at: string | null;
+    /** Set while a re-linked Item is still resending history (migration 028) */
+    relinked_at: string | null;
   };
   transactions: {
     id: string;
