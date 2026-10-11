@@ -108,14 +108,9 @@ export function useUpdateTransaction() {
 
 ## Database & Migrations
 
-**Migration naming**: `NNN_description_in_snake_case.sql` — next file should increment from the highest existing number.
+**Migration naming**: `NNN_description_in_snake_case.sql`. Take the next number after the highest in `migrations/` (check with `ls migrations | tail -1`; don't hardcode it here, it goes stale). Numbers aren't guaranteed unique (there are two `026_` files), so check rather than assume.
 
-```
-migrations/029_add_account_idle_snoozed_until.sql  ← current latest
-migrations/030_your_new_migration.sql              ← next one
-```
-
-Run migrations in Supabase SQL editor (no CLI migration runner configured). `supabase-schema.sql` is a full baseline as of migration 023, so a fresh project runs it and then migrations 024 and up. Regenerate it when you want to move the baseline forward.
+Run migrations in Supabase SQL editor (no CLI migration runner configured), **before** deploying the code that reads them, and say so in the file's header comment. `supabase-schema.sql` is a full baseline as of migration 023, so a fresh project runs it and then migrations 024 and up. Regenerate it when you want to move the baseline forward.
 
 **RLS**: Enabled on all tables (migration 019). Server uses service-role key to bypass — no permissive policies needed. Don't add `user_id` filtering to server queries; the key handles isolation.
 
