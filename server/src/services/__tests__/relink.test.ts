@@ -111,7 +111,7 @@ describe('pickAdoptableTransaction', () => {
     expect(pickAdoptableTransaction('COFFEE', rows, new Set(['a', 'b']))).toBeUndefined();
   });
 
-  it('leaves CSV imported rows alone', () => {
-    expect(pickAdoptableTransaction('COFFEE', [candidate('a', 'COFFEE', null)], new Set())).toBeUndefined();
+  it('adopts a CSV imported row, which is the same transaction', () => {
+    expect(pickAdoptableTransaction('COFFEE', [candidate('a', 'COFFEE', null)], new Set())?.id).toBe('a');
   });
 });

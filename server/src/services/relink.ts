@@ -83,7 +83,8 @@ const descriptionHead = (description: string | null) => norm(description).replac
 
 /**
  * Picks the stored transaction (same account, date and amount, stored before the re-link) that a
- * re-linked Item's transaction is the same as. An identical description wins. Otherwise a lone
+ * re-linked Item's transaction is the same as. That includes rows CSV imported while the account
+ * was disconnected. An identical description wins. Otherwise a lone
  * candidate is taken only when its description starts the same way. Rows already adopted are never
  * picked twice, so two identical charges on one day each keep their own row.
  */
@@ -92,7 +93,7 @@ export const pickAdoptableTransaction = (
   candidates: AdoptionCandidate[],
   adopted: ReadonlySet<string>,
 ): AdoptionCandidate | undefined => {
-  const open = candidates.filter(c => c.plaid_transaction_id && !adopted.has(c.id));
+  const open = candidates.filter(c => !adopted.has(c.id));
   const exact = open.find(c => c.original_description === description);
   if (exact) return exact;
   if (open.length !== 1) return undefined;

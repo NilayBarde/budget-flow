@@ -6,6 +6,7 @@ import { applySyncResult } from '../services/sync-transactions.js';
 import { getPlaidErrorCode, needsReconnect, redactError } from '../services/plaid-errors.js';
 import { recordSyncFailure } from '../services/sync-error.js';
 import { removeItemIfUnused } from '../services/plaid-items.js';
+import { isManualToken } from '../services/account-types.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { classifySyncHealth, DEFAULT_STALE_DAYS, INVESTMENT_STALE_DAYS, parseStaleDaysOverride } from '../services/sync-health.js';
 import { toPublicAccount } from '../services/account-redaction.js';
@@ -295,6 +296,70 @@ router.post('/:id/update-webhook', async (req, res) => {
     res.status(500).json({ message: 'Failed to update webhook' });
   }
 });
+
+// Disconnect a bank connection from Plaid but keep its accounts and their history: each becomes a
+// manual account (balance edited by hand, new activity from CSV imports). It acts on the whole Plaid
+// Item, not one account, because Plaid bills per Item and keeps sending every account on it: a
+// single account taken off a live Item would have its new transactions filed under a sibling.
+router.post('/:id/disconnect', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const { data: account, error: lookupError } = await supabase
+    .from('accounts')
+    .select('plaid_item_id, plaid_access_token')
+    .eq('id', id)
+    .maybeSingle();
+  if (lookupError) throw lookupError;
+  if (!account) return res.status(404).json({ message: 'Account not found' });
+  if (isManualToken(account.plaid_access_token)) {
+    return res.status(400).json({ message: 'Account is not connected to Plaid' });
+  }
+
+  const { data: connection, error: connectionError } = await supabase
+    .from('accounts')
+    .select('id, account_name')
+    .eq('plaid_item_id', account.plaid_item_id);
+  if (connectionError) throw connectionError;
+
+  // Remove the Item at Plaid first. If that fails nothing has changed here, and the access token is
+  // still stored so the user can retry; dropping it first would leave an Item billing forever. An
+  // Item Plaid no longer knows is already gone, which is the outcome we want.
+  try {
+    await plaidService.removeItem(account.plaid_access_token);
+  } catch (plaidError) {
+    const code = getPlaidErrorCode(plaidError);
+    if (code !== 'ITEM_NOT_FOUND' && code !== 'INVALID_ACCESS_TOKEN') {
+      console.warn('Could not remove item from Plaid:', redactError(plaidError));
+      return res.status(502).json({ message: 'Plaid could not remove the connection, so nothing was changed. Try again.' });
+    }
+  }
+
+  for (const row of connection ?? []) {
+    const { error } = await supabase
+      .from('accounts')
+      .update({
+        plaid_item_id: `manual-${row.id}`,
+        plaid_access_token: 'manual',
+        plaid_cursor: null,
+        needs_reauth: false,
+        reauth_detected_at: null,
+        last_sync_error: null,
+        last_sync_error_at: null,
+        relinked_at: null,
+      })
+      .eq('id', row.id);
+    if (error) throw error;
+  }
+
+  // Pending rows will never post now, so they would count as spending forever
+  const ids = (connection ?? []).map(row => row.id);
+  if (ids.length > 0) {
+    const { error } = await supabase.from('transactions').delete().in('account_id', ids).eq('pending', true);
+    if (error) throw error;
+  }
+
+  res.json({ disconnected: (connection ?? []).map(row => row.account_name) });
+}));
 
 // Delete an account (and its Plaid Item once no other account uses it)
 router.delete('/:id', asyncHandler(async (req, res) => {
