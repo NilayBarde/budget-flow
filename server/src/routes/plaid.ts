@@ -54,7 +54,7 @@ router.post('/create-link-token', async (req, res) => {
   }
 });
 
-// Create update mode link token to add investments permission to existing accounts
+// Create update mode link token to reconnect or change an existing Plaid connection
 router.post('/create-update-link-token', async (req, res) => {
   try {
     const { account_id, redirect_uri } = req.body;
