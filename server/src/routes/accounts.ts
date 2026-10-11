@@ -7,6 +7,7 @@ import { getPlaidErrorCode, needsReconnect, redactError } from '../services/plai
 import { recordSyncFailure } from '../services/sync-error.js';
 import { removeItemIfUnused } from '../services/plaid-items.js';
 import { isManualToken } from '../services/account-types.js';
+import { findIdleConnections, IDLE_SNOOZE_DAYS } from '../services/idle-connections.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { classifySyncHealth, DEFAULT_STALE_DAYS, INVESTMENT_STALE_DAYS, parseStaleDaysOverride } from '../services/sync-health.js';
 import { toPublicAccount } from '../services/account-redaction.js';
@@ -43,11 +44,27 @@ router.get('/', async (req, res) => {
       }
     }
 
+    // Plaid connections with no activity in a while, which the Accounts page suggests disconnecting.
+    // One "newest transaction" lookup per Plaid account; manual accounts are never idle.
+    const plaidAccounts = (accounts || []).filter(a => !isManualToken(a.plaid_access_token));
+    const lastTransactionDates = await Promise.all(plaidAccounts.map(async account => {
+      const { data: newest, error: newestError } = await supabase
+        .from('transactions')
+        .select('date')
+        .eq('account_id', account.id)
+        .order('date', { ascending: false })
+        .limit(1);
+      if (newestError) throw newestError;
+      return { ...account, last_transaction_date: newest?.[0]?.date ?? null };
+    }));
+    const idle = findIdleConnections(lastTransactionDates, Date.now());
+
     // Merge last import dates into accounts
     // Use csv_imports table first, fall back to account's own last_csv_import_at (set by holdings import)
     const accountsWithLastImport = accounts?.map(account => ({
       ...toPublicAccount(account),
       last_csv_import_at: lastImportMap.get(account.id) || account.last_csv_import_at || null,
+      idle: idle.get(account.id) ?? null,
     }));
 
     res.json(accountsWithLastImport);
@@ -359,6 +376,29 @@ router.post('/:id/disconnect', asyncHandler(async (req, res) => {
   }
 
   res.json({ disconnected: (connection ?? []).map(row => row.account_name) });
+}));
+
+// "Keep" on an idle connection: hide the disconnect suggestion for IDLE_SNOOZE_DAYS. It applies to
+// every account on the connection, since the suggestion is about the connection.
+router.post('/:id/snooze-idle', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const { data: account, error: lookupError } = await supabase
+    .from('accounts')
+    .select('plaid_item_id')
+    .eq('id', id)
+    .maybeSingle();
+  if (lookupError) throw lookupError;
+  if (!account) return res.status(404).json({ message: 'Account not found' });
+
+  const snoozedUntil = new Date(Date.now() + IDLE_SNOOZE_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const { error } = await supabase
+    .from('accounts')
+    .update({ idle_snoozed_until: snoozedUntil })
+    .eq('plaid_item_id', account.plaid_item_id);
+  if (error) throw error;
+
+  res.json({ idle_snoozed_until: snoozedUntil });
 }));
 
 // Delete an account (and its Plaid Item once no other account uses it)

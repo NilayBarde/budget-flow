@@ -161,6 +161,9 @@ export interface DisconnectAccountResult {
   disconnected: string[];
 }
 
+export const snoozeIdleConnection = (accountId: string) =>
+  fetchApi<{ idle_snoozed_until: string }>(`/accounts/${accountId}/snooze-idle`, { method: 'POST' });
+
 export const disconnectAccount = (accountId: string) =>
   fetchApi<DisconnectAccountResult>(`/accounts/${accountId}/disconnect`, { method: 'POST' });
 

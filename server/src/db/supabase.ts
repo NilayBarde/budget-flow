@@ -30,6 +30,8 @@ export type Database = {
     last_sync_error_at: string | null;
     /** Set while a re-linked Item is still resending history (migration 028) */
     relinked_at: string | null;
+    /** "Keep" on an idle connection hides the disconnect suggestion until then (migration 029) */
+    idle_snoozed_until: string | null;
   };
   transactions: {
     id: string;

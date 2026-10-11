@@ -18,6 +18,9 @@ export interface Account {
   last_synced_at?: string | null;
   last_sync_error?: string | null;
   last_sync_error_at?: string | null;
+  /** Set when this account's Plaid connection has had no transactions in 60 days (server decides) */
+  idle?: { last_activity: string | null } | null;
+  idle_snoozed_until?: string | null;
   created_at: string;
 }
 
