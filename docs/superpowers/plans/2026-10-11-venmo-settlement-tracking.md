@@ -242,6 +242,15 @@ describe('findSettlementMatches', () => {
     expect(findSettlementMatches([v], [s1, s2, s3, s4])).toEqual([]);
   });
 
+  it('skips an ambiguous 1:1 match rather than guessing which split it was', () => {
+    // Two unrelated splits (two different dinners/friends) happen to owe the same amount.
+    // Picking either one would silently settle the wrong split, so neither is picked.
+    const s1 = split({ remainingAmount: 25 });
+    const s2 = split({ remainingAmount: 25 });
+    const v = venmo({ amount: -25 });
+    expect(findSettlementMatches([v], [s1, s2])).toEqual([]);
+  });
+
   it('never reuses a split across two different Venmo transactions', () => {
     const s = split({ remainingAmount: 25 });
     const v1 = venmo({ amount: -25, date: '2026-08-03' });
@@ -356,12 +365,17 @@ export const findSettlementMatches = (
       (s) => !usedSplitIds.has(s.id) && daysBetween(txn.date, s.date) <= windowDays,
     );
 
-    const exact = candidates.find((s) => Math.abs(toCents(s.remainingAmount) - targetCents) <= AMOUNT_TOLERANCE_CENTS);
-    if (exact) {
+    // Collecting every exact match (not just the first) so two unrelated splits that happen to
+    // owe the same amount are treated as ambiguous instead of silently picking whichever is
+    // first in the array.
+    const exactMatches = candidates.filter((s) => Math.abs(toCents(s.remainingAmount) - targetCents) <= AMOUNT_TOLERANCE_CENTS);
+    if (exactMatches.length === 1) {
+      const [exact] = exactMatches;
       matches.push({ venmoTransactionId: txn.id, splitIds: [exact.id], splitAmounts: { [exact.id]: exact.remainingAmount } });
       usedSplitIds.add(exact.id);
       continue;
     }
+    if (exactMatches.length > 1) continue; // ambiguous: two splits owe the same amount, don't guess
 
     const combinations = findSumCombinations(candidates, targetCents, MAX_SPLITS_PER_MATCH);
     if (combinations.length === 1) {
@@ -383,7 +397,7 @@ export const findSettlementMatches = (
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm run test --prefix server -- venmo-settlement-matching`
-Expected: PASS (all 9 cases).
+Expected: PASS (all 10 cases).
 
 - [ ] **Step 5: Commit**
 
@@ -850,7 +864,7 @@ git commit -m "Run Venmo settlement reconciliation after each sync"
 - Consumes: `loadUnsettledSplits`, `reconcileVenmoSettlements` types from Task 4; `detectTransactionType` from `transaction-type.ts`.
 - Produces:
   - `GET /api/venmo-settlements/pending` → `UnsettledSplit[]` joined with transaction description, as `{ splitId, transactionId, description, date, remainingAmount }[]`.
-  - `POST /api/venmo-settlements/:venmoTransactionId/link` body `{ splitIds: string[] }` → 204, or 400 on amount mismatch / already-settled split.
+  - `POST /api/venmo-settlements/:venmoTransactionId/link` body `{ splitIds: string[] }` → 204, or 400 on amount mismatch / already-settled split / the transaction not being an incoming payment.
   - `DELETE /api/venmo-settlements/:venmoTransactionId` → 204.
   - `linkVenmoSettlement(venmoTransactionId: string, splitIds: string[]): Promise<void>` and `unlinkVenmoSettlement(venmoTransactionId: string): Promise<void>`, exported from `venmo-settlement-reconciliation.ts`, consumed by the route and by Task 7's client (indirectly, via HTTP).
 
@@ -955,6 +969,14 @@ describe('linkVenmoSettlement', () => {
     state.settlements = [{ id: 's1', split_id: 'split-1', venmo_transaction_id: 'other-txn', amount: 25 }];
     await expect(linkVenmoSettlement('venmo-txn', ['split-1'])).rejects.toThrow(/settled/i);
   });
+
+  it('rejects linking a Venmo send (money out), even if the amount matches', async () => {
+    // A split can only be settled by money arriving, never by money the user sent — otherwise a
+    // real expense would get flipped to a transfer and silently drop out of spending totals.
+    state.transactions = [{ id: 'venmo-txn', amount: 25, is_venmo_settlement: false, transaction_type: 'expense' }];
+    await expect(linkVenmoSettlement('venmo-txn', ['split-1'])).rejects.toThrow(/incoming/i);
+    expect(state.settlements).toEqual([]);
+  });
 });
 
 describe('unlinkVenmoSettlement', () => {
@@ -978,6 +1000,10 @@ describe('unlinkVenmoSettlement', () => {
 Run: `npm run test --prefix server -- venmo-settlement-link`
 Expected: FAIL — `linkVenmoSettlement` / `unlinkVenmoSettlement` not exported.
 
+Note: the test file above now has 5 cases total — 4 for `linkVenmoSettlement` (including the
+new direction-check case) plus 1 for `unlinkVenmoSettlement` — Step 4 below expects all 5 to
+pass.
+
 - [ ] **Step 3: Implement the two service functions**
 
 Add to `server/src/services/venmo-settlement-reconciliation.ts` (append after `reconcileVenmoSettlementsAfterSync`):
@@ -999,6 +1025,10 @@ export const linkVenmoSettlement = async (venmoTransactionId: string, splitIds: 
   if (txnError) throw txnError;
   const txn = (txnData as { id: string; amount: number }[] | null)?.[0];
   if (!txn) throw new Error('Venmo transaction not found');
+  // Same direction rule reconcileVenmoSettlements enforces: a split is only ever settled by
+  // money arriving, never by money sent out. Without this, linking the wrong transaction would
+  // flip a real expense to a transfer and silently drop it out of spending totals.
+  if (txn.amount >= 0) throw new Error('Only an incoming Venmo payment can settle a split');
 
   const { data: splitRows, error: splitsError } = await supabase
     .from('transaction_splits')
@@ -1084,7 +1114,7 @@ export const unlinkVenmoSettlement = async (venmoTransactionId: string): Promise
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm run test --prefix server -- venmo-settlement-link`
-Expected: PASS (all 4 cases).
+Expected: PASS (all 5 cases).
 
 - [ ] **Step 5: Add the route and a description-joining query for the pending list**
 
