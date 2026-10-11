@@ -40,6 +40,17 @@ Required vars (see `server/ENV_SETUP.md`):
 - `PORT` (defaults to 3001)
 - Client: no env file needed locally (the client calls `/api` and the Vite dev server proxies it to `http://localhost:3001`). Set `VITE_API_URL` in `client/.env` (or the host's build env) only when the client is hosted separately from the API, for example on Vercel
 
+## Versioning
+
+**Every PR must bump the version in the root `package.json`.** The Settings page shows it (Vite injects it as `__APP_VERSION__`), and the `Version bump` GitHub check fails any PR whose version isn't higher than main's.
+
+```bash
+npm run bump                                    # patch: fixes, small tweaks (1.1.0 → 1.1.1)
+npm version minor --no-git-tag-version          # minor: new features (1.1.0 → 1.2.0)
+```
+
+Commit the updated `package.json` and `package-lock.json`. If main moved ahead while your PR was open, bump again above the new main version.
+
 ## Server Conventions
 
 **Routes**: Every route handler must be wrapped with `asyncHandler` — it catches rejections and passes to Express's global error handler.

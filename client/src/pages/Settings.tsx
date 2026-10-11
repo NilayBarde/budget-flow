@@ -325,7 +325,7 @@ export const Settings = () => {
           subtitle="BudgetFlow - Personal Finance Tracker"
         />
         <div className="space-y-2 text-sm text-slate-400">
-          <p>Version 1.0.0</p>
+          <p>Version {__APP_VERSION__}</p>
           <p>Built with React, TypeScript, and TailwindCSS</p>
           <p>Bank connections powered by Plaid</p>
         </div>

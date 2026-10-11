@@ -1,0 +1,32 @@
+name: Version bump
+
+# Every PR into main must raise the version in the root package.json,
+# which the Settings page shows as the app version.
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compare with main
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          base=$(git show "$BASE_SHA:package.json" | node -p 'JSON.parse(require("fs").readFileSync(0, "utf-8")).version')
+          head=$(node -p 'require("./package.json").version')
+          echo "main: $base, this PR: $head"
+          node -e '
+            const [base, head] = process.argv.slice(1).map(v => v.split(".").map(Number));
+            for (let i = 0; i < 3; i++) {
+              if (head[i] > base[i]) process.exit(0);
+              if (head[i] < base[i]) break;
+            }
+            console.error("::error file=package.json::Bump the version above main (run `npm run bump`, or `npm version minor --no-git-tag-version` for features)");
+            process.exit(1);
+          ' "$base" "$head"
