@@ -7,6 +7,7 @@ const dateDaysAgo = (days: number) => daysAgo(days).slice(0, 10);
 
 const account = (overrides: Partial<IdleCheckAccount> = {}): IdleCheckAccount => ({
   id: 'acct-1',
+  account_type: 'credit card',
   plaid_item_id: 'item-1',
   plaid_access_token: 'access-token',
   created_at: daysAgo(200),
@@ -22,7 +23,7 @@ describe('findIdleConnections', () => {
 
   it(`flags a connection with no transaction in more than ${IDLE_DAYS} days, with its last activity`, () => {
     const idle = findIdleConnections([account({ last_transaction_date: '2026-02-04' })], NOW);
-    expect(idle.get('acct-1')).toEqual({ last_activity: '2026-02-04' });
+    expect(idle.get('acct-1')).toEqual({ last_activity: '2026-02-04', updates_balances: false });
   });
 
   it(`does not flag a connection whose last transaction is exactly ${IDLE_DAYS} days old`, () => {
@@ -30,7 +31,7 @@ describe('findIdleConnections', () => {
   });
 
   it('flags an old connection that never had a transaction', () => {
-    expect(findIdleConnections([account({ last_transaction_date: null })], NOW).get('acct-1')).toEqual({ last_activity: null });
+    expect(findIdleConnections([account({ last_transaction_date: null })], NOW).get('acct-1')).toEqual({ last_activity: null, updates_balances: false });
   });
 
   it(`gives a connection linked less than ${IDLE_DAYS} days ago time to be used`, () => {
@@ -53,7 +54,7 @@ describe('findIdleConnections', () => {
     ];
     const idle = findIdleConnections(accounts, NOW);
     expect([...idle.keys()].sort()).toEqual(['brokerage', 'card']);
-    expect(idle.get('brokerage')).toEqual({ last_activity: '2026-03-23' });
+    expect(idle.get('brokerage')).toEqual({ last_activity: '2026-03-23', updates_balances: false });
   });
 
   it('measures the grace period from the oldest account, so an account added later does not reset it', () => {
@@ -73,6 +74,27 @@ describe('findIdleConnections', () => {
   it('never flags manual or disconnected accounts, which Plaid does not bill', () => {
     const manual = account({ plaid_item_id: 'manual-acct-1', plaid_access_token: 'manual', last_transaction_date: null });
     expect(findIdleConnections([manual], NOW).size).toBe(0);
+  });
+
+  it('leaves a re-linked connection alone while Plaid is still resending its history', () => {
+    const relinked = account({ last_transaction_date: '2026-03-01', relinked_at: daysAgo(0) });
+    expect(findIdleConnections([relinked], NOW).size).toBe(0);
+  });
+
+  it('leaves a broken connection to its reconnect or sync error notice, since its quiet is not disuse', () => {
+    const quiet = { last_transaction_date: '2026-03-01' };
+    expect(findIdleConnections([account({ ...quiet, needs_reauth: true })], NOW).size).toBe(0);
+    expect(findIdleConnections([account({ ...quiet, last_sync_error: 'Failed to save 1 transaction(s).' })], NOW).size).toBe(0);
+  });
+
+  it('says when a connection also keeps investment or savings balances up to date', () => {
+    const accounts = [
+      account({ id: 'card', last_transaction_date: '2026-03-23' }),
+      account({ id: 'brokerage', account_type: 'investment', last_transaction_date: null }),
+    ];
+    expect(findIdleConnections(accounts, NOW).get('card')).toEqual({ last_activity: '2026-03-23', updates_balances: true });
+    const savings = account({ account_type: 'savings', last_transaction_date: null });
+    expect(findIdleConnections([savings], NOW).get('acct-1')?.updates_balances).toBe(true);
   });
 
   it('keeps connections apart', () => {

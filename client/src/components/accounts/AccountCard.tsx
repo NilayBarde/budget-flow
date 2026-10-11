@@ -359,8 +359,14 @@ export const AccountCard = ({ account, connectionAccountNames, onImportCsv, onVi
           <IdleConnectionNotice
             institutionName={account.institution_name}
             lastActivity={account.idle.last_activity}
+            updatesBalances={account.idle.updates_balances}
             onDisconnect={handleDisconnect}
-            onKeep={() => snoozeIdle.mutate(account.id, { onError: error => setUpdateError(error.message) })}
+            onKeep={() => snoozeIdle.mutate(account.id, {
+              onError: error => {
+                setUpdateError(error.message);
+                setTimeout(() => setUpdateError(null), 8000);
+              },
+            })}
             busy={disconnectAccount.isPending || snoozeIdle.isPending}
           />
         )}

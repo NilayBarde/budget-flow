@@ -207,6 +207,8 @@ router.post('/exchange-token', asyncHandler(async (req, res) => {
             // The new Item resends the history: every sync adopts stored copies until it is all in
             historical_sync_complete: false,
             relinked_at: new Date().toISOString(),
+            // A snooze was about the replaced connection
+            idle_snoozed_until: null,
             institution_name: institutionName,
             // account_name is left alone: the user may have renamed it
             account_type: plaidAccount.subtype || plaidAccount.type || 'unknown',

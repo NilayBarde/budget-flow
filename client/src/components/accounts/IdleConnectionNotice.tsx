@@ -5,6 +5,8 @@ interface IdleConnectionNoticeProps {
   institutionName: string;
   /** Newest transaction on the connection (YYYY-MM-DD), or null if it never had one */
   lastActivity: string | null;
+  /** The connection also keeps investment or savings balances current, which disconnecting freezes */
+  updatesBalances?: boolean;
   onDisconnect: () => void;
   onKeep: () => void;
   busy?: boolean;
@@ -13,7 +15,7 @@ interface IdleConnectionNoticeProps {
 // Shown on the cards of a Plaid connection with no transactions in 60 days. Plaid bills every
 // connection monthly whether or not it brings anything in, so suggest disconnecting it (history
 // kept) or keeping it, which hides this for 90 days.
-export const IdleConnectionNotice = ({ institutionName, lastActivity, onDisconnect, onKeep, busy = false }: IdleConnectionNoticeProps) => (
+export const IdleConnectionNotice = ({ institutionName, lastActivity, updatesBalances = false, onDisconnect, onKeep, busy = false }: IdleConnectionNoticeProps) => (
   // role=status, not alert, for the same reason as ReconnectNotice: on screen at page load, once per card.
   <div role="status" className="mb-3 rounded-lg border border-slate-500/30 bg-slate-500/10 p-3">
     <p className="text-sm text-slate-200">
@@ -22,6 +24,11 @@ export const IdleConnectionNotice = ({ institutionName, lastActivity, onDisconne
         : `This ${institutionName} connection has had no transactions yet.`}
       {' '}Plaid still bills it monthly.
     </p>
+    {updatesBalances && (
+      <p className="mt-1 text-xs text-slate-400">
+        It still updates investment or savings balances for net worth. Disconnecting stops those updates; you would edit the balances by hand.
+      </p>
+    )}
     <div className="mt-2 flex flex-wrap gap-2">
       <button
         type="button"

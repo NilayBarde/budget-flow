@@ -30,6 +30,18 @@ describe('IdleConnectionNotice', () => {
     expect(screen.getByRole('status').textContent).toMatch(/no transactions yet/i);
   });
 
+  it('warns that disconnecting stops balance updates when the connection keeps balances current', () => {
+    renderNotice({ updatesBalances: true });
+
+    expect(screen.getByRole('status').textContent).toMatch(/stops those updates/i);
+  });
+
+  it('does not mention balances for a connection that only brings in transactions', () => {
+    renderNotice();
+
+    expect(screen.getByRole('status').textContent).not.toMatch(/balances/i);
+  });
+
   it('offers Disconnect (keeping history) and Keep', () => {
     const props = renderNotice();
 

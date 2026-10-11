@@ -1,4 +1,4 @@
-import { isManualToken } from './account-types.js';
+import { isHoldingsAccountType, isManualToken } from './account-types.js';
 
 // Plaid bills every connection (Item) monthly whether or not it brings anything in, so a connection
 // that has gone quiet is worth a nudge to disconnect it. Judged per connection, not per account,
@@ -12,10 +12,15 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface IdleCheckAccount {
   id: string;
+  account_type?: string | null;
   plaid_item_id: string;
   plaid_access_token: string;
   created_at: string;
   idle_snoozed_until?: string | null;
+  /** Set while a re-linked connection is still resending its history */
+  relinked_at?: string | null;
+  needs_reauth?: boolean | null;
+  last_sync_error?: string | null;
   /** Date (YYYY-MM-DD) of the account's newest transaction, pending included, or null if it has none */
   last_transaction_date: string | null;
 }
@@ -23,13 +28,20 @@ export interface IdleCheckAccount {
 export interface IdleConnection {
   /** Newest transaction date across the connection's accounts, or null if none ever arrived */
   last_activity: string | null;
+  /** The connection also keeps investment or savings balances current, which disconnecting freezes */
+  updates_balances: boolean;
 }
+
+const updatesBalances = (accountType?: string | null) =>
+  isHoldingsAccountType(accountType) || (accountType ?? '').toLowerCase().includes('savings');
 
 /**
  * The accounts on idle Plaid connections, keyed by account id. A connection is idle when it was
  * linked at least IDLE_DAYS ago (so a new card has time to be used), none of its accounts has had a
  * transaction in the last IDLE_DAYS, and the user has not snoozed it. Manual and disconnected
- * accounts are never idle: Plaid does not bill them.
+ * accounts are never idle: Plaid does not bill them. Nor is a connection that is re-linking (its
+ * history is still arriving) or broken (needs a reconnect, or its syncs fail): its quiet is not
+ * disuse, and its own notice already asks for a fix, not a disconnect.
  */
 export const findIdleConnections = (accounts: IdleCheckAccount[], now: number): Map<string, IdleConnection> => {
   const cutoff = now - IDLE_DAYS * DAY_MS;
@@ -38,7 +50,9 @@ export const findIdleConnections = (accounts: IdleCheckAccount[], now: number): 
   const connections = new Map<string, IdleCheckAccount[]>();
   for (const account of accounts) {
     if (isManualToken(account.plaid_access_token)) continue;
-    connections.set(account.plaid_item_id, [...(connections.get(account.plaid_item_id) ?? []), account]);
+    const members = connections.get(account.plaid_item_id);
+    if (members) members.push(account);
+    else connections.set(account.plaid_item_id, [account]);
   }
 
   const idle = new Map<string, IdleConnection>();
@@ -47,6 +61,8 @@ export const findIdleConnections = (accounts: IdleCheckAccount[], now: number): 
     const linkedAt = Math.min(...members.map(a => Date.parse(a.created_at)));
     if (linkedAt > cutoff) continue;
 
+    if (members.some(a => a.relinked_at || a.needs_reauth || a.last_sync_error)) continue;
+
     // "Keep" snoozes every account on the connection together; any live snooze counts
     if (members.some(a => a.idle_snoozed_until && Date.parse(a.idle_snoozed_until) > now)) continue;
 
@@ -54,7 +70,8 @@ export const findIdleConnections = (accounts: IdleCheckAccount[], now: number): 
     const lastActivity = dates.length > 0 ? dates.sort().at(-1)! : null;
     if (lastActivity && lastActivity >= cutoffDate) continue;
 
-    for (const account of members) idle.set(account.id, { last_activity: lastActivity });
+    const connection = { last_activity: lastActivity, updates_balances: members.some(a => updatesBalances(a.account_type)) };
+    for (const account of members) idle.set(account.id, connection);
   }
   return idle;
 };
