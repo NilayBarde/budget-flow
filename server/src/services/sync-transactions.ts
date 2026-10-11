@@ -210,7 +210,6 @@ const loadAdoptionCandidates = async (plaidItemId: string): Promise<Map<string, 
         .select('id, date, amount, plaid_transaction_id, original_description')
         .eq('account_id', account.id)
         .lt('created_at', account.relinked_at)
-        .not('plaid_transaction_id', 'is', null)
         .range(from, from + PAGE_SIZE - 1);
       if (rowsError) throw rowsError;
       for (const row of rows ?? []) {

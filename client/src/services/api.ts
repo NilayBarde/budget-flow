@@ -157,10 +157,8 @@ export const deleteAccount = (accountId: string) =>
   fetchApi<void>(`/accounts/${accountId}`, { method: 'DELETE' });
 
 export interface DisconnectAccountResult {
-  account: Account;
-  /** False while other accounts still use the bank connection, so Plaid keeps billing it */
-  plaid_item_removed: boolean;
-  still_connected: string[];
+  /** Every account on the bank connection, all now manual */
+  disconnected: string[];
 }
 
 export const disconnectAccount = (accountId: string) =>

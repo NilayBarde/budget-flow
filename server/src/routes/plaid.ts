@@ -161,7 +161,8 @@ router.post('/exchange-token', asyncHandler(async (req, res) => {
     console.log(`Found ${plaidAccounts.length} accounts from ${institutionName}`);
 
     // A re-link of a bank we already have creates a new Item. Find the stored accounts it replaces:
-    // any account Plaid kept the id of, plus this institution's other Plaid accounts.
+    // any account Plaid kept the id of, plus this institution's other Plaid accounts, including ones
+    // the user disconnected (manual now, but they keep their Plaid account id), which this reconnects.
     const plaidAccountIds = plaidAccounts.map(a => a.account_id);
     const columns = 'id, plaid_account_id, plaid_item_id, plaid_access_token, account_name, account_type';
     const [byId, byInstitution] = await Promise.all([
@@ -170,13 +171,15 @@ router.post('/exchange-token', asyncHandler(async (req, res) => {
     ]);
     const relinkable = new Map<string, StoredPlaidAccount>();
     for (const row of [...(byId.data || []), ...(byInstitution.data || [])] as StoredPlaidAccount[]) {
-      if (row.plaid_item_id !== itemId && !isManualToken(row.plaid_access_token)) relinkable.set(row.id, row);
+      const wasPlaid = !isManualToken(row.plaid_access_token) || Boolean(row.plaid_account_id);
+      if (row.plaid_item_id !== itemId && wasPlaid) relinkable.set(row.id, row);
     }
 
     // What each old Item still reports about its accounts, when it can still be read. Its masks keep a
     // second login's look-alike account from being taken for this one. /accounts/get is free.
     const oldPlaidAccounts = new Map<string, LinkedPlaidAccount>();
     for (const oldToken of new Set([...relinkable.values()].map(a => a.plaid_access_token))) {
+      if (isManualToken(oldToken)) continue;
       try {
         const old = await plaidService.getAccounts(oldToken);
         for (const account of old.accounts) oldPlaidAccounts.set(account.account_id, account);
