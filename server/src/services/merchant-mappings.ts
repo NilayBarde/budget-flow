@@ -1,4 +1,4 @@
-import { supabase } from '../db/supabase.js';
+import type { DbContext } from '../db/context.js';
 import type { TransactionType } from './transaction-type.js';
 
 export interface MerchantMapping {
@@ -18,8 +18,8 @@ export interface MerchantMappingLookup {
   find: (...candidateNames: (string | null | undefined)[]) => MerchantMapping | undefined;
 }
 
-export const loadMerchantMappings = async (): Promise<MerchantMappingLookup> => {
-  const { data } = await supabase.from('merchant_mappings').select('*');
+export const loadMerchantMappings = async ({ db, userId }: DbContext): Promise<MerchantMappingLookup> => {
+  const { data } = await db.from('merchant_mappings').select('*').eq('user_id', userId);
   const byName = new Map<string, MerchantMapping>(
     data?.map((m) => [m.original_name.toLowerCase(), m as MerchantMapping]) || [],
   );
@@ -53,15 +53,17 @@ const ID_BATCH_SIZE = 200;
  * a transaction's amount/date/pending without reverting a manual type correction.
  */
 export const loadManuallyTypedIds = async (
+  { db, userId }: DbContext,
   transactions: { transaction_id: string }[],
 ): Promise<Set<string>> => {
   const manuallyTypedIds = new Set<string>();
 
   for (let i = 0; i < transactions.length; i += ID_BATCH_SIZE) {
     const ids = transactions.slice(i, i + ID_BATCH_SIZE).map((tx) => tx.transaction_id);
-    const { data } = await supabase
+    const { data } = await db
       .from('transactions')
       .select('plaid_transaction_id, type_manually_set')
+      .eq('user_id', userId)
       .in('plaid_transaction_id', ids);
 
     for (const row of data || []) {

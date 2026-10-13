@@ -5,8 +5,10 @@ const db = {
   failUpdate: false,
 };
 
-vi.mock('../../db/supabase.js', () => ({
-  supabase: {
+// A fake client handed to the service through its context
+const ctx = {
+  userId: 'user-1',
+  db: {
     from: (table: string) => {
       const entry = { table, payload: {} as Record<string, unknown>, filters: [] as [string, unknown][] };
       const builder = {
@@ -25,7 +27,7 @@ vi.mock('../../db/supabase.js', () => ({
       return builder;
     },
   },
-}));
+} as never;
 
 const { describeSyncError, recordSyncFailure, SYNC_ERROR_MAX_LENGTH } = await import('../sync-error.js');
 
@@ -99,12 +101,12 @@ describe('recordSyncFailure', () => {
   });
 
   it('stores the reason and the time on every account of the item', async () => {
-    await recordSyncFailure('item-1', new Error('Failed to save 1 transaction(s).'));
+    await recordSyncFailure(ctx, 'item-1', new Error('Failed to save 1 transaction(s).'));
 
     expect(db.updates).toHaveLength(1);
     const [update] = db.updates;
     expect(update.table).toBe('accounts');
-    expect(update.filters).toEqual([['plaid_item_id', 'item-1']]);
+    expect(update.filters).toEqual([['user_id', 'user-1'], ['plaid_item_id', 'item-1']]);
     expect(update.payload.last_sync_error).toBe('Failed to save 1 transaction(s).');
     expect(new Date(update.payload.last_sync_error_at as string).getTime()).not.toBeNaN();
   });
@@ -113,30 +115,30 @@ describe('recordSyncFailure', () => {
     db.failUpdate = true;
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    await expect(recordSyncFailure('item-1', new Error('original'))).resolves.toBeUndefined();
+    await expect(recordSyncFailure(ctx, 'item-1', new Error('original'))).resolves.toBeUndefined();
 
     expect(logged).toHaveBeenCalled();
     logged.mockRestore();
   });
 
   it('also flags the item for reconnecting when the login expired, so every sync path agrees', async () => {
-    await recordSyncFailure('item-1', plaidError('ITEM_LOGIN_REQUIRED', 'the login details of this item have changed'));
+    await recordSyncFailure(ctx, 'item-1', plaidError('ITEM_LOGIN_REQUIRED', 'the login details of this item have changed'));
 
     const flag = db.updates.find(u => 'needs_reauth' in u.payload);
-    expect(flag?.filters).toEqual([['plaid_item_id', 'item-1']]);
+    expect(flag?.filters).toEqual([['user_id', 'user-1'], ['plaid_item_id', 'item-1']]);
     expect(flag?.payload.needs_reauth).toBe(true);
     expect(new Date(flag?.payload.reauth_detected_at as string).getTime()).not.toBeNaN();
   });
 
   it('does not flag a reconnect for any other failure', async () => {
-    await recordSyncFailure('item-1', plaidError('RATE_LIMIT_EXCEEDED', 'too many requests'));
-    await recordSyncFailure('item-1', new Error('Failed to save 1 transaction(s).'));
+    await recordSyncFailure(ctx, 'item-1', plaidError('RATE_LIMIT_EXCEEDED', 'too many requests'));
+    await recordSyncFailure(ctx, 'item-1', new Error('Failed to save 1 transaction(s).'));
 
     expect(db.updates.some(u => 'needs_reauth' in u.payload)).toBe(false);
   });
 
   it('does nothing when the item is unknown', async () => {
-    await recordSyncFailure(null, new Error('original'));
+    await recordSyncFailure(ctx, null, new Error('original'));
 
     expect(db.updates).toEqual([]);
   });

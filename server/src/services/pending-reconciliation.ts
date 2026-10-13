@@ -1,4 +1,4 @@
-import { supabase } from '../db/supabase.js';
+import type { DbContext } from '../db/context.js';
 import { cleanMerchantName } from './categorizer.js';
 import { scaleSplits, type SplitInput } from './split-scaling.js';
 import { randomUUID } from 'node:crypto';
@@ -27,15 +27,17 @@ interface PendingRow {
 // from the pending row onto the just-inserted posted row, then delete the
 // pending row. Returns true if a pending predecessor was found and reconciled.
 export async function reconcilePendingTransaction(
+  { db, userId }: DbContext,
   postedLocalId: string,
   postedAmount: number,
   pendingPlaidTxId: string | null | undefined,
 ): Promise<boolean> {
   if (!pendingPlaidTxId) return false;
 
-  const { data: pending, error: lookupError } = await supabase
+  const { data: pending, error: lookupError } = await db
     .from('transactions')
     .select('id, amount, category_id, notes, merchant_display_name, merchant_name, is_split, needs_review, split_dismissed, splits:transaction_splits(amount, description, is_my_share)')
+    .eq('user_id', userId)
     .eq('plaid_transaction_id', pendingPlaidTxId)
     .maybeSingle();
 
@@ -66,7 +68,7 @@ export async function reconcilePendingTransaction(
   // of the user's splits and tags, so nothing may fail quietly before that point. A thrown error
   // leaves the pending row in place for the sync's retry to finish.
   if (Object.keys(updates).length) {
-    const { error } = await supabase.from('transactions').update(updates).eq('id', postedLocalId);
+    const { error } = await db.from('transactions').update(updates).eq('user_id', userId).eq('id', postedLocalId);
     if (error) throw error;
   }
 
@@ -74,21 +76,23 @@ export async function reconcilePendingTransaction(
   // after this step but before the pending row was deleted is retried, so skip the copy when the
   // posted row already has splits; otherwise the retry would double them.
   const splits = p.splits || [];
-  const { count: existingSplitCount, error: countError } = await supabase
+  const { count: existingSplitCount, error: countError } = await db
     .from('transaction_splits')
     .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
     .eq('parent_transaction_id', postedLocalId);
   // If the count is unknown, do not guess "none": a wrong guess doubles the splits.
   if (countError) throw countError;
 
   if (p.is_split && splits.length && !existingSplitCount) {
     const scaled = scaleSplits(splits, postedAmount);
-    const { error: markError } = await supabase.from('transactions').update({ is_split: true }).eq('id', postedLocalId);
+    const { error: markError } = await db.from('transactions').update({ is_split: true }).eq('user_id', userId).eq('id', postedLocalId);
     if (markError) throw markError;
 
-    const { error: splitError } = await supabase.from('transaction_splits').insert(
+    const { error: splitError } = await db.from('transaction_splits').insert(
       scaled.map(s => ({
         id: randomUUID(),
+        user_id: userId,
         parent_transaction_id: postedLocalId,
         amount: s.amount,
         description: s.description,
@@ -100,20 +104,21 @@ export async function reconcilePendingTransaction(
   }
 
   // 3) Carry tags over.
-  const { data: tags, error: tagsError } = await supabase
+  const { data: tags, error: tagsError } = await db
     .from('transaction_tags')
     .select('tag_id')
+    .eq('user_id', userId)
     .eq('transaction_id', p.id);
   if (tagsError) throw tagsError;
   if (tags && tags.length) {
-    const { error } = await supabase
+    const { error } = await db
       .from('transaction_tags')
-      .upsert(tags.map(t => ({ transaction_id: postedLocalId, tag_id: t.tag_id })));
+      .upsert(tags.map(t => ({ user_id: userId, transaction_id: postedLocalId, tag_id: t.tag_id })));
     if (error) throw error;
   }
 
   // 4) Remove the superseded pending row (its splits/tags cascade via FK).
-  const { error: deleteError } = await supabase.from('transactions').delete().eq('id', p.id);
+  const { error: deleteError } = await db.from('transactions').delete().eq('user_id', userId).eq('id', p.id);
   if (deleteError) throw deleteError;
   return true;
 }

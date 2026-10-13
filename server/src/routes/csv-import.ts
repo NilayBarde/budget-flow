@@ -2,6 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { parse } from 'csv-parse/sync';
 import { supabase } from '../db/supabase.js';
+import { userContext } from '../db/context.js';
 import { categorizeForSpending, categorizeWithPlaid, cleanMerchantName } from '../services/categorizer.js';
 import { randomUUID } from 'node:crypto';
 
@@ -281,7 +282,7 @@ router.post('/:accountId/preview', upload.single('file'), async (req, res) => {
     const categoryNameById = new Map(categories?.map(c => [c.id, c.name]) || []);
 
     // Get merchant mappings so the preview reflects the user's previous corrections
-    const merchantMappings = await loadMerchantMappings();
+    const merchantMappings = await loadMerchantMappings(userContext(req));
 
     // Parse transactions
     const transactions: ParsedTransaction[] = [];
@@ -450,7 +451,7 @@ router.post('/:accountId/import', upload.single('file'), async (req, res) => {
     const { data: categories } = await supabase.from('categories').select('id, name');
     const categoryMap = new Map(categories?.map(c => [c.name, c.id]) || []);
 
-    const merchantMappings = await loadMerchantMappings();
+    const merchantMappings = await loadMerchantMappings(userContext(req));
 
     // Create import record
     const importId = randomUUID();

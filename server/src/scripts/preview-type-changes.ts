@@ -3,9 +3,10 @@
  * whose type would change. Read-only, never writes to the database.
  *
  * Usage (from server/):
- *   npx tsx --env-file=.env src/scripts/preview-type-changes.ts
+ *   npx tsx --env-file=.env src/scripts/preview-type-changes.ts --user-email you@example.com
  */
-import { supabase } from '../db/supabase.js';
+import type { DbContext } from '../db/context.js';
+import { scriptContext } from './script-user.js';
 import { loadMerchantMappings, resolveTransactionType } from '../services/merchant-mappings.js';
 import { detectTransactionType, SPENDING_PFC_PRIMARY } from '../services/transaction-type.js';
 import type { PlaidPFC } from '../services/categorizer.js';
@@ -23,12 +24,13 @@ interface Row {
   plaid_category: PlaidPFC | null;
 }
 
-const loadAllTransactions = async (): Promise<Row[]> => {
+const loadAllTransactions = async ({ db, userId }: DbContext): Promise<Row[]> => {
   const rows: Row[] = [];
   for (let from = 0; ; from += PAGE_SIZE) {
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('transactions')
       .select('id, date, amount, merchant_name, original_description, transaction_type, type_manually_set, plaid_category')
+      .eq('user_id', userId)
       .order('date', { ascending: false })
       .range(from, from + PAGE_SIZE - 1);
     if (error) throw error;
@@ -39,7 +41,8 @@ const loadAllTransactions = async (): Promise<Row[]> => {
 };
 
 const main = async () => {
-  const [rows, mappings] = await Promise.all([loadAllTransactions(), loadMerchantMappings()]);
+  const ctx = await scriptContext();
+  const [rows, mappings] = await Promise.all([loadAllTransactions(ctx), loadMerchantMappings(ctx)]);
 
   let skippedManual = 0;
   // Rows the detector change itself flips (new logic vs. the previous patterns-first logic).

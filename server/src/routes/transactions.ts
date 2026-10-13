@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
+import { userContext } from '../db/context.js';
 import { randomUUID } from 'node:crypto';
 import { categorizeWithPlaid, cleanMerchantName } from '../services/categorizer.js';
 import { getCategoryIdForType } from '../services/category-lookup.js';
@@ -301,7 +302,7 @@ router.post('/', async (req, res) => {
         needsReview = result.needsReview;
       } else if (finalTransactionType === 'income' || finalTransactionType === 'investment') {
         // Auto-assign category based on transaction type
-        finalCategoryId = await getCategoryIdForType(finalTransactionType as TransactionType);
+        finalCategoryId = await getCategoryIdForType(userContext(req), finalTransactionType as TransactionType);
       }
     }
 
@@ -353,7 +354,7 @@ router.patch('/:id', async (req, res) => {
     // If changing transaction_type to 'income' or 'investment' and no category_id provided,
     // auto-assign the corresponding category
     if ((updates.transaction_type === 'income' || updates.transaction_type === 'investment') && !updates.category_id) {
-      const categoryId = await getCategoryIdForType(updates.transaction_type as TransactionType);
+      const categoryId = await getCategoryIdForType(userContext(req), updates.transaction_type as TransactionType);
       if (categoryId) {
         updates.category_id = categoryId;
       }
