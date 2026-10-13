@@ -152,6 +152,12 @@ ALTER TABLE budget_goals
   ADD CONSTRAINT budget_goals_user_id_category_id_month_year_key UNIQUE (user_id, category_id, month, year);
 ALTER TABLE app_settings ADD CONSTRAINT app_settings_user_id_key_key UNIQUE (user_id, key);
 
+-- The server gives each user the default categories once, recorded by this marker (see
+-- server/src/services/user-setup.ts). The owner already has their categories, so they're marked
+-- set up and never re-seeded, even if they've renamed or deleted defaults.
+INSERT INTO app_settings (user_id, key, value)
+VALUES (current_setting('budgetflow.owner_id')::uuid, 'user_defaults_seeded', 'true');
+
 -- Routes decide "manual or disconnected?" from the token. Signed-in users can't read the token,
 -- so expose the answer as its own column. Mirrors isManualToken in server/src/services/account-types.ts.
 ALTER TABLE accounts ADD COLUMN is_manual BOOLEAN GENERATED ALWAYS AS (
@@ -189,21 +195,5 @@ END $$;
 COMMIT;
 
 -- If your first Google sign-in created a second nilaybarde@gmail.com user instead of linking to the
--- one you created by hand (two rows in Authentication → Users), move the data to the Google one
--- BEFORE running 031, then delete the placeholder user in the dashboard:
---
--- BEGIN;
--- DO $$
--- DECLARE
---   placeholder uuid := '<id of the user you created by hand>';
---   google_user uuid := '<id of the user Google sign-in created>';
---   t text;
--- BEGIN
---   FOREACH t IN ARRAY ARRAY['accounts','categories','csv_imports','transactions','budget_goals','transaction_splits',
---                            'merchant_mappings','tags','transaction_tags','recurring_transactions','app_settings'] LOOP
---     EXECUTE format('UPDATE %I SET user_id = %L WHERE user_id = %L', t, google_user, placeholder);
---     EXECUTE format(
---       'ALTER TABLE %I ALTER COLUMN user_id SET DEFAULT COALESCE(auth.uid(), %L::uuid)', t, google_user);
---   END LOOP;
--- END $$;
--- COMMIT;
+-- one you created by hand (two rows in Authentication → Users), run
+-- server/scripts/sql/reassign-owner.sql BEFORE 031, then delete the placeholder user in the dashboard.

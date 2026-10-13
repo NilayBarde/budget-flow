@@ -273,7 +273,7 @@ SQL to run in the editor after migrating, impersonating two users via `set_confi
 6. Sign in with Google and verify your data.
 7. Run `031_multi_user_cleanup.sql`. Only then add other people to `user_allowlist`.
 
-**If the Google sign-in creates a separate user instead of linking** (visible as two `nilaybarde@gmail.com` rows in Auth → Users), run the reassignment block kept commented at the bottom of 030 before step 7: update `user_id` from the placeholder ID to the Google user's ID on every table, then delete the placeholder user.
+**If the first sign-in shows an error or an empty app**, check Authentication → Users for two `nilaybarde@gmail.com` rows: Google sign-in created a separate user instead of linking. (Before 031 the server can't even seed that user's defaults, because the old `UNIQUE (name)` still holds, so its requests fail.) Put the two ids into `server/scripts/sql/reassign-owner.sql` and run it before step 7. It moves your data to the Google user, refusing if that user already owns anything real, then you delete the placeholder in the dashboard. `test:migrations` exercises it.
 
 ## 7. Delivery
 
