@@ -50,7 +50,7 @@ Let more than one person use BudgetFlow, each with their own completely separate
   3. Look up the `email` claim (lowercased) in `user_allowlist` via `supabaseAdmin`; not found → `403 { message: "This Google account hasn't been invited." }`.
   4. `await ensureUserSetup(sub)`.
   5. Set `req.userId = sub` (the claims' user ID) and `req.db = createUserClient(token)`; `next()`.
-  - The allowlist check and `ensureUserSetup` result are cached in an in-memory `Map<userId, expiresAt>` for 5 minutes so they don't run on every request. Consequence: removing someone from the allowlist takes effect within 5 minutes, not instantly. Token verification runs on every request.
+  - The allowlist check and `ensureUserSetup` result are cached in an in-memory `Map<userId, expiresAt>` for 5 minutes so they don't run on every request. The database enforces the allowlist too (section 2, Policies), so removing someone cuts off their data immediately; the cache only delays the server's friendlier 403 by up to 5 minutes. Token verification runs on every request.
   - Express `Request` is augmented in `server/src/types/express.d.ts` with `userId: string` and `db: Db`.
 - New `server/src/services/user-setup.ts` → `ensureUserSetup(userId)`: if the user has no categories, insert the default category set (moved out of `supabase-schema.sql` into a `DEFAULT_CATEGORIES` constant) with `user_id = userId`, using `supabaseAdmin` and `ON CONFLICT (user_id, name) DO NOTHING` so concurrent first requests are safe.
 
@@ -121,8 +121,13 @@ RLS is already enabled on all tables (migration 019). Each data table gets:
 
 ```sql
 CREATE POLICY owner_all ON <table> FOR ALL TO authenticated
-  USING (user_id = (SELECT auth.uid())) WITH CHECK (user_id = (SELECT auth.uid()));
+  USING (user_id = (SELECT auth.uid()) AND (SELECT public.is_allowlisted()))
+  WITH CHECK (user_id = (SELECT auth.uid()) AND (SELECT public.is_allowlisted()));
 ```
+
+**Invite-only in the database.** Supabase Auth gives a session to any Google account and the anon key is public, so without this an uninvited person could sign in and use PostgREST directly with their own (empty) rows. `public.is_allowlisted()` is a `SECURITY DEFINER` function returning whether the JWT's `email` claim is in `user_allowlist`; `anon` can't execute it.
+
+**References must be the writer's own.** Foreign keys don't check RLS, so each child table also gets `AS RESTRICTIVE` insert and update policies (`owned_refs_insert`, `owned_refs_update`) requiring every referenced parent row to be visible to the writer, which under `owner_all` means owned by them: `transactions` (account, category, import, parent transaction), `csv_imports` (account), `budget_goals` (category), `transaction_splits` (parent transaction), `transaction_tags` (transaction, tag), `merchant_mappings` (default category). These apply to writes only, so reads cost nothing extra.
 
 `(SELECT auth.uid())` rather than bare `auth.uid()` is Supabase's documented pattern: Postgres evaluates it once per query instead of once per row, which matters for the stats routes that scan a year of transactions.
 
@@ -147,12 +152,12 @@ ALTER TABLE accounts ADD COLUMN is_manual boolean GENERATED ALWAYS AS
 
 It mirrors `isManualToken` in `services/account-types.ts`. Routes and `idle-connections.ts` switch to `is_manual`; `isManualToken` stays only for code running under `supabaseAdmin` (relink, `plaid-items.ts`). `is_manual` is excluded from the `UPDATE` grant (Postgres rejects updates to generated columns anyway).
 
-`INSERT` and `DELETE` stay table-level. The `UPDATE` grant deliberately covers sync bookkeeping (`current_balance`, `last_synced_at`, `needs_reauth`, `last_sync_error*`) as well as user-editable fields, so routes keep updating those through `req.db`. `user_id` is not updatable, so a row can never change owner.
+Signed-in users get no `INSERT` on `accounts`, and the `UPDATE` grant also excludes `plaid_item_id` and `plaid_account_id`: writing another user's item id onto your own account would make webhooks see an item with two owners and skip it. `DELETE` stays table-level. The `UPDATE` grant deliberately covers sync bookkeeping (`current_balance`, `last_synced_at`, `needs_reauth`, `last_sync_error*`) as well as user-editable fields, so routes keep updating those through `req.db`. `user_id` is not updatable, so a row can never change owner.
 
 Consequences for the server:
 - No `select('*')` on `accounts` through `req.db`. A shared `ACCOUNT_COLUMNS` constant in `server/src/db/columns.ts` lists the readable columns.
 - Reading or writing `plaid_access_token` / `plaid_cursor` goes through `supabaseAdmin` only, via `services/plaid-secrets.ts` (section 3). This includes the cursor reset at `accounts.ts:628`, Disconnect's token write at `accounts.ts:365`, the relink path that reads old tokens to retire the previous Item (`plaid.ts:166-182`), and `plaid-items.ts` `removeItemIfUnused`, which counts accounts by token.
-- Manual account creation (`accounts.ts:130`) drops its `user_id: 'default-user'` (the column is now a uuid filled by the default) and keeps writing the `'manual'` token sentinel, which the table-level `INSERT` grant allows.
+- Every account insert, manual accounts included (`accounts.ts:130`), goes through `supabaseAdmin` with `user_id: req.userId` set explicitly, via an `insertAccount(userId, row)` helper in `plaid-secrets.ts`. The `'manual'` token sentinel is unchanged.
 - Future migrations that add a column to `accounts` must also `GRANT SELECT (new_col)` (and `UPDATE` if routes write it); this is added to CLAUDE.md. `relinked_at` (028) and `idle_snoozed_until` (029) are included in 030's grants.
 - Between running 030 and deploying, the old code's two account inserts (linking a bank, adding a manual account) fail because they write `user_id: 'default-user'` into the now-uuid column. Everything else keeps working. Run 030 shortly before deploying to keep that window small.
 
@@ -189,7 +194,7 @@ New `server/src/services/plaid-secrets.ts`, the only code that reads or writes `
 
 - `getItemSecrets(userId, accountId)` → `supabaseAdmin` select of token + cursor `WHERE id = accountId AND user_id = userId`; returns `null` if not found (the route then 404s).
 - `getItemAccountsByPlaidItem(plaidItemId)` → for webhooks: all account rows for an item including `user_id`.
-- `saveCursor(plaidItemId, cursor)`, `saveAccessToken(...)` for link/relink.
+- `saveCursor(plaidItemId, cursor)`, `saveAccessToken(...)` for link/relink, and `insertAccount(userId, row)` for every new account (Plaid or manual).
 
 `account-redaction.ts` remains as a defense-in-depth strip on responses.
 
@@ -292,6 +297,5 @@ Work happens on a long-lived `feature/multi-user` branch cut from main. Each ste
 
 - **Broad mechanical change** (~170 DB call sites across 22 files). Mitigated by the type change: removing the `supabase` export makes every un-migrated call site a compile error.
 - **Column grants on `accounts`** must be maintained when columns are added. Documented in CLAUDE.md; a forgotten grant fails loudly (permission denied), not silently.
-- **Rows that point at another user's row.** Foreign keys don't check RLS, so a user who somehow knew another user's transaction UUID could attach their own split or tag to it. The row is owned by them and invisible to the other user, so it changes nothing the other user sees. Accepted; UUIDs are not guessable and are never exposed across users.
 - **Plaid webhook is unauthenticated (existing gap).** `/api/webhooks/plaid` doesn't verify Plaid's `Plaid-Verification` JWT today. With several users, a forged webhook could trigger paid syncs for anyone's item (no data exposure, since sync writes only to the item's owner). Follow-up: verify webhook signatures. Not part of this change.
 - **Service-role paths bypass RLS.** Confined to webhooks, scripts, `plaid-secrets.ts` and `ensureUserSetup`, all of which filter or stamp `user_id` explicitly and have tests asserting it.

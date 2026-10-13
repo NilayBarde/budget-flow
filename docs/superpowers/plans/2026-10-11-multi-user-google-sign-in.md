@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-11-multi-user-google-sign-in-design.md`
 
+**Security review amendment (2026-10-12):** a background review of the first 030 commit found three gaps, fixed in commit `35862b6` and tested in `12ea1e5`: the allowlist is enforced in the policies (`public.is_allowlisted()`), signed-in users can't insert accounts or write Plaid ids, and restrictive policies require referenced parent rows to be the writer's own. The committed `migrations/030_multi_user.sql` and `server/scripts/sql/*.sql` are authoritative where they differ from the code blocks in Task 2.
+
 **How this plan is organized:** PR 1 (database foundation) is planned in full below. PRs 2–7 are listed as a roadmap with their scope and interfaces; each gets its own detailed plan, written against the code as it is when that PR starts, because `main` keeps changing the files they touch (`accounts.ts`, `plaid.ts`) and exact code written today would be stale.
 
 ## Global Constraints
@@ -17,9 +19,9 @@
 - Owner email: `nilaybarde@gmail.com`.
 - Migrations: `030_multi_user.sql` (expand, run before deploy) and `031_multi_user_cleanup.sql` (contract, run after deploy and owner sign-in). Each wrapped in `BEGIN; … COMMIT;`.
 - Data tables (exactly these 11): `accounts`, `categories`, `csv_imports`, `transactions`, `budget_goals`, `transaction_splits`, `merchant_mappings`, `tags`, `transaction_tags`, `recurring_transactions`, `app_settings`.
-- Policy text: `USING (user_id = (SELECT auth.uid())) WITH CHECK (user_id = (SELECT auth.uid()))`, `FOR ALL TO authenticated`, named `owner_all`.
+- Policy text: `USING (user_id = (SELECT auth.uid()) AND (SELECT public.is_allowlisted()))`, same `WITH CHECK`, `FOR ALL TO authenticated`, named `owner_all`; plus restrictive `owned_refs_insert` / `owned_refs_update` on child tables.
 - 030 default: `COALESCE(auth.uid(), '<owner uuid>'::uuid)`; 031 default: `auth.uid()`.
-- Signed-in users cannot read `plaid_access_token` / `plaid_cursor`, cannot update `id`, `user_id`, `is_manual`, `plaid_access_token`, `plaid_cursor`.
+- Signed-in users cannot read `plaid_access_token` / `plaid_cursor`, cannot insert into `accounts` at all, and cannot update `id`, `user_id`, `is_manual`, `plaid_access_token`, `plaid_cursor`, `plaid_item_id`, `plaid_account_id`.
 - PRs 1–6 target `feature/multi-user`, no version bump. PR 7 targets `main` with `npm version minor --no-git-tag-version`.
 - Every route handler wrapped in `asyncHandler`; tests in `__tests__/` next to the code; `vi.fn()` mocks.
 
@@ -961,8 +963,8 @@ Before each: `git fetch origin && git merge origin/main` into `feature/multi-use
 | PR | Scope (spec section) | Consumes | Produces |
 |---|---|---|---|
 | 2 | `middleware/requireAuth.ts` (getClaims → allowlist → `ensureUserSetup` → `req.userId`/`req.db`, 5-minute cache), `services/user-setup.ts` + `DEFAULT_CATEGORIES`, mount in `index.ts` skipping `/api/health` and `/api/webhooks`, remove the anon-key fallback and fail startup without both keys (§1) | `supabaseAdmin`, `createUserClient`, `user_allowlist` | `requireAuth`, `ensureUserSetup(userId: string): Promise<void>` |
-| 3 | `DbContext { db: Db; userId: string }` through every service; `services/plaid-secrets.ts` (`getItemSecrets`, `getItemAccountsByPlaidItem`, `saveCursor`, `saveAccessToken`); owner-aware webhook sync; `plaid-items.ts` on `supabaseAdmin`; `idle-connections.ts` on `is_manual` (§3) | `Db`, `supabaseAdmin`, `is_manual` | service signatures taking `DbContext` |
-| 4 | Routes part 1 — `accounts`, `plaid`, `transactions`, `csv-import` — to `req.db`, `ACCOUNT_COLUMNS` instead of `select('*')`, secrets via `plaid-secrets.ts`, `client_user_id: req.userId`, 409 on another user's account, composite `onConflict`, `asyncHandler` (§2–3) | PR 2, PR 3 | — |
+| 3 | `DbContext { db: Db; userId: string }` through every service; `services/plaid-secrets.ts` (`getItemSecrets`, `getItemAccountsByPlaidItem`, `saveCursor`, `saveAccessToken`, `insertAccount`); owner-aware webhook sync; `plaid-items.ts` on `supabaseAdmin`; `idle-connections.ts` on `is_manual` (§3) | `Db`, `supabaseAdmin`, `is_manual` | service signatures taking `DbContext` |
+| 4 | Routes part 1 — `accounts`, `plaid`, `transactions`, `csv-import` — to `req.db`, `ACCOUNT_COLUMNS` instead of `select('*')`, secrets and every account insert (manual ones too) via `plaid-secrets.ts`, `client_user_id: req.userId`, 409 on another user's account, composite `onConflict`, `asyncHandler` (§2–3) | PR 2, PR 3 | — |
 | 5 | Routes part 2 — the other nine — same treatment; delete the deprecated `supabase` export; scripts take `--user-email` (§3) | PR 2, PR 3 | compile-time guarantee no route uses the admin client |
 | 6 | Client: `services/supabase.ts`, `AuthProvider`/`AuthContext`, `RequireAuth` (Layout and `/oauth-callback`), `/login`, bearer header + `fetchForm` + 401/403 handling in `api.ts`, user menu, sign-out clears query cache and the Plaid link token (§1, §4). End-to-end checks against the Supabase dev project | PRs 2–5 | — |
 | 7 | Into main: `ENV_SETUP.md`, CLAUDE.md (Database/RLS rules, accounts grant rule), minor version bump, end-to-end checklist from spec §5 | all | release |
