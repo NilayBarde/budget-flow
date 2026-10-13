@@ -13,6 +13,7 @@ Let more than one person use BudgetFlow, each with their own completely separate
 - **Invite-only, Google sign-in.** No public sign-up. A Google account can use the app only if its email is on an allowlist.
 - **Isolation via per-request Supabase client + RLS.** The database enforces ownership with `auth.uid()`; the service-role key is kept only for work that has no signed-in user (Plaid webhooks, CLI scripts) and for reading Plaid secrets.
 - **Existing data belongs to the owner.** Everything stored today becomes owned by `nilaybarde@gmail.com`'s Google sign-in.
+- **No re-linking.** Every linked bank keeps working through the change: the migrations never touch `plaid_access_token`, `plaid_item_id`, `plaid_account_id` or `plaid_cursor`, webhooks keep finding items by `plaid_item_id`, and the new `client_user_id` only applies to future links. `test:migrations` checks those four columns are unchanged after 030 and 031.
 
 ### Assumptions (correct these if wrong)
 
