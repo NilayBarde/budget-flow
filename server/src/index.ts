@@ -19,9 +19,21 @@ console.log('  PLAID_CLIENT_ID:', process.env.PLAID_CLIENT_ID ? 'Set' : 'NOT SET
 console.log('  PLAID_SECRET:', process.env.PLAID_SECRET ? 'Set' : 'NOT SET');
 console.log('  PLAID_ENV:', process.env.PLAID_ENV || 'NOT SET');
 console.log('  SUPABASE_URL:', process.env.SUPABASE_URL ? 'Set' : 'NOT SET');
-console.log('  SUPABASE_KEY:', process.env.SUPABASE_SERVICE_ROLE_KEY ? 'service_role' : process.env.SUPABASE_ANON_KEY ? 'anon' : 'NOT SET');
+console.log('  SUPABASE_SERVICE_ROLE_KEY:', process.env.SUPABASE_SERVICE_ROLE_KEY ? 'Set' : 'NOT SET');
+console.log('  SUPABASE_ANON_KEY:', process.env.SUPABASE_ANON_KEY ? 'Set' : 'NOT SET');
+
+// Signed-in requests run as the user (anon key + their token); webhooks and account inserts run as
+// the service role. Without both keys one of those silently fails, so refuse to start instead.
+const missingSupabaseEnv = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_ANON_KEY'].filter(
+  name => !process.env[name],
+);
+if (missingSupabaseEnv.length > 0) {
+  console.error(`Missing required env: ${missingSupabaseEnv.join(', ')} (see server/ENV_SETUP.md)`);
+  process.exit(1);
+}
 
 // Now import routes (env vars are already loaded)
+const { requireAuth } = await import('./middleware/requireAuth.js');
 const { default: accountsRouter } = await import('./routes/accounts.js');
 const { default: plaidRouter } = await import('./routes/plaid.js');
 const { default: transactionsRouter } = await import('./routes/transactions.js');
@@ -46,6 +58,9 @@ const PORT = process.env.PORT || 3001;
 app.use(compression());
 app.use(cors());
 app.use(express.json());
+
+// Every /api route needs a signed-in, invited user, except the health check and Plaid webhooks.
+app.use('/api', requireAuth);
 
 // Routes
 app.use('/api/accounts', accountsRouter);
