@@ -1,8 +1,8 @@
 -- Data shaped like the single-user app's today, written before 030 runs.
-INSERT INTO accounts (id, plaid_item_id, plaid_access_token, institution_name, account_name, account_type, plaid_account_id)
+INSERT INTO accounts (id, plaid_item_id, plaid_access_token, plaid_cursor, institution_name, account_name, account_type, plaid_account_id)
 VALUES
-  ('10000000-0000-0000-0000-000000000001', 'item-1', 'access-sandbox-1', 'Chase', 'Checking', 'checking', 'plaid-acct-1'),
-  ('10000000-0000-0000-0000-000000000002', 'manual-2', 'manual', 'Cash', 'Wallet', 'cash', NULL);
+  ('10000000-0000-0000-0000-000000000001', 'item-1', 'access-sandbox-1', 'cursor-abc', 'Chase', 'Checking', 'checking', 'plaid-acct-1'),
+  ('10000000-0000-0000-0000-000000000002', 'manual-2', 'manual', NULL, 'Cash', 'Wallet', 'cash', NULL);
 
 INSERT INTO csv_imports (id, account_id, file_name, transaction_count)
 VALUES ('20000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002', 'wallet.csv', 1);
