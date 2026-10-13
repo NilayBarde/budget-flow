@@ -66,6 +66,37 @@ if run -d noowner -f "$root/migrations/030_multi_user.sql" 2>"$tmp/err"; then
 fi
 expect_error "More than one Supabase Auth user"
 
+step "reassign-owner.sql moves the data when Google sign-in created a second owner user"
+new_database reassign
+run -d reassign -f "$sql/legacy-seed.sql"
+run -d reassign -f "$root/migrations/030_multi_user.sql"
+placeholder=00000000-0000-0000-0000-00000000000a
+google=00000000-0000-0000-0000-0000000000a3
+reassign_sql="$tmp/reassign.sql"
+sed -e "s/PLACEHOLDER_USER_ID/$placeholder/" -e "s/GOOGLE_USER_ID/$google/" "$sql/reassign-owner.sql" > "$reassign_sql"
+# Before 031 the server can't seed that user's defaults (the old UNIQUE (name) still holds), so the
+# duplicate user owns nothing when this script runs.
+run -d reassign -c "INSERT INTO auth.users (id, email) VALUES ('$google', 'nilaybarde@gmail.com')"
+# Refuses while the Google user has something of their own, and changes nothing.
+run -d reassign -c "INSERT INTO tags (user_id, name, color) VALUES ('$google', 'Mine', '#000000')"
+if run -d reassign -f "$reassign_sql" 2>"$tmp/err"; then
+  echo "reassign-owner.sql should refuse when the Google user owns real data" >&2; exit 1
+fi
+expect_error "merge by hand"
+[ "$(run -d reassign -tA -c "SELECT count(*) FROM transactions WHERE user_id = '$placeholder'")" = "2" ]
+run -d reassign -c "DELETE FROM tags WHERE user_id = '$google'"
+owner_categories="$(run -d reassign -tA -c "SELECT count(*) FROM categories WHERE user_id = '$placeholder'")"
+run -d reassign -f "$reassign_sql"
+for t in accounts categories csv_imports transactions budget_goals transaction_splits merchant_mappings tags \
+         transaction_tags recurring_transactions app_settings; do
+  left="$(run -d reassign -tA -c "SELECT count(*) FROM $t WHERE user_id = '$placeholder'")"
+  [ "$left" = "0" ] || { echo "$t still has $left rows on the placeholder" >&2; exit 1; }
+done
+[ "$(run -d reassign -tA -c "SELECT count(*) FROM categories WHERE user_id = '$google'")" = "$owner_categories" ]
+[ "$(run -d reassign -tA -c "SELECT count(*) FROM transactions WHERE user_id = '$google'")" = "2" ]
+run -d reassign -tA -c "SELECT column_default FROM information_schema.columns
+  WHERE table_name = 'transactions' AND column_name = 'user_id'" | grep -q "$google"
+
 step "030 expand migration"
 run -d app -f "$root/migrations/030_multi_user.sql"
 
