@@ -123,11 +123,15 @@ router.post('/plaid', async (req, res) => {
       } else if (webhook_code === 'HISTORICAL_UPDATE') {
         console.log(`Historical update complete for item ${item_id}`);
         // Mark historical sync as complete for every account under the item
-        await ctx.db
+        const { data: marked, error: historyError } = await ctx.db
           .from('accounts')
           .update({ historical_sync_complete: true })
           .eq('user_id', ctx.userId)
-          .eq('plaid_item_id', item_id);
+          .eq('plaid_item_id', item_id)
+          .select('id');
+        // Plaid won't resend this webhook (we answer 200 regardless), so say when it didn't stick.
+        if (historyError) console.error(`Could not mark item ${item_id} history complete:`, redactError(historyError));
+        else if (!marked?.length) console.warn(`Item ${item_id}: no accounts to mark history complete on`);
       }
     }
 
