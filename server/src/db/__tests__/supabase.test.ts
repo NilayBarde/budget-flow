@@ -22,6 +22,13 @@ describe('supabaseAdmin', () => {
     expect(supabaseAdmin).toEqual({ url: 'https://project.supabase.co', key: 'service-key' });
   });
 
+  it('never falls back to the anon key', async () => {
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    await loadModule();
+    expect(createClient).toHaveBeenCalledWith('https://project.supabase.co', '');
+    expect(createClient).not.toHaveBeenCalledWith('https://project.supabase.co', 'anon-key');
+  });
+
   it('is what the deprecated supabase export points at', async () => {
     const { supabase, supabaseAdmin } = await loadModule();
     expect(supabase).toBe(supabaseAdmin);

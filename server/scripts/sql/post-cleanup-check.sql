@@ -59,6 +59,33 @@ BEGIN
   END;
 END $$;
 
+-- The owner can still write rows that reference their own rows (so the checks above can't pass
+-- merely because the reference policies refuse everything).
+SELECT set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000a","email":"nilaybarde@gmail.com","role":"authenticated"}', true);
+INSERT INTO transaction_splits (parent_transaction_id, amount, description)
+  VALUES ('30000000-0000-0000-0000-000000000001', 10, 'owner split');
+INSERT INTO tags (id, name, color) VALUES ('40000000-0000-0000-0000-000000000002', 'Owner Check', '#00ff00');
+INSERT INTO transaction_tags (transaction_id, tag_id)
+  VALUES ('30000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000002');
+INSERT INTO budget_goals (category_id, month, year, limit_amount)
+  VALUES (current_setting('check.owner_dining')::uuid, 11, 2026, 250);
+INSERT INTO transactions (id, account_id, amount, date, merchant_name, category_id, parent_transaction_id)
+  VALUES ('30000000-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000001', 5, '2026-10-03',
+          'Blue Bottle (part)', current_setting('check.owner_dining')::uuid, '30000000-0000-0000-0000-000000000001');
+UPDATE transactions SET notes = 'edited' WHERE id = '30000000-0000-0000-0000-000000000003';
+INSERT INTO csv_imports (account_id, file_name) VALUES ('10000000-0000-0000-0000-000000000002', 'owner.csv');
+UPDATE merchant_mappings SET default_category_id = current_setting('check.owner_dining')::uuid
+  WHERE original_name = 'BLUE BOTTLE #12';
+DO $$
+BEGIN
+  IF (SELECT count(*) FROM transaction_splits WHERE description = 'owner split') <> 1
+     OR (SELECT notes FROM transactions WHERE id = '30000000-0000-0000-0000-000000000003') IS DISTINCT FROM 'edited'
+     OR (SELECT default_category_id FROM merchant_mappings WHERE original_name = 'BLUE BOTTLE #12')
+        IS DISTINCT FROM current_setting('check.owner_dining')::uuid THEN
+    RAISE EXCEPTION 'the owner could not write rows referencing their own rows';
+  END IF;
+END $$;
+
 -- A signed-in user whose email isn't invited can't write even their own rows.
 SELECT set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000c","email":"uninvited@example.com","role":"authenticated"}', true);
 DO $$

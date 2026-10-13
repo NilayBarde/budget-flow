@@ -4,6 +4,8 @@ BEGIN;
 
 SELECT set_config('check.owner', (SELECT id::text FROM auth.users WHERE lower(email) = 'nilaybarde@gmail.com'), true);
 SELECT set_config('check.stranger', 'ffffffff-ffff-ffff-ffff-ffffffffffff', true);
+-- The stranger is invited, so check 3 proves ownership isolation rather than the allowlist.
+INSERT INTO user_allowlist (email) VALUES ('isolation-check@example.invalid');
 
 -- Row counts as the database owner, for comparison.
 DO $$
@@ -73,7 +75,7 @@ BEGIN
 END $$;
 
 -- 3. Someone else sees nothing and cannot write into the owner's data.
-SELECT set_config('request.jwt.claims', json_build_object('sub', current_setting('check.stranger'), 'role', 'authenticated')::text, true);
+SELECT set_config('request.jwt.claims', json_build_object('sub', current_setting('check.stranger'), 'email', 'isolation-check@example.invalid', 'role', 'authenticated')::text, true);
 DO $$
 DECLARE t text; n bigint;
 BEGIN

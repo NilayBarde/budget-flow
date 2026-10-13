@@ -3,12 +3,12 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 // env is loaded in index.ts
 
 const supabaseUrl = process.env.SUPABASE_URL || '';
-// Prefer the service-role key so the server bypasses RLS.
-// Fall back to the anon key for backwards compatibility (removed with the auth middleware).
-const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '';
+// No fallback to the anon key: webhooks and account inserts need to bypass RLS, and as anon they
+// would silently see and write nothing.
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 if (!supabaseUrl || !serviceRoleKey) {
-  console.warn('Warning: Supabase credentials not configured. Database operations will fail.');
+  console.warn('Warning: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is not set. Database operations will fail.');
 }
 
 export type Db = SupabaseClient;

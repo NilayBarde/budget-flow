@@ -121,13 +121,13 @@ RLS is already enabled on all tables (migration 019). Each data table gets:
 
 ```sql
 CREATE POLICY owner_all ON <table> FOR ALL TO authenticated
-  USING (user_id = (SELECT auth.uid()) AND (SELECT public.is_allowlisted()))
-  WITH CHECK (user_id = (SELECT auth.uid()) AND (SELECT public.is_allowlisted()));
+  USING (user_id = (SELECT auth.uid()) AND (SELECT private.is_allowlisted()))
+  WITH CHECK (user_id = (SELECT auth.uid()) AND (SELECT private.is_allowlisted()));
 ```
 
-**Invite-only in the database.** Supabase Auth gives a session to any Google account and the anon key is public, so without this an uninvited person could sign in and use PostgREST directly with their own (empty) rows. `public.is_allowlisted()` is a `SECURITY DEFINER` function returning whether the JWT's `email` claim is in `user_allowlist`; `anon` can't execute it.
+**Invite-only in the database.** Supabase Auth gives a session to any Google account and the anon key is public, so without this an uninvited person could sign in and use PostgREST directly with their own (empty) rows. `private.is_allowlisted()` is a `SECURITY DEFINER` function returning whether the JWT's `email` claim is in `user_allowlist`; `anon` can't execute it.
 
-**References must be the writer's own.** Foreign keys don't check RLS, so each child table also gets `AS RESTRICTIVE` insert and update policies (`owned_refs_insert`, `owned_refs_update`) requiring every referenced parent row to be visible to the writer, which under `owner_all` means owned by them: `transactions` (account, category, import, parent transaction), `csv_imports` (account), `budget_goals` (category), `transaction_splits` (parent transaction), `transaction_tags` (transaction, tag), `merchant_mappings` (default category). These apply to writes only, so reads cost nothing extra.
+**References must be the writer's own.** Foreign keys don't check RLS, so each child table also gets `AS RESTRICTIVE` insert and update policies (`owned_refs_insert`, `owned_refs_update`) requiring every referenced parent row to belong to the writer, checked by `SECURITY DEFINER` helpers in a `private` schema PostgREST doesn't expose (`private.owns_account`, `owns_category`, `owns_csv_import`, `owns_transaction`, `owns_tag`). Helpers rather than subqueries, because a policy on `transactions` can't query `transactions` (infinite recursion) and an unqualified column inside a subquery binds to the subquery's own table first: `transactions` (account, category, import, parent transaction), `csv_imports` (account), `budget_goals` (category), `transaction_splits` (parent transaction), `transaction_tags` (transaction, tag), `merchant_mappings` (default category). These apply to writes only, so reads cost nothing extra.
 
 `(SELECT auth.uid())` rather than bare `auth.uid()` is Supabase's documented pattern: Postgres evaluates it once per query instead of once per row, which matters for the stats routes that scan a year of transactions.
 

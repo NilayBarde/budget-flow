@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-11-multi-user-google-sign-in-design.md`
 
-**Security review amendment (2026-10-12):** a background review of the first 030 commit found three gaps, fixed in commit `35862b6` and tested in `12ea1e5`: the allowlist is enforced in the policies (`public.is_allowlisted()`), signed-in users can't insert accounts or write Plaid ids, and restrictive policies require referenced parent rows to be the writer's own. The committed `migrations/030_multi_user.sql` and `server/scripts/sql/*.sql` are authoritative where they differ from the code blocks in Task 2.
+**Security review amendment (2026-10-12):** a background review of the first 030 commit found three gaps, fixed in commit `35862b6` and tested in `12ea1e5`: the allowlist is enforced in the policies (`private.is_allowlisted()`), signed-in users can't insert accounts or write Plaid ids, and restrictive policies require referenced parent rows to be the writer's own. The committed `migrations/030_multi_user.sql` and `server/scripts/sql/*.sql` are authoritative where they differ from the code blocks in Task 2.
 
 **How this plan is organized:** PR 1 (database foundation) is planned in full below. PRs 2–7 are listed as a roadmap with their scope and interfaces; each gets its own detailed plan, written against the code as it is when that PR starts, because `main` keeps changing the files they touch (`accounts.ts`, `plaid.ts`) and exact code written today would be stale.
 
@@ -19,7 +19,7 @@
 - Owner email: `nilaybarde@gmail.com`.
 - Migrations: `030_multi_user.sql` (expand, run before deploy) and `031_multi_user_cleanup.sql` (contract, run after deploy and owner sign-in). Each wrapped in `BEGIN; … COMMIT;`.
 - Data tables (exactly these 11): `accounts`, `categories`, `csv_imports`, `transactions`, `budget_goals`, `transaction_splits`, `merchant_mappings`, `tags`, `transaction_tags`, `recurring_transactions`, `app_settings`.
-- Policy text: `USING (user_id = (SELECT auth.uid()) AND (SELECT public.is_allowlisted()))`, same `WITH CHECK`, `FOR ALL TO authenticated`, named `owner_all`; plus restrictive `owned_refs_insert` / `owned_refs_update` on child tables.
+- Policy text: `USING (user_id = (SELECT auth.uid()) AND (SELECT private.is_allowlisted()))`, same `WITH CHECK`, `FOR ALL TO authenticated`, named `owner_all`; plus restrictive `owned_refs_insert` / `owned_refs_update` on child tables.
 - 030 default: `COALESCE(auth.uid(), '<owner uuid>'::uuid)`; 031 default: `auth.uid()`.
 - Signed-in users cannot read `plaid_access_token` / `plaid_cursor`, cannot insert into `accounts` at all, and cannot update `id`, `user_id`, `is_manual`, `plaid_access_token`, `plaid_cursor`, `plaid_item_id`, `plaid_account_id`.
 - PRs 1–6 target `feature/multi-user`, no version bump. PR 7 targets `main` with `npm version minor --no-git-tag-version`.

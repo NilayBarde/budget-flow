@@ -57,6 +57,15 @@ fi
 expect_error "Create the owner user in Supabase Auth"
 [ "$(run -d noowner -tA -c "SELECT to_regclass('public.user_allowlist') IS NULL")" = "t" ]
 
+step "030 aborts when two Supabase Auth users share the owner's email"
+run -d noowner -c "INSERT INTO auth.users (id, email) VALUES
+  ('00000000-0000-0000-0000-0000000000a1', 'nilaybarde@gmail.com'),
+  ('00000000-0000-0000-0000-0000000000a2', 'NilayBarde@gmail.com')"
+if run -d noowner -f "$root/migrations/030_multi_user.sql" 2>"$tmp/err"; then
+  echo "030 should have failed with two owner users" >&2; exit 1
+fi
+expect_error "More than one Supabase Auth user"
+
 step "030 expand migration"
 run -d app -f "$root/migrations/030_multi_user.sql"
 
