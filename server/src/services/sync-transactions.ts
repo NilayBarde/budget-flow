@@ -164,37 +164,23 @@ export const buildTransactionUpdate = (tx: PlaidTransaction, { accountId, accoun
  * flips on, never back off.
  */
 const recordSuccessfulSync = async (
-  { db, userId }: DbContext,
+  { userId }: DbContext,
   plaidItemId: string,
   nextCursor: string,
   historicalComplete: boolean,
 ) => {
-  const { error } = await db
-    .from('accounts')
-    .update({
-      last_synced_at: new Date().toISOString(),
-      needs_reauth: false,
-      reauth_detected_at: null,
-      last_sync_error: null,
-      last_sync_error_at: null,
-    })
-    .eq('user_id', userId)
-    .eq('plaid_item_id', plaidItemId);
-  if (error) throw error;
-
-  if (historicalComplete) {
+  // One update, so the cursor never advances without the status that says the sync worked, or the
+  // other way round. Signed-in users can't write the cursor, so it goes through the service role,
+  // still narrowed to this user's accounts.
+  await saveCursor(userId, plaidItemId, nextCursor, {
+    last_synced_at: new Date().toISOString(),
+    needs_reauth: false,
+    reauth_detected_at: null,
+    last_sync_error: null,
+    last_sync_error_at: null,
     // The whole history has arrived, so a re-linked account has nothing left to adopt.
-    const { error: historyError } = await db
-      .from('accounts')
-      .update({ historical_sync_complete: true, relinked_at: null })
-      .eq('user_id', userId)
-      .eq('plaid_item_id', plaidItemId);
-    if (historyError) throw historyError;
-  }
-
-  // Last, so an advanced cursor always means everything above was saved. Signed-in users can't
-  // write the cursor, so it goes through the service role (still narrowed to this user).
-  await saveCursor(userId, plaidItemId, nextCursor);
+    ...(historicalComplete ? { historical_sync_complete: true, relinked_at: null } : {}),
+  });
 };
 
 const PAGE_SIZE = 1000;

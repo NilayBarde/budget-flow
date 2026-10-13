@@ -65,7 +65,7 @@ router.get('/', asyncHandler(async (req, res) => {
 }));
 ```
 
-**Database**: Use the `supabase` client from `db/supabase.ts`. Service-role key bypasses RLS — no need to pass user context. Single user app (`user_id = 'default-user'`).
+**Database**: Multi-user: every row belongs to a Supabase Auth user (`user_id uuid`), and `requireAuth` admits only invited Google accounts. In route handlers use `userContext(req)` from `db/context.ts`, which gives `{ db, userId }`: `db` runs as the signed-in user, so RLS limits it to their rows. `supabaseAdmin` (service role, bypasses RLS) is only for code with no signed-in user (Plaid webhooks, scripts via `--user-email`) and for Plaid credentials, which signed-in users can't read or write; those go through `services/plaid-secrets.ts`. Services take a `DbContext` and must filter every query with `.eq('user_id', userId)` and stamp `user_id` on every row they write, because they also run under the service role.
 
 **Error responses**: Global handler returns `{ message: 'Internal server error' }` with 500. Return specific errors early with `res.status(4xx).json({ message: '...' })`.
 
@@ -112,7 +112,7 @@ export function useUpdateTransaction() {
 
 Run migrations in Supabase SQL editor (no CLI migration runner configured), **before** deploying the code that reads them, and say so in the file's header comment. `supabase-schema.sql` is a full baseline as of migration 023, so a fresh project runs it and then migrations 024 and up. Regenerate it when you want to move the baseline forward.
 
-**RLS**: Enabled on all tables (migration 019). Server uses service-role key to bypass — no permissive policies needed. Don't add `user_id` filtering to server queries; the key handles isolation.
+**RLS**: Each data table has an `owner_all` policy (migration 030): the row's `user_id` must be the caller and their email must be on `user_allowlist`. A new data table needs a `user_id uuid NOT NULL DEFAULT auth.uid()` column and the same policy. On `accounts`, signed-in users have column-level grants that exclude the Plaid token, cursor and ids: a migration that adds an `accounts` column must `GRANT SELECT` (and `UPDATE` if routes write it) on it and add it to `ACCOUNT_COLUMN_LIST` in `server/src/db/columns.ts`. `npm run test:migrations --prefix server` checks migrations, isolation and that list against a local Postgres.
 
 ## Testing
 

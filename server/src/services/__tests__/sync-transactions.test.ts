@@ -111,9 +111,11 @@ const makeBuilder = (table: string) => {
 const ctx = { db: { from: (table: string) => makeBuilder(table) }, userId: 'user-1' } as never;
 
 // The cursor goes through the service-role helper; recorded in the same log so its order shows.
+const cursorSave = { fails: false };
 vi.mock('../plaid-secrets.js', () => ({
-  saveCursor: async (userId: string, plaidItemId: string, cursor: string) => {
-    db.ops.push({ table: 'accounts', op: 'save_cursor', payload: { cursor }, filters: [['user_id', userId], ['plaid_item_id', plaidItemId]] });
+  saveCursor: async (userId: string, plaidItemId: string, cursor: string, otherFields: Record<string, unknown> = {}) => {
+    db.ops.push({ table: 'accounts', op: 'save_cursor', payload: { ...otherFields, plaid_cursor: cursor }, filters: [['user_id', userId], ['plaid_item_id', plaidItemId]] });
+    if (cursorSave.fails) throw new Error('cursor save failed');
   },
 }));
 
@@ -680,14 +682,14 @@ describe('applySyncResult', () => {
 
       expect(counts).toMatchObject({ added: 0, adopted: 0 });
       // The sync still records success, so the cursor moves on
-      expect(opsOf('accounts', 'update').length).toBeGreaterThan(0);
+      expect(opsOf('accounts', 'save_cursor')).toHaveLength(1);
     });
 
     it('stops adopting once the history is complete', async () => {
       await apply(emptySync(), { historicalComplete: true });
 
-      const historyUpdate = opsOf('accounts', 'update').find(o => (o.payload as Record<string, unknown>).historical_sync_complete);
-      expect(historyUpdate?.payload).toEqual({ historical_sync_complete: true, relinked_at: null });
+      const [write] = opsOf('accounts', 'save_cursor');
+      expect(write.payload).toMatchObject({ historical_sync_complete: true, relinked_at: null });
     });
   });
 
@@ -782,36 +784,26 @@ describe('applySyncResult', () => {
   });
 
   describe('recording a successful sync', () => {
-    const stateWrites = () => opsOf('accounts', 'update');
+    const stateWrites = () => opsOf('accounts', 'save_cursor');
 
-    it('stamps the sync time and clears the reconnect flag on every account of the item', async () => {
+    it("saves the cursor, the sync time and the cleared reconnect flag in one write, on this user's item only", async () => {
       await apply(emptySync({ nextCursor: 'cursor-9' }));
 
       const [write] = stateWrites();
-      expect(filterValue(write, 'plaid_item_id')).toBe('item-1');
-      expect(write.payload).toMatchObject({ needs_reauth: false, reauth_detected_at: null });
-      expect(write.payload).not.toHaveProperty('plaid_cursor');
+      expect(stateWrites()).toHaveLength(1);
+      expect(opsOf('accounts', 'update')).toEqual([]);
+      expect(write.filters).toEqual([['user_id', 'user-1'], ['plaid_item_id', 'item-1']]);
+      expect(write.payload).toMatchObject({ plaid_cursor: 'cursor-9', needs_reauth: false, reauth_detected_at: null });
       expect(Date.parse((write.payload as { last_synced_at: string }).last_synced_at)).not.toBeNaN();
     });
 
-    it("saves the cursor last, through the service-role helper, for this user's item only", async () => {
-      await apply(emptySync({ nextCursor: 'cursor-9' }), { historicalComplete: true });
-
-      const writes = db.ops.filter(o => o.table === 'accounts' && o.op !== 'select');
-      expect(writes.at(-1)).toEqual({
-        table: 'accounts',
-        op: 'save_cursor',
-        payload: { cursor: 'cursor-9' },
-        filters: [['user_id', 'user-1'], ['plaid_item_id', 'item-1']],
-      });
-    });
-
-    it('does not advance the cursor when the sync state cannot be recorded', async () => {
-      db.failUpdateFor.add('');
-
-      await expect(apply(emptySync())).rejects.toBeTruthy();
-
-      expect(opsOf('accounts', 'save_cursor')).toEqual([]);
+    it('fails the sync when the cursor and status cannot be saved', async () => {
+      cursorSave.fails = true;
+      try {
+        await expect(apply(emptySync())).rejects.toThrow('cursor save failed');
+      } finally {
+        cursorSave.fails = false;
+      }
     });
 
     it('clears the last failure, since this sync proved the item works', async () => {
@@ -823,19 +815,18 @@ describe('applySyncResult', () => {
 
     it('marks the history complete only when told, and never writes false', async () => {
       await apply(emptySync());
-      expect(stateWrites()).toHaveLength(1);
       expect(JSON.stringify(stateWrites().map(w => w.payload))).not.toContain('historical_sync_complete');
 
       db.ops = [];
       await apply(emptySync(), { historicalComplete: true });
-      expect(stateWrites().map(w => w.payload)).toContainEqual({ historical_sync_complete: true, relinked_at: null });
+      expect(stateWrites()[0].payload).toMatchObject({ historical_sync_complete: true, relinked_at: null });
     });
 
     it('runs after every transaction is saved, and the card payment pairing after that', async () => {
       await apply(emptySync({ added: [tx()], removed: [{ transaction_id: 'gone' }] }));
 
       const order = db.ops.map(o => `${o.table}:${o.op}`).filter(step => !step.endsWith(':select'));
-      expect(order).toEqual(['transactions:insert', 'transactions:delete', 'accounts:update', 'accounts:save_cursor']);
+      expect(order).toEqual(['transactions:insert', 'transactions:delete', 'accounts:save_cursor']);
       expect(reconcileCardPayments).toHaveBeenCalledTimes(1);
     });
 
@@ -942,7 +933,7 @@ describe('applySyncResult', () => {
 
       expect(counts.added).toBe(1);
       // The sync still succeeds and records its cursor.
-      expect(opsOf('accounts', 'update')).toHaveLength(1);
+      expect(opsOf('accounts', 'save_cursor')).toHaveLength(1);
       // The other sync owns that row, so this one does not reconcile its pending predecessor.
       expect(reconcilePending).toHaveBeenCalledTimes(1);
     });

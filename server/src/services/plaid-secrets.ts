@@ -44,16 +44,30 @@ export const itemOwner = (accounts: Pick<ItemAccount, 'user_id'>[]): string | nu
 };
 
 /**
- * Save the item's sync cursor on all of the user's accounts under it, keeping them in step. null
- * clears it, so the next sync re-delivers the whole history.
+ * Save the item's sync cursor on all of the user's accounts under it, keeping them in step, along
+ * with any status fields in the same update (a successful sync's timestamps and health flags), so
+ * the cursor and the status they describe can't disagree. null clears the cursor, so the next sync
+ * re-delivers the whole history. user_id in `otherFields` is dropped.
+ * Throws when no account of the user is under the item: a cursor saved nowhere would make every
+ * later sync fetch (and pay for) the same changes again.
  */
-export const saveCursor = async (userId: string, plaidItemId: string, cursor: string | null): Promise<void> => {
-  const { error } = await supabaseAdmin
+export const saveCursor = async (
+  userId: string,
+  plaidItemId: string,
+  cursor: string | null,
+  otherFields: Record<string, unknown> = {},
+): Promise<void> => {
+  const { user_id: _ignored, ...fields } = otherFields;
+  const { data, error } = await supabaseAdmin
     .from('accounts')
-    .update({ plaid_cursor: cursor })
+    .update({ ...fields, plaid_cursor: cursor })
     .eq('user_id', userId)
-    .eq('plaid_item_id', plaidItemId);
+    .eq('plaid_item_id', plaidItemId)
+    .select('id');
   if (error) throw error;
+  if (!data || data.length === 0) {
+    throw new Error(`No accounts of this user under Plaid item ${plaidItemId}, so the sync cursor was not saved`);
+  }
 };
 
 export interface AccountSecrets {
