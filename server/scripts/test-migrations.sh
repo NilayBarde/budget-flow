@@ -47,6 +47,8 @@ run -d postgres -f "$sql/supabase-roles.sql"
 step "baseline + migrations 024-029, then legacy data"
 new_database app
 run -d app -f "$sql/legacy-seed.sql"
+plaid_links_sql="SELECT string_agg(concat_ws('|', id, plaid_item_id, plaid_access_token, plaid_cursor, plaid_account_id), ';' ORDER BY id) FROM accounts"
+plaid_links_before="$(run -d app -tA -c "$plaid_links_sql")"
 
 step "030 aborts when the owner has no Supabase Auth user"
 new_database noowner
@@ -118,6 +120,12 @@ check -d app -f "$root/migrations/031_multi_user_cleanup.sql"
 step "isolation and per-user uniqueness after 031"
 check -d app -f "$sql/isolation-check.sql"
 check -d app -f "$sql/post-cleanup-check.sql"
+
+step "linked banks keep their Plaid connections untouched (no re-linking)"
+plaid_links_after="$(run -d app -tA -c "$plaid_links_sql")"
+if [ "$plaid_links_before" != "$plaid_links_after" ]; then
+  echo "before: $plaid_links_before" >&2; echo "after:  $plaid_links_after" >&2; exit 1
+fi
 
 step "later migrations"
 for f in $(migrations_between 32 1000); do run -d app -f "$f"; done
