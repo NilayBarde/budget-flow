@@ -67,6 +67,13 @@ export const requireAuth: RequestHandler = asyncHandler(async (req, res, next) =
   }
 
   req.userId = userId;
-  req.db = createUserClient(token);
+  // Built on first use and reused for the rest of the request, so requests that never query
+  // (or only use the service role) don't pay for a client.
+  let db: ReturnType<typeof createUserClient> | undefined;
+  Object.defineProperty(req, 'db', {
+    get: () => (db ??= createUserClient(token)),
+    configurable: true,
+    enumerable: true,
+  });
   next();
 });

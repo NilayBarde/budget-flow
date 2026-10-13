@@ -17,16 +17,24 @@ export const DEFAULT_CATEGORIES = [
   { name: 'Other', icon: 'more-horizontal', color: '#64748b' },
 ] as const;
 
+// The app_settings key recording that a user has had their defaults (migration 030 sets it for the
+// owner). A marker rather than "has no categories", so deleting every category doesn't bring the
+// defaults back.
+export const SETUP_MARKER_KEY = 'user_defaults_seeded';
+
 // Seeds a user's default categories the first time they sign in. Runs as the service role because
 // it happens before anything of theirs exists, so it stamps user_id itself. Safe to call repeatedly
-// and concurrently: existing names are skipped.
+// and concurrently: existing names and markers are skipped, and the marker is written only after
+// the categories, so a failed seed is retried on the next request.
 export const ensureUserSetup = async (userId: string): Promise<void> => {
-  const { count, error } = await supabaseAdmin
-    .from('categories')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', userId);
+  const { data: marker, error } = await supabaseAdmin
+    .from('app_settings')
+    .select('value')
+    .eq('user_id', userId)
+    .eq('key', SETUP_MARKER_KEY)
+    .maybeSingle();
   if (error) throw error;
-  if (count) return;
+  if (marker) return;
 
   const { error: seedError } = await supabaseAdmin
     .from('categories')
@@ -35,4 +43,12 @@ export const ensureUserSetup = async (userId: string): Promise<void> => {
       { onConflict: 'user_id,name', ignoreDuplicates: true },
     );
   if (seedError) throw seedError;
+
+  const { error: markerError } = await supabaseAdmin
+    .from('app_settings')
+    .upsert(
+      { user_id: userId, key: SETUP_MARKER_KEY, value: 'true' },
+      { onConflict: 'user_id,key', ignoreDuplicates: true },
+    );
+  if (markerError) throw markerError;
 };

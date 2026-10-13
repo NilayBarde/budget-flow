@@ -28,8 +28,10 @@ vi.mock('../../db/supabase.js', () => ({
       };
     },
   },
-  createUserClient: (token: string) => ({ client: 'user', token }),
+  createUserClient: (token: string) => createUserClient(token),
 }));
+
+const createUserClient = vi.fn((token: string) => ({ client: 'user', token }));
 
 const ensureUserSetup = vi.fn(async (_userId: string) => {});
 vi.mock('../../services/user-setup.js', () => ({ ensureUserSetup: (userId: string) => ensureUserSetup(userId) }));
@@ -74,6 +76,7 @@ beforeEach(() => {
   clearSetupCache();
   auth.getClaims.mockReset();
   ensureUserSetup.mockClear();
+  createUserClient.mockClear();
   allowlist.emails = new Set(['owner@example.com']);
   allowlist.error = null;
   allowlist.queries = [];
@@ -159,7 +162,10 @@ describe('requireAuth', () => {
     expect(allowlist.queries).toEqual(['owner@example.com']);
     expect(ensureUserSetup).toHaveBeenCalledWith('user-1');
     expect(req.userId).toBe('user-1');
+    expect(createUserClient).not.toHaveBeenCalled();
     expect(req.db).toEqual({ client: 'user', token: 'tok' });
+    expect(req.db).toBe(req.db);
+    expect(createUserClient).toHaveBeenCalledTimes(1);
     expect(next).toHaveBeenCalledWith();
     expect(res.status).not.toHaveBeenCalled();
   });
