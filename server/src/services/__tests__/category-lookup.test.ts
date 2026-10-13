@@ -1,16 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock the supabase module before importing the module under test
+// A fake client handed to the service through its context
 const mockSingle = vi.fn();
-const mockEq = vi.fn(() => ({ single: mockSingle }));
+const mockEq: ReturnType<typeof vi.fn> = vi.fn(() => ({ eq: mockEq, single: mockSingle }));
 const mockSelect = vi.fn(() => ({ eq: mockEq }));
 const mockFrom = vi.fn(() => ({ select: mockSelect }));
+const ctx = { db: { from: mockFrom }, userId: 'user-1' } as never;
 
-vi.mock('../../db/supabase.js', () => ({
-  supabase: { from: mockFrom },
-}));
-
-// Import AFTER the mock is set up
 const { getCategoryIdForType } = await import('../category-lookup.js');
 
 describe('getCategoryIdForType', () => {
@@ -21,7 +17,7 @@ describe('getCategoryIdForType', () => {
   it('returns the category ID for "income"', async () => {
     mockSingle.mockResolvedValue({ data: { id: 'cat-income-123' } });
 
-    const result = await getCategoryIdForType('income');
+    const result = await getCategoryIdForType(ctx, 'income');
 
     expect(result).toBe('cat-income-123');
     expect(mockFrom).toHaveBeenCalledWith('categories');
@@ -29,31 +25,39 @@ describe('getCategoryIdForType', () => {
     expect(mockEq).toHaveBeenCalledWith('name', 'Income');
   });
 
+  it("only looks at the user's own categories", async () => {
+    mockSingle.mockResolvedValue({ data: { id: 'cat-income-123' } });
+
+    await getCategoryIdForType(ctx, 'income');
+
+    expect(mockEq).toHaveBeenCalledWith('user_id', 'user-1');
+  });
+
   it('returns the category ID for "investment"', async () => {
     mockSingle.mockResolvedValue({ data: { id: 'cat-invest-456' } });
 
-    const result = await getCategoryIdForType('investment');
+    const result = await getCategoryIdForType(ctx, 'investment');
 
     expect(result).toBe('cat-invest-456');
     expect(mockEq).toHaveBeenCalledWith('name', 'Investment');
   });
 
   it('returns null for "expense" without querying the database', async () => {
-    const result = await getCategoryIdForType('expense');
+    const result = await getCategoryIdForType(ctx, 'expense');
 
     expect(result).toBeNull();
     expect(mockFrom).not.toHaveBeenCalled();
   });
 
   it('returns null for "transfer" without querying the database', async () => {
-    const result = await getCategoryIdForType('transfer');
+    const result = await getCategoryIdForType(ctx, 'transfer');
 
     expect(result).toBeNull();
     expect(mockFrom).not.toHaveBeenCalled();
   });
 
   it('returns null for "return" without querying the database', async () => {
-    const result = await getCategoryIdForType('return');
+    const result = await getCategoryIdForType(ctx, 'return');
 
     expect(result).toBeNull();
     expect(mockFrom).not.toHaveBeenCalled();
@@ -62,7 +66,7 @@ describe('getCategoryIdForType', () => {
   it('returns null when the database has no matching category', async () => {
     mockSingle.mockResolvedValue({ data: null });
 
-    const result = await getCategoryIdForType('income');
+    const result = await getCategoryIdForType(ctx, 'income');
 
     expect(result).toBeNull();
   });

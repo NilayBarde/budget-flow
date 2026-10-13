@@ -1,4 +1,4 @@
-import { isHoldingsAccountType, isManualToken } from './account-types.js';
+import { isHoldingsAccountType } from './account-types.js';
 
 // Plaid bills every connection (Item) monthly whether or not it brings anything in, so a connection
 // that has gone quiet is worth a nudge to disconnect it. Judged per connection, not per account,
@@ -14,7 +14,8 @@ export interface IdleCheckAccount {
   id: string;
   account_type?: string | null;
   plaid_item_id: string;
-  plaid_access_token: string;
+  /** Manual or disconnected (no live Plaid token), derived in the database (migration 030) */
+  is_manual: boolean;
   created_at: string;
   idle_snoozed_until?: string | null;
   /** Set while a re-linked connection is still resending its history */
@@ -49,7 +50,7 @@ export const findIdleConnections = (accounts: IdleCheckAccount[], now: number): 
 
   const connections = new Map<string, IdleCheckAccount[]>();
   for (const account of accounts) {
-    if (isManualToken(account.plaid_access_token)) continue;
+    if (account.is_manual) continue;
     const members = connections.get(account.plaid_item_id);
     if (members) members.push(account);
     else connections.set(account.plaid_item_id, [account]);

@@ -1,4 +1,4 @@
-import { supabase } from '../db/supabase.js';
+import { supabaseAdmin } from '../db/supabase.js';
 import { removeItem } from './plaid.js';
 import { redactError } from './plaid-errors.js';
 import { isManualToken } from './account-types.js';
@@ -8,11 +8,13 @@ import { isManualToken } from './account-types.js';
  * Item monthly, but one Item can hold several accounts (a bank's checking and card), so removing it
  * while a sibling still uses it would cut that account off. Returns true when the Item was removed.
  * A failed removal is logged, not thrown: the local change has already happened.
+ * Runs as the service role: it matches on the access token, which signed-in users can't read, and
+ * a token belongs to exactly one item, so no user filter is needed to stay inside one user's data.
  */
 export const removeItemIfUnused = async (accessToken: string): Promise<boolean> => {
   if (isManualToken(accessToken)) return false;
 
-  const { count, error } = await supabase
+  const { count, error } = await supabaseAdmin
     .from('accounts')
     .select('id', { count: 'exact', head: true })
     .eq('plaid_access_token', accessToken);

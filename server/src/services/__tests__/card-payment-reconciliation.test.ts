@@ -60,7 +60,7 @@ const builderFor = (table: string) => {
   return builder;
 };
 
-vi.mock('../../db/supabase.js', () => ({ supabase: { from: (table: string) => builderFor(table) } }));
+const ctx = { db: { from: (table: string) => builderFor(table) }, userId: 'user-1' } as never;
 
 const { reconcileCardPayments, reconcileCardPaymentsAfterSync, retypeInvestmentsReadingAsCardBills } =
   await import('../card-payment-reconciliation.js');
@@ -104,7 +104,7 @@ describe('reconcileCardPayments', () => {
   it('retypes the unpaired leg as a transfer with no category and leaves other rows alone', async () => {
     withPaymentPair();
 
-    const changed = await reconcileCardPayments();
+    const changed = await reconcileCardPayments(ctx);
 
     expect(changed.map(c => c.id)).toEqual(['bank-leg']);
     expect(changed[0].previous_type).toBe('expense');
@@ -116,9 +116,10 @@ describe('reconcileCardPayments', () => {
   it('re-checks at write time so a row typed by hand, or already a transfer or investment, is never overwritten', async () => {
     withPaymentPair();
 
-    await reconcileCardPayments();
+    await reconcileCardPayments(ctx);
 
     expect(state.updates[0].guards).toEqual([
+      ['eq', 'user_id', 'user-1'],
       ['or', 'type_manually_set.is.null,type_manually_set.eq.false'],
       ['neq', 'transaction_type', 'transfer'],
       ['neq', 'transaction_type', 'investment'],
@@ -129,7 +130,7 @@ describe('reconcileCardPayments', () => {
     withPaymentPair();
     state.mappings = [{ id: 'm1', original_name: 'Acme Card - Rent Withdrawal', display_name: 'Rent', default_category_id: null, default_transaction_type: 'expense' }];
 
-    expect(await reconcileCardPayments()).toEqual([]);
+    expect(await reconcileCardPayments(ctx)).toEqual([]);
     expect(state.updates).toEqual([]);
   });
 
@@ -138,14 +139,14 @@ describe('reconcileCardPayments', () => {
     (state.transactions as Record<string, unknown>[])[1].original_description = 'ACME RAW DESCRIPTOR';
     state.mappings = [{ id: 'm1', original_name: 'ACME RAW DESCRIPTOR', display_name: 'Rent', default_category_id: null, default_transaction_type: 'expense' }];
 
-    expect(await reconcileCardPayments()).toEqual([]);
+    expect(await reconcileCardPayments(ctx)).toEqual([]);
     expect(state.updates).toEqual([]);
   });
 
   it('reports what would change without writing when apply is false', async () => {
     withPaymentPair();
 
-    const changed = await reconcileCardPayments({ apply: false });
+    const changed = await reconcileCardPayments(ctx, { apply: false });
 
     expect(changed.map(c => c.id)).toEqual(['bank-leg']);
     expect(state.updates).toEqual([]);
@@ -155,7 +156,7 @@ describe('reconcileCardPayments', () => {
     state.accounts = [{ id: 'bank', account_type: 'checking' }];
     state.transactions = [tx({ id: 'a', account_id: 'bank', amount: 10, date: today() })];
 
-    expect(await reconcileCardPayments()).toEqual([]);
+    expect(await reconcileCardPayments(ctx)).toEqual([]);
     expect(state.updates).toEqual([]);
   });
 
@@ -169,7 +170,7 @@ describe('reconcileCardPayments', () => {
       tx({ id: 'bank-leg', account_id: 'b', amount: 75, date: today(), merchant_name: 'ZEPHYR CARD PMT' }),
     ];
 
-    const changed = await reconcileCardPayments({ sinceDate: null });
+    const changed = await reconcileCardPayments(ctx, { sinceDate: null });
 
     expect(changed.map(c => c.id).sort()).toEqual(['bank-leg', 'card-leg']);
   });
@@ -184,22 +185,36 @@ describe('reconcileCardPayments', () => {
       tx({ id: 'purchase', account_id: 'broker', amount: 40, date: today(), merchant_name: 'Acme Store' }),
     ];
 
-    expect(await reconcileCardPayments()).toEqual([]);
+    expect(await reconcileCardPayments(ctx)).toEqual([]);
   });
 
   it('counts a row returned twice across pages only once', async () => {
     withPaymentPair();
     state.transactions = [...(state.transactions as unknown[]), (state.transactions as unknown[])[1]];
 
-    const changed = await reconcileCardPayments();
+    const changed = await reconcileCardPayments(ctx);
 
     expect(changed.map(c => c.id)).toEqual(['bank-leg']);
+  });
+
+  it("reads only the user's own accounts, transactions and rules", async () => {
+    withPaymentPair();
+    state.eqCalls = [];
+
+    await reconcileCardPayments(ctx);
+
+    // accounts, transactions and merchant_mappings: one user filter each
+    expect(state.eqCalls.filter(([column]) => column === 'user_id')).toEqual([
+      ['user_id', 'user-1'],
+      ['user_id', 'user-1'],
+      ['user_id', 'user-1'],
+    ]);
   });
 
   it('orders by id after date so pagination is stable', async () => {
     withPaymentPair();
 
-    await reconcileCardPayments();
+    await reconcileCardPayments(ctx);
 
     expect(state.orderCalls).toEqual([['date', { ascending: false }], ['id']]);
   });
@@ -207,7 +222,7 @@ describe('reconcileCardPayments', () => {
   it('only looks back a few weeks by default, and scans all history when sinceDate is null', async () => {
     withPaymentPair();
 
-    await reconcileCardPayments();
+    await reconcileCardPayments(ctx);
     const [column, since] = state.gteCalls[0] as [string, string];
     const daysBack = (Date.now() - Date.parse(since)) / (24 * 60 * 60 * 1000);
     expect(column).toBe('date');
@@ -215,7 +230,7 @@ describe('reconcileCardPayments', () => {
     expect(daysBack).toBeLessThan(23);
 
     state.gteCalls = [];
-    await reconcileCardPayments({ sinceDate: null });
+    await reconcileCardPayments(ctx, { sinceDate: null });
     expect(state.gteCalls).toEqual([]);
   });
 });
@@ -239,7 +254,7 @@ describe('retypeInvestmentsReadingAsCardBills', () => {
       investment({ id: 'contribution', amount: 540, merchant_name: 'Robinhood', original_description: 'Robinhood - Debits Withdrawal WITHDRAWAL' }),
     ];
 
-    const changed = await retypeInvestmentsReadingAsCardBills();
+    const changed = await retypeInvestmentsReadingAsCardBills(ctx);
 
     expect(changed.map(c => c.id).sort()).toEqual(['bill', 'bill-2']);
     expect(state.updates).toHaveLength(1);
@@ -252,10 +267,11 @@ describe('retypeInvestmentsReadingAsCardBills', () => {
       investment({ id: 'bill', amount: 10, merchant_name: 'Acme', original_description: 'Acme Ccb - Payment' }),
     ];
 
-    await retypeInvestmentsReadingAsCardBills();
+    await retypeInvestmentsReadingAsCardBills(ctx);
 
     expect(state.eqCalls).toContainEqual(['transaction_type', 'investment']);
     expect(state.updates[0].guards).toEqual([
+      ['eq', 'user_id', 'user-1'],
       ['or', 'type_manually_set.is.null,type_manually_set.eq.false'],
       ['eq', 'transaction_type', 'investment'],
     ]);
@@ -267,7 +283,7 @@ describe('retypeInvestmentsReadingAsCardBills', () => {
       investment({ id: 'ruled', amount: 10, merchant_name: 'Acme', original_description: 'Acme Ccb - Payment' }),
     ];
 
-    expect(await retypeInvestmentsReadingAsCardBills()).toEqual([]);
+    expect(await retypeInvestmentsReadingAsCardBills(ctx)).toEqual([]);
     expect(state.updates).toEqual([]);
   });
 
@@ -276,7 +292,7 @@ describe('retypeInvestmentsReadingAsCardBills', () => {
       investment({ id: 'manual', amount: 10, merchant_name: 'Acme', original_description: 'Acme Ccb - Payment', type_manually_set: true }),
     ];
 
-    expect(await retypeInvestmentsReadingAsCardBills()).toEqual([]);
+    expect(await retypeInvestmentsReadingAsCardBills(ctx)).toEqual([]);
     expect(state.updates).toEqual([]);
   });
 
@@ -285,7 +301,7 @@ describe('retypeInvestmentsReadingAsCardBills', () => {
       investment({ id: 'bill', amount: 10, merchant_name: 'Acme', original_description: 'Acme Ccb - Payment' }),
     ];
 
-    const changed = await retypeInvestmentsReadingAsCardBills({ apply: false });
+    const changed = await retypeInvestmentsReadingAsCardBills(ctx, { apply: false });
 
     expect(changed.map(c => c.id)).toEqual(['bill']);
     expect(state.updates).toEqual([]);
@@ -303,7 +319,7 @@ describe('reconcileCardPaymentsAfterSync', () => {
     state.failTransactions = true;
     const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    await expect(reconcileCardPaymentsAfterSync()).resolves.toBeUndefined();
+    await expect(reconcileCardPaymentsAfterSync(ctx)).resolves.toBeUndefined();
     expect(errorLog).toHaveBeenCalled();
   });
 
@@ -311,7 +327,7 @@ describe('reconcileCardPaymentsAfterSync', () => {
     state.accounts = [];
     state.transactions = [];
 
-    await reconcileCardPaymentsAfterSync({ sinceDate: null });
+    await reconcileCardPaymentsAfterSync(ctx, { sinceDate: null });
 
     expect(state.gteCalls).toEqual([]);
   });

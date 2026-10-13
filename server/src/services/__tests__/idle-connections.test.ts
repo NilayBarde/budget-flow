@@ -9,7 +9,7 @@ const account = (overrides: Partial<IdleCheckAccount> = {}): IdleCheckAccount =>
   id: 'acct-1',
   account_type: 'credit card',
   plaid_item_id: 'item-1',
-  plaid_access_token: 'access-token',
+  is_manual: false,
   created_at: daysAgo(200),
   idle_snoozed_until: null,
   last_transaction_date: dateDaysAgo(5),
@@ -72,7 +72,7 @@ describe('findIdleConnections', () => {
   });
 
   it('never flags manual or disconnected accounts, which Plaid does not bill', () => {
-    const manual = account({ plaid_item_id: 'manual-acct-1', plaid_access_token: 'manual', last_transaction_date: null });
+    const manual = account({ plaid_item_id: 'manual-acct-1', is_manual: true, last_transaction_date: null });
     expect(findIdleConnections([manual], NOW).size).toBe(0);
   });
 

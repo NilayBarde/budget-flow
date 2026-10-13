@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { supabase } from '../db/supabase.js';
+import type { DbContext } from '../db/context.js';
+import { saveCursor } from './plaid-secrets.js';
 import { categorizeForSpending, cleanMerchantName, type PlaidPFC } from './categorizer.js';
 import { detectTransactionType, type TransactionType } from './transaction-type.js';
 import { loadManuallyTypedIds, loadMerchantMappings, resolveTransactionType, type MerchantMapping } from './merchant-mappings.js';
@@ -162,28 +163,38 @@ export const buildTransactionUpdate = (tx: PlaidTransaction, { accountId, accoun
  * item, so it is saved on every account under it to keep them in step. The history flag only ever
  * flips on, never back off.
  */
-const recordSuccessfulSync = async (plaidItemId: string, nextCursor: string, historicalComplete: boolean) => {
-  const { error } = await supabase
+const recordSuccessfulSync = async (
+  { db, userId }: DbContext,
+  plaidItemId: string,
+  nextCursor: string,
+  historicalComplete: boolean,
+) => {
+  const { error } = await db
     .from('accounts')
     .update({
-      plaid_cursor: nextCursor,
       last_synced_at: new Date().toISOString(),
       needs_reauth: false,
       reauth_detected_at: null,
       last_sync_error: null,
       last_sync_error_at: null,
     })
+    .eq('user_id', userId)
     .eq('plaid_item_id', plaidItemId);
   if (error) throw error;
 
   if (historicalComplete) {
     // The whole history has arrived, so a re-linked account has nothing left to adopt.
-    const { error: historyError } = await supabase
+    const { error: historyError } = await db
       .from('accounts')
       .update({ historical_sync_complete: true, relinked_at: null })
+      .eq('user_id', userId)
       .eq('plaid_item_id', plaidItemId);
     if (historyError) throw historyError;
   }
+
+  // Last, so an advanced cursor always means everything above was saved. Signed-in users can't
+  // write the cursor, so it goes through the service role (still narrowed to this user).
+  await saveCursor(userId, plaidItemId, nextCursor);
 };
 
 const PAGE_SIZE = 1000;
@@ -195,22 +206,25 @@ const PAGE_SIZE = 1000;
  * whole history, however many syncs that takes. Loaded once per sync, not once per transaction.
  */
 const loadAdoptionCandidates = async (
+  { db, userId }: DbContext,
   plaidItemId: string,
   deliveredIds: ReadonlySet<string>,
 ): Promise<Map<string, AdoptionCandidate[]>> => {
   const index = new Map<string, AdoptionCandidate[]>();
-  const { data: relinked, error } = await supabase
+  const { data: relinked, error } = await db
     .from('accounts')
     .select('id, relinked_at')
+    .eq('user_id', userId)
     .eq('plaid_item_id', plaidItemId)
     .not('relinked_at', 'is', null);
   if (error) throw error;
 
   for (const account of relinked ?? []) {
     for (let from = 0; ; from += PAGE_SIZE) {
-      const { data: rows, error: rowsError } = await supabase
+      const { data: rows, error: rowsError } = await db
         .from('transactions')
         .select('id, date, amount, plaid_transaction_id, original_description')
+        .eq('user_id', userId)
         .eq('account_id', account.id)
         .lt('created_at', account.relinked_at)
         .range(from, from + PAGE_SIZE - 1);
@@ -243,6 +257,8 @@ export interface SyncCounts {
 }
 
 interface ApplySyncOptions {
+  /** The item's owner; every read and write stays inside their data. */
+  ctx: DbContext;
   plaidItemId: string;
   syncResult: SyncResult;
   /** Maps a Plaid account id to our account row id. Returning undefined skips the transaction. */
@@ -261,6 +277,7 @@ interface ApplySyncOptions {
  * already stored are skipped). Without that, a failed insert would be skipped past for good.
  */
 export const applySyncResult = async ({
+  ctx,
   plaidItemId,
   syncResult,
   resolveAccountId,
@@ -268,14 +285,15 @@ export const applySyncResult = async ({
   historicalComplete = false,
   reconcileSinceDate,
 }: ApplySyncOptions): Promise<SyncCounts> => {
-  const { data: categories } = await supabase.from('categories').select('id, name');
+  const { db, userId } = ctx;
+  const { data: categories } = await db.from('categories').select('id, name').eq('user_id', userId);
   const categoryMap = new Map<string, string>((categories ?? []).map(c => [c.name, c.id]));
-  const mappings = await loadMerchantMappings();
+  const mappings = await loadMerchantMappings(ctx);
 
   const counts: SyncCounts = { added: 0, modified: 0, removed: 0, reattributed: 0, reconciled: 0, skipped: 0, adopted: 0 };
   const deliveredIds = new Set([...syncResult.added, ...syncResult.modified].map(tx => tx.transaction_id));
   const adoptionCandidates = syncResult.added.length > 0
-    ? await loadAdoptionCandidates(plaidItemId, deliveredIds)
+    ? await loadAdoptionCandidates(ctx, plaidItemId, deliveredIds)
     : new Map<string, AdoptionCandidate[]>();
   const adoptedRowIds = new Set<string>();
   let failures = 0;
@@ -294,9 +312,10 @@ export const applySyncResult = async ({
       continue;
     }
 
-    const { data: existing, error: lookupError } = await supabase
+    const { data: existing, error: lookupError } = await db
       .from('transactions')
       .select('id, account_id')
+      .eq('user_id', userId)
       .eq('plaid_transaction_id', tx.transaction_id)
       .single();
 
@@ -311,7 +330,11 @@ export const applySyncResult = async ({
       // Already stored. If a prior sync filed it under the wrong card, move it, which keeps every
       // user edit (splits, category, notes, display name).
       if (existing.account_id !== accountId) {
-        const { error } = await supabase.from('transactions').update({ account_id: accountId }).eq('id', existing.id);
+        const { error } = await db
+          .from('transactions')
+          .update({ account_id: accountId })
+          .eq('user_id', userId)
+          .eq('id', existing.id);
         if (error) fail('move a transaction to the right account', tx.transaction_id, error);
         else counts.reattributed++;
       }
@@ -321,7 +344,7 @@ export const applySyncResult = async ({
       // nothing once the pending row is gone, so running it again is safe.
       if (tx.pending_transaction_id) {
         try {
-          if (await reconcilePendingTransaction(existing.id, tx.amount, tx.pending_transaction_id)) counts.reconciled++;
+          if (await reconcilePendingTransaction(ctx, existing.id, tx.amount, tx.pending_transaction_id)) counts.reconciled++;
         } catch (error) {
           fail('replace a pending transaction', tx.transaction_id, error);
         }
@@ -337,9 +360,10 @@ export const applySyncResult = async ({
       adoptedRowIds,
     );
     if (match) {
-      const { error } = await supabase
+      const { error } = await db
         .from('transactions')
         .update({ plaid_transaction_id: tx.transaction_id, pending: tx.pending })
+        .eq('user_id', userId)
         .eq('id', match.id);
       // A duplicate key means another sync (the webhook Plaid sends right after a link races the link's
       // own sync) already gave this transaction to a row. It is stored, so this is not a failure.
@@ -354,6 +378,7 @@ export const applySyncResult = async ({
 
     const row = {
       id: randomUUID(),
+      user_id: userId,
       ...buildNewTransactionRow(tx, {
         accountId,
         accountType: accountTypeById.get(accountId),
@@ -361,7 +386,7 @@ export const applySyncResult = async ({
         categoryMap,
       }),
     };
-    const { error } = await supabase.from('transactions').insert(row);
+    const { error } = await db.from('transactions').insert(row);
     // A duplicate key means another sync (a webhook racing a manual sync) stored this transaction
     // between our check and our insert. It is stored, which is all that matters, and that sync owns
     // the reconciliation, so this is neither a failure nor an addition of ours.
@@ -375,14 +400,14 @@ export const applySyncResult = async ({
     // A posted transaction can supersede a pending authorization: carry the pending row's edits
     // and splits over and drop it, so a tip adjustment is not counted twice.
     try {
-      if (await reconcilePendingTransaction(row.id, tx.amount, tx.pending_transaction_id)) counts.reconciled++;
+      if (await reconcilePendingTransaction(ctx, row.id, tx.amount, tx.pending_transaction_id)) counts.reconciled++;
     } catch (reconcileError) {
       fail('replace a pending transaction', tx.transaction_id, reconcileError);
     }
   }
 
   // Look up the hand typed flags once, not per transaction.
-  const manuallyTypedIds = await loadManuallyTypedIds(syncResult.modified);
+  const manuallyTypedIds = await loadManuallyTypedIds(ctx, syncResult.modified);
 
   for (const tx of syncResult.modified) {
     const accountId = resolveAccountId(tx.account_id);
@@ -391,9 +416,10 @@ export const applySyncResult = async ({
       continue;
     }
 
-    const { data: existing, error: lookupError } = await supabase
+    const { data: existing, error: lookupError } = await db
       .from('transactions')
       .select('merchant_name, merchant_display_name, transaction_type, original_description, category_id, plaid_category')
+      .eq('user_id', userId)
       .eq('plaid_transaction_id', tx.transaction_id)
       .single();
 
@@ -414,13 +440,21 @@ export const applySyncResult = async ({
       categoryMap,
       existing,
     });
-    const { error } = await supabase.from('transactions').update(update).eq('plaid_transaction_id', tx.transaction_id);
+    const { error } = await db
+      .from('transactions')
+      .update(update)
+      .eq('user_id', userId)
+      .eq('plaid_transaction_id', tx.transaction_id);
     if (error) fail('update a modified transaction', tx.transaction_id, error);
     else counts.modified++;
   }
 
   for (const tx of syncResult.removed) {
-    const { error } = await supabase.from('transactions').delete().eq('plaid_transaction_id', tx.transaction_id);
+    const { error } = await db
+      .from('transactions')
+      .delete()
+      .eq('user_id', userId)
+      .eq('plaid_transaction_id', tx.transaction_id);
     if (error) fail('remove a deleted transaction', tx.transaction_id, error);
     else counts.removed++;
   }
@@ -429,8 +463,8 @@ export const applySyncResult = async ({
     throw new Error(`Failed to save ${failures} transaction(s). The sync cursor was not advanced, so the next sync retries them.`);
   }
 
-  await recordSuccessfulSync(plaidItemId, syncResult.nextCursor, historicalComplete);
-  await reconcileCardPaymentsAfterSync(reconcileSinceDate === undefined ? {} : { sinceDate: reconcileSinceDate });
+  await recordSuccessfulSync(ctx, plaidItemId, syncResult.nextCursor, historicalComplete);
+  await reconcileCardPaymentsAfterSync(ctx, reconcileSinceDate === undefined ? {} : { sinceDate: reconcileSinceDate });
 
   return counts;
 };

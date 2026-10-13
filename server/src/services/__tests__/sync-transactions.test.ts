@@ -6,7 +6,7 @@ import type { MerchantMapping } from '../merchant-mappings.js';
 // it ended up with, and results come from `db`, so tests can assert both what was written and when.
 interface Op {
   table: string;
-  op: 'select' | 'insert' | 'update' | 'delete';
+  op: 'select' | 'insert' | 'update' | 'delete' | 'save_cursor';
   payload?: unknown;
   filters: [string, unknown][];
 }
@@ -108,7 +108,14 @@ const makeBuilder = (table: string) => {
   return builder;
 };
 
-vi.mock('../../db/supabase.js', () => ({ supabase: { from: (table: string) => makeBuilder(table) } }));
+const ctx = { db: { from: (table: string) => makeBuilder(table) }, userId: 'user-1' } as never;
+
+// The cursor goes through the service-role helper; recorded in the same log so its order shows.
+vi.mock('../plaid-secrets.js', () => ({
+  saveCursor: async (userId: string, plaidItemId: string, cursor: string) => {
+    db.ops.push({ table: 'accounts', op: 'save_cursor', payload: { cursor }, filters: [['user_id', userId], ['plaid_item_id', plaidItemId]] });
+  },
+}));
 
 // The helpers below are tested on their own, so here they are stubs with a recorded call.
 const rules = { list: [] as MerchantMapping[], lockedIds: new Set<string>() };
@@ -516,6 +523,7 @@ const emptySync = (overrides: Partial<SyncResult> = {}): SyncResult => ({
 
 const apply = (syncResult: SyncResult, overrides: Partial<Parameters<typeof applySyncResult>[0]> = {}) =>
   applySyncResult({
+    ctx,
     plaidItemId: 'item-1',
     syncResult,
     resolveAccountId: (plaidAccountId: string) => (plaidAccountId === 'plaid-acct' ? 'acct-1' : undefined),
@@ -527,6 +535,26 @@ const opsOf = (table: string, op: Op['op']) => db.ops.filter(o => o.table === ta
 const filterValue = (o: Op, column: string) => o.filters.find(([c]) => c === column)?.[1];
 
 describe('applySyncResult', () => {
+  it("stays inside the item owner's data: every query is filtered by user and every new row is theirs", async () => {
+    db.ops = [];
+    db.existingByPlaidId = new Map([['moved', { id: 'row-1', account_id: 'other-acct' }], ['m1', { id: 'row-2', account_id: 'acct-1' }]]);
+    db.relinkedAccounts = [{ id: 'acct-1', relinked_at: '2026-09-01' }];
+
+    await apply(emptySync({
+      added: [tx(), tx({ transaction_id: 'moved' })],
+      modified: [tx({ transaction_id: 'm1' })],
+      removed: [{ transaction_id: 'gone' }],
+    }), { historicalComplete: true });
+
+    expect(db.ops.length).toBeGreaterThan(5);
+    for (const op of db.ops.filter(o => o.op !== 'insert')) {
+      expect(op.filters[0], `${op.table} ${op.op}`).toEqual(['user_id', 'user-1']);
+    }
+    for (const insert of opsOf('transactions', 'insert')) {
+      expect(insert.payload).toMatchObject({ user_id: 'user-1' });
+    }
+  });
+
   beforeEach(() => {
     db.ops = [];
     db.existingByPlaidId = new Map();
@@ -684,7 +712,7 @@ describe('applySyncResult', () => {
     expect(insert.category_id).toBe('cat-custom');
     expect(insert.merchant_display_name).toBe('My Cafe');
     expect(reconcilePending).toHaveBeenCalledTimes(2);
-    expect(reconcilePending).toHaveBeenCalledWith(insert.id, 12.5, 'p1');
+    expect(reconcilePending).toHaveBeenCalledWith(ctx, insert.id, 12.5, 'p1');
     expect(counts.reconciled).toBe(1);
   });
 
@@ -756,13 +784,34 @@ describe('applySyncResult', () => {
   describe('recording a successful sync', () => {
     const stateWrites = () => opsOf('accounts', 'update');
 
-    it('saves the cursor on every account of the item, stamps the sync time and clears the reconnect flag', async () => {
+    it('stamps the sync time and clears the reconnect flag on every account of the item', async () => {
       await apply(emptySync({ nextCursor: 'cursor-9' }));
 
       const [write] = stateWrites();
       expect(filterValue(write, 'plaid_item_id')).toBe('item-1');
-      expect(write.payload).toMatchObject({ plaid_cursor: 'cursor-9', needs_reauth: false, reauth_detected_at: null });
+      expect(write.payload).toMatchObject({ needs_reauth: false, reauth_detected_at: null });
+      expect(write.payload).not.toHaveProperty('plaid_cursor');
       expect(Date.parse((write.payload as { last_synced_at: string }).last_synced_at)).not.toBeNaN();
+    });
+
+    it("saves the cursor last, through the service-role helper, for this user's item only", async () => {
+      await apply(emptySync({ nextCursor: 'cursor-9' }), { historicalComplete: true });
+
+      const writes = db.ops.filter(o => o.table === 'accounts' && o.op !== 'select');
+      expect(writes.at(-1)).toEqual({
+        table: 'accounts',
+        op: 'save_cursor',
+        payload: { cursor: 'cursor-9' },
+        filters: [['user_id', 'user-1'], ['plaid_item_id', 'item-1']],
+      });
+    });
+
+    it('does not advance the cursor when the sync state cannot be recorded', async () => {
+      db.failUpdateFor.add('');
+
+      await expect(apply(emptySync())).rejects.toBeTruthy();
+
+      expect(opsOf('accounts', 'save_cursor')).toEqual([]);
     });
 
     it('clears the last failure, since this sync proved the item works', async () => {
@@ -786,21 +835,21 @@ describe('applySyncResult', () => {
       await apply(emptySync({ added: [tx()], removed: [{ transaction_id: 'gone' }] }));
 
       const order = db.ops.map(o => `${o.table}:${o.op}`).filter(step => !step.endsWith(':select'));
-      expect(order).toEqual(['transactions:insert', 'transactions:delete', 'accounts:update']);
+      expect(order).toEqual(['transactions:insert', 'transactions:delete', 'accounts:update', 'accounts:save_cursor']);
       expect(reconcileCardPayments).toHaveBeenCalledTimes(1);
     });
 
     it('passes the pairing look back through, so a first link can scan its whole history', async () => {
       await apply(emptySync(), { reconcileSinceDate: null });
 
-      expect(reconcileCardPayments).toHaveBeenCalledWith({ sinceDate: null });
+      expect(reconcileCardPayments).toHaveBeenCalledWith(ctx, { sinceDate: null });
     });
   });
 
   it('passes no look back by default, so the pairing uses its own short window', async () => {
     await apply(emptySync());
 
-    expect(reconcileCardPayments).toHaveBeenCalledWith({});
+    expect(reconcileCardPayments).toHaveBeenCalledWith(ctx, {});
   });
 
   describe('when a save fails', () => {
@@ -936,7 +985,7 @@ describe('applySyncResult', () => {
       const counts = await apply(emptySync({ added: [tx({ transaction_id: 'posted', pending_transaction_id: 'p9' })] }));
 
       expect(opsOf('transactions', 'insert')).toHaveLength(0);
-      expect(reconcilePending).toHaveBeenCalledWith('row-9', 12.5, 'p9');
+      expect(reconcilePending).toHaveBeenCalledWith(ctx, 'row-9', 12.5, 'p9');
       expect(counts.added).toBe(0);
     });
 

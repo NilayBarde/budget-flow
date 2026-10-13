@@ -1,4 +1,4 @@
-import { supabase } from '../db/supabase.js';
+import type { DbContext } from '../db/context.js';
 import { getPlaidErrorCode, needsReconnect, redactError } from './plaid-errors.js';
 
 // Long enough for a Plaid message, short enough that one runaway error cannot fill a row.
@@ -28,17 +28,22 @@ export const describeSyncError = (error: unknown): string => {
  * caller, so a webhook sync and a manual sync end up in the same state. It never throws: it runs
  * while another error is already being handled, and a failed write here must not replace that error.
  */
-export const recordSyncFailure = async (plaidItemId: string | null | undefined, error: unknown): Promise<void> => {
+export const recordSyncFailure = async (
+  { db, userId }: DbContext,
+  plaidItemId: string | null | undefined,
+  error: unknown,
+): Promise<void> => {
   if (!plaidItemId) return;
 
   const now = new Date().toISOString();
-  const { error: writeError } = await supabase
+  const { error: writeError } = await db
     .from('accounts')
     .update({
       last_sync_error: describeSyncError(error),
       last_sync_error_at: now,
       ...(needsReconnect(getPlaidErrorCode(error)) ? { needs_reauth: true, reauth_detected_at: now } : {}),
     })
+    .eq('user_id', userId)
     .eq('plaid_item_id', plaidItemId);
 
   if (writeError) console.error(`Could not record the sync failure for item ${plaidItemId}:`, redactError(writeError));
