@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Request, Response } from 'express';
 
 const auth = {
@@ -34,10 +34,20 @@ vi.mock('../../db/supabase.js', () => ({
 const ensureUserSetup = vi.fn(async (_userId: string) => {});
 vi.mock('../../services/user-setup.js', () => ({ ensureUserSetup: (userId: string) => ensureUserSetup(userId) }));
 
-const { requireAuth, clearAccessCache, ACCESS_CACHE_MS } = await import('../requireAuth.js');
+const { requireAuth, clearSetupCache } = await import('../requireAuth.js');
 
-const signedIn = (sub = 'user-1', email = 'owner@example.com') => {
-  auth.getClaims.mockResolvedValue({ data: { claims: { sub, email } }, error: null });
+// Claims shaped like a Supabase access token for a Google sign-in.
+const googleClaims = (overrides: Record<string, unknown> = {}) => ({
+  sub: 'user-1',
+  email: 'owner@example.com',
+  role: 'authenticated',
+  is_anonymous: false,
+  app_metadata: { provider: 'google', providers: ['google'] },
+  ...overrides,
+});
+
+const signedIn = (overrides: Record<string, unknown> = {}) => {
+  auth.getClaims.mockResolvedValue({ data: { claims: googleClaims(overrides) }, error: null });
 };
 
 const call = async (path: string, authorization?: string) => {
@@ -58,17 +68,15 @@ const expectRejected = (res: { status: ReturnType<typeof vi.fn>; json: ReturnTyp
   expect(next).not.toHaveBeenCalled();
 };
 
+const NOT_INVITED = "This Google account hasn't been invited.";
+
 beforeEach(() => {
-  clearAccessCache();
+  clearSetupCache();
   auth.getClaims.mockReset();
   ensureUserSetup.mockClear();
   allowlist.emails = new Set(['owner@example.com']);
   allowlist.error = null;
   allowlist.queries = [];
-});
-
-afterEach(() => {
-  vi.useRealTimers();
 });
 
 describe('requireAuth', () => {
@@ -108,22 +116,44 @@ describe('requireAuth', () => {
     expectRejected(res, next, 401, 'Not signed in');
   });
 
-  it('rejects a token with no email without querying the allowlist', async () => {
-    auth.getClaims.mockResolvedValue({ data: { claims: { sub: 'user-1' } }, error: null });
+  it.each([
+    ['the anon key', { role: 'anon', sub: undefined }],
+    ['the service-role key', { role: 'service_role', sub: undefined }],
+    ['a token with no role', { role: undefined }],
+  ])('rejects %s as not signed in', async (_label, overrides) => {
+    signedIn(overrides);
     const { res, next } = await call('/accounts', 'Bearer tok');
-    expectRejected(res, next, 403, "This Google account hasn't been invited.");
+    expectRejected(res, next, 401, 'Not signed in');
     expect(allowlist.queries).toEqual([]);
   });
 
-  it('rejects an account that is not on the allowlist and does not set it up', async () => {
-    signedIn('user-2', 'stranger@example.com');
+  it.each([
+    ['an anonymous session', { is_anonymous: true }],
+    ['an email/password account', { app_metadata: { provider: 'email', providers: ['email'] } }],
+    ['a token with no app_metadata', { app_metadata: undefined }],
+    ['a token with no email', { email: undefined }],
+  ])('rejects %s without querying the allowlist', async (_label, overrides) => {
+    signedIn(overrides);
     const { res, next } = await call('/accounts', 'Bearer tok');
-    expectRejected(res, next, 403, "This Google account hasn't been invited.");
+    expectRejected(res, next, 403, NOT_INVITED);
+    expect(allowlist.queries).toEqual([]);
+  });
+
+  it('accepts an account created by hand and then linked to Google', async () => {
+    signedIn({ app_metadata: { provider: 'email', providers: ['email', 'google'] } });
+    const { next } = await call('/accounts', 'Bearer tok');
+    expect(next).toHaveBeenCalledWith();
+  });
+
+  it('rejects an account that is not on the allowlist and does not set it up', async () => {
+    signedIn({ sub: 'user-2', email: 'stranger@example.com' });
+    const { res, next } = await call('/accounts', 'Bearer tok');
+    expectRejected(res, next, 403, NOT_INVITED);
     expect(ensureUserSetup).not.toHaveBeenCalled();
   });
 
   it('admits an invited account, matching its email case-insensitively', async () => {
-    signedIn('user-1', 'Owner@Example.com');
+    signedIn({ email: 'Owner@Example.com' });
     const { req, res, next } = await call('/accounts', 'Bearer tok');
 
     expect(allowlist.queries).toEqual(['owner@example.com']);
@@ -134,21 +164,23 @@ describe('requireAuth', () => {
     expect(res.status).not.toHaveBeenCalled();
   });
 
-  it('remembers an admitted user for five minutes, then checks again', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] });
+  it('checks the allowlist on every request but sets a user up only once', async () => {
     signedIn();
-
     await call('/accounts', 'Bearer tok');
     await call('/transactions', 'Bearer tok');
-    expect(allowlist.queries).toHaveLength(1);
-    expect(ensureUserSetup).toHaveBeenCalledTimes(1);
-
-    vi.setSystemTime(Date.now() + ACCESS_CACHE_MS + 1);
-    await call('/accounts', 'Bearer tok');
     expect(allowlist.queries).toHaveLength(2);
+    expect(ensureUserSetup).toHaveBeenCalledTimes(1);
   });
 
-  it('verifies the token on every request, even when the user is remembered', async () => {
+  it('refuses a user on their next request once they are removed from the allowlist', async () => {
+    signedIn();
+    await call('/accounts', 'Bearer tok');
+    allowlist.emails.delete('owner@example.com');
+    const { res, next } = await call('/accounts', 'Bearer tok');
+    expectRejected(res, next, 403, NOT_INVITED);
+  });
+
+  it('verifies the token on every request', async () => {
     signedIn();
     await call('/accounts', 'Bearer tok');
     auth.getClaims.mockResolvedValue({ data: null, error: new Error('expired') });
@@ -156,14 +188,21 @@ describe('requireAuth', () => {
     expectRejected(res, next, 401, 'Not signed in');
   });
 
-  it('passes an allowlist lookup failure to the error handler and does not remember the user', async () => {
+  it('passes an allowlist lookup failure to the error handler', async () => {
     signedIn();
     allowlist.error = new Error('db down');
     const { next } = await call('/accounts', 'Bearer tok');
     expect(next).toHaveBeenCalledWith(allowlist.error);
+    expect(ensureUserSetup).not.toHaveBeenCalled();
+  });
 
-    allowlist.error = null;
+  it('retries setup on the next request if it failed', async () => {
+    signedIn();
+    ensureUserSetup.mockRejectedValueOnce(new Error('seed failed'));
+    const { next } = await call('/accounts', 'Bearer tok');
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ message: 'seed failed' }));
+
     await call('/accounts', 'Bearer tok');
-    expect(allowlist.queries).toHaveLength(2);
+    expect(ensureUserSetup).toHaveBeenCalledTimes(2);
   });
 });
