@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { supabase } from '../db/supabase.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
 import { userContext } from '../db/context.js';
 import { randomUUID } from 'node:crypto';
 import { categorizeWithPlaid, cleanMerchantName } from '../services/categorizer.js';
@@ -13,7 +13,8 @@ import { fetchAllRows } from '../utils/paginate.js';
 const router = Router();
 
 // Get transactions with filters
-router.get('/', async (req, res) => {
+router.get('/', asyncHandler(async (req, res) => {
+  const { db } = userContext(req);
   try {
     const { month, year, account_id, category_id, tag_id, search, is_recurring, transaction_type, needs_review, date } = req.query;
 
@@ -23,7 +24,7 @@ router.get('/', async (req, res) => {
     // Built fresh for each page of results below. Without a month or date filter this reads all
     // history, which is more than the 1000 rows Supabase returns from one request.
     const buildQuery = () => {
-      let query = supabase
+      let query = db
         .from('transactions')
         .select(`
           *,
@@ -83,15 +84,16 @@ router.get('/', async (req, res) => {
     console.error('Error fetching transactions:', error);
     res.status(500).json({ message: 'Failed to fetch transactions' });
   }
-});
+}));
 
 // Get similar transactions list by merchant name
-router.get('/similar/:merchantName', async (req, res) => {
+router.get('/similar/:merchantName', asyncHandler(async (req, res) => {
+  const { db } = userContext(req);
   try {
     const { merchantName } = req.params;
     const { excludeId } = req.query;
 
-    let query = supabase
+    let query = db
       .from('transactions')
       .select('id, date, amount, merchant_name, merchant_display_name, category:categories(name, color)')
       .eq('merchant_name', merchantName)
@@ -109,15 +111,16 @@ router.get('/similar/:merchantName', async (req, res) => {
     console.error('Error fetching similar transactions:', error);
     res.status(500).json({ message: 'Failed to fetch similar transactions' });
   }
-});
+}));
 
 // Get count of similar transactions by merchant name
-router.get('/similar/:merchantName/count', async (req, res) => {
+router.get('/similar/:merchantName/count', asyncHandler(async (req, res) => {
+  const { db } = userContext(req);
   try {
     const { merchantName } = req.params;
     const { excludeId } = req.query;
 
-    let query = supabase
+    let query = db
       .from('transactions')
       .select('id', { count: 'exact', head: true })
       .eq('merchant_name', merchantName);
@@ -134,15 +137,16 @@ router.get('/similar/:merchantName/count', async (req, res) => {
     console.error('Error fetching similar transactions count:', error);
     res.status(500).json({ message: 'Failed to fetch similar transactions count' });
   }
-});
+}));
 
 // Find duplicate transactions — only flags exact ID matches
 // Matches on plaid_transaction_id or csv_reference
-router.get('/duplicates', async (req, res) => {
+router.get('/duplicates', asyncHandler(async (req, res) => {
+  const { db } = userContext(req);
   try {
     // All history, read in pages: one request returns at most 1000 rows, so older duplicates were missed.
     const transactions = await fetchAllRows((from, to) =>
-      supabase
+      db
         .from('transactions')
         .select(`
           id,
@@ -222,10 +226,11 @@ router.get('/duplicates', async (req, res) => {
     console.error('Error finding duplicates:', error);
     res.status(500).json({ message: 'Failed to find duplicates' });
   }
-});
+}));
 
 // Bulk delete transactions
-router.post('/bulk/delete', async (req, res) => {
+router.post('/bulk/delete', asyncHandler(async (req, res) => {
+  const { db } = userContext(req);
   try {
     const { transactionIds } = req.body;
 
@@ -234,13 +239,13 @@ router.post('/bulk/delete', async (req, res) => {
     }
 
     // Delete splits first
-    await supabase.from('transaction_splits').delete().in('parent_transaction_id', transactionIds);
+    await db.from('transaction_splits').delete().in('parent_transaction_id', transactionIds);
 
     // Delete tags
-    await supabase.from('transaction_tags').delete().in('transaction_id', transactionIds);
+    await db.from('transaction_tags').delete().in('transaction_id', transactionIds);
 
     // Delete transactions
-    const { error } = await supabase.from('transactions').delete().in('id', transactionIds);
+    const { error } = await db.from('transactions').delete().in('id', transactionIds);
 
     if (error) throw error;
     res.json({ deleted: transactionIds.length });
@@ -248,14 +253,15 @@ router.post('/bulk/delete', async (req, res) => {
     console.error('Error bulk deleting transactions:', error);
     res.status(500).json({ message: 'Failed to bulk delete transactions' });
   }
-});
+}));
 
 // Get single transaction
-router.get('/:id', async (req, res) => {
+router.get('/:id', asyncHandler(async (req, res) => {
+  const { db } = userContext(req);
   try {
     const { id } = req.params;
 
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('transactions')
       .select(`
         *,
@@ -273,10 +279,11 @@ router.get('/:id', async (req, res) => {
     console.error('Error fetching transaction:', error);
     res.status(500).json({ message: 'Failed to fetch transaction' });
   }
-});
+}));
 
 // Create manual transaction
-router.post('/', async (req, res) => {
+router.post('/', asyncHandler(async (req, res) => {
+  const { db } = userContext(req);
   try {
     const { amount, date, merchant_name, category_id, notes, transaction_type } = req.body;
 
@@ -293,7 +300,7 @@ router.post('/', async (req, res) => {
       if (finalTransactionType === 'expense') {
         // Use pattern-based categorization for manual transactions (no Plaid data)
         const result = categorizeWithPlaid(merchant_name, null, null);
-        const { data: category } = await supabase
+        const { data: category } = await db
           .from('categories')
           .select('id')
           .eq('name', result.categoryName)
@@ -323,7 +330,7 @@ router.post('/', async (req, res) => {
       created_at: new Date().toISOString(),
     };
 
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('transactions')
       .insert(transaction)
       .select()
@@ -335,17 +342,19 @@ router.post('/', async (req, res) => {
     console.error('Error creating transaction:', error);
     res.status(500).json({ message: 'Failed to create transaction' });
   }
-});
+}));
 
 // Update transaction
-router.patch('/:id', async (req, res) => {
+router.patch('/:id', asyncHandler(async (req, res) => {
+  const ctx = userContext(req);
+  const { db, userId } = ctx;
   try {
     const { id } = req.params;
     const { recurring_amount: recurringAmountOverride, ...updates } = req.body;
     const applyToAll = req.query.applyToAll === 'true';
 
     // Get the current transaction to know the merchant and current type
-    const { data: transaction } = await supabase
+    const { data: transaction } = await db
       .from('transactions')
       .select('merchant_name, merchant_display_name, transaction_type, category_id')
       .eq('id', id)
@@ -354,7 +363,7 @@ router.patch('/:id', async (req, res) => {
     // If changing transaction_type to 'income' or 'investment' and no category_id provided,
     // auto-assign the corresponding category
     if ((updates.transaction_type === 'income' || updates.transaction_type === 'investment') && !updates.category_id) {
-      const categoryId = await getCategoryIdForType(userContext(req), updates.transaction_type as TransactionType);
+      const categoryId = await getCategoryIdForType(ctx, updates.transaction_type as TransactionType);
       if (categoryId) {
         updates.category_id = categoryId;
       }
@@ -375,7 +384,7 @@ router.patch('/:id', async (req, res) => {
       }
 
       // Check if a mapping already exists for this merchant
-      const { data: existingMapping } = await supabase
+      const { data: existingMapping } = await db
         .from('merchant_mappings')
         .select('*')
         .eq('original_name', transaction.merchant_name)
@@ -391,16 +400,18 @@ router.patch('/:id', async (req, res) => {
         existingMapping?.default_transaction_type ||
         null;
 
-      await supabase
+      await db
         .from('merchant_mappings')
         .upsert({
           id: existingMapping?.id || randomUUID(),
+          // In the row because conflict matching needs it (the column default doesn't apply there)
+          user_id: userId,
           original_name: transaction.merchant_name,
           display_name: displayName,
           default_category_id: categoryId,
           default_transaction_type: transactionType,
         }, {
-          onConflict: 'original_name',
+          onConflict: 'user_id,original_name',
         });
 
       // If applyToAll is true, update all transactions from the same merchant
@@ -415,7 +426,7 @@ router.patch('/:id', async (req, res) => {
         bulkUpdates.needs_review = false; // Clear review flag for all matching transactions
 
         if (Object.keys(bulkUpdates).length > 0) {
-          await supabase
+          await db
             .from('transactions')
             .update(bulkUpdates)
             .eq('merchant_name', transaction.merchant_name);
@@ -429,7 +440,7 @@ router.patch('/:id', async (req, res) => {
 
       // If applyToAll, bulk-update is_recurring for all transactions from this merchant
       if (applyToAll && transaction.merchant_name) {
-        await supabase
+        await db
           .from('transactions')
           .update({ is_recurring: updates.is_recurring })
           .eq('merchant_name', transaction.merchant_name);
@@ -438,7 +449,7 @@ router.patch('/:id', async (req, res) => {
       if (updates.is_recurring) {
         // Marking as recurring: upsert into recurring_transactions
         // Query all recurring transactions for this merchant to compute average MONTHLY total (split-aware)
-        const { data: recurringTxns } = await supabase
+        const { data: recurringTxns } = await db
           .from('transactions')
           .select('amount, date, is_split, splits:transaction_splits(amount, is_my_share)')
           .eq('merchant_name', transaction.merchant_name)
@@ -457,7 +468,7 @@ router.patch('/:id', async (req, res) => {
 
         // If no transactions found yet (single update not yet committed), use current transaction
         if (monthlyTotals.size === 0) {
-          const { data: thisTx } = await supabase
+          const { data: thisTx } = await db
             .from('transactions')
             .select('amount, date, is_split, splits:transaction_splits(amount, is_my_share)')
             .eq('id', id)
@@ -480,9 +491,10 @@ router.patch('/:id', async (req, res) => {
             : 0;
         }
 
-        await supabase
+        await db
           .from('recurring_transactions')
           .upsert({
+            user_id: userId,
             merchant_display_name: merchantName,
             average_amount: avgAmount,
             frequency: 'monthly' as const,
@@ -494,11 +506,11 @@ router.patch('/:id', async (req, res) => {
             // Marking recurring again revives a series the user deleted.
             user_hidden: false,
           }, {
-            onConflict: 'merchant_display_name',
+            onConflict: 'user_id,merchant_display_name',
           });
       } else {
         // Unmarking as recurring: check if any transactions for this merchant are still recurring
-        const { count } = await supabase
+        const { count } = await db
           .from('transactions')
           .select('id', { count: 'exact', head: true })
           .eq('merchant_name', transaction.merchant_name)
@@ -509,12 +521,12 @@ router.patch('/:id', async (req, res) => {
           // No more recurring transactions for this merchant. Detected series
           // are only deactivated (so detection can still find the real
           // series); manual ones are also hidden so they are not resurrected.
-          const { data: row } = await supabase
+          const { data: row } = await db
             .from('recurring_transactions')
             .select('source')
             .eq('merchant_display_name', merchantName)
             .maybeSingle();
-          await supabase
+          await db
             .from('recurring_transactions')
             .update(recurringUnmarkUpdate(row?.source))
             .eq('merchant_display_name', merchantName);
@@ -522,7 +534,7 @@ router.patch('/:id', async (req, res) => {
       }
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('transactions')
       .update(updates)
       .eq('id', id)
@@ -535,20 +547,21 @@ router.patch('/:id', async (req, res) => {
     console.error('Error updating transaction:', error);
     res.status(500).json({ message: 'Failed to update transaction' });
   }
-});
+}));
 
 // Delete transaction
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', asyncHandler(async (req, res) => {
+  const { db } = userContext(req);
   try {
     const { id } = req.params;
 
     // Delete splits first
-    await supabase.from('transaction_splits').delete().eq('parent_transaction_id', id);
+    await db.from('transaction_splits').delete().eq('parent_transaction_id', id);
 
     // Delete tags
-    await supabase.from('transaction_tags').delete().eq('transaction_id', id);
+    await db.from('transaction_tags').delete().eq('transaction_id', id);
 
-    const { error } = await supabase.from('transactions').delete().eq('id', id);
+    const { error } = await db.from('transactions').delete().eq('id', id);
 
     if (error) throw error;
     res.status(204).send();
@@ -556,10 +569,11 @@ router.delete('/:id', async (req, res) => {
     console.error('Error deleting transaction:', error);
     res.status(500).json({ message: 'Failed to delete transaction' });
   }
-});
+}));
 
 // Bulk split multiple transactions (must be before /:id/splits to avoid route conflict)
-router.post('/bulk/splits', async (req, res) => {
+router.post('/bulk/splits', asyncHandler(async (req, res) => {
+  const { db } = userContext(req);
   try {
     const { transactionIds, numPeople } = req.body;
 
@@ -572,7 +586,7 @@ router.post('/bulk/splits', async (req, res) => {
     }
 
     // Get all selected transactions
-    const { data: transactions, error: fetchError } = await supabase
+    const { data: transactions, error: fetchError } = await db
       .from('transactions')
       .select('id, amount, is_split')
       .in('id', transactionIds);
@@ -617,7 +631,7 @@ router.post('/bulk/splits', async (req, res) => {
         },
       ].filter(s => s.amount > 0);
 
-      const { error: insertError } = await supabase
+      const { error: insertError } = await db
         .from('transaction_splits')
         .insert(splitRecords);
 
@@ -627,7 +641,7 @@ router.post('/bulk/splits', async (req, res) => {
       }
 
       // Mark transaction as split
-      await supabase
+      await db
         .from('transactions')
         .update({ is_split: true })
         .eq('id', tx.id);
@@ -640,16 +654,17 @@ router.post('/bulk/splits', async (req, res) => {
     console.error('Error bulk splitting transactions:', error);
     res.status(500).json({ message: 'Failed to bulk split transactions' });
   }
-});
+}));
 
 // Create splits for a transaction
-router.post('/:id/splits', async (req, res) => {
+router.post('/:id/splits', asyncHandler(async (req, res) => {
+  const { db } = userContext(req);
   try {
     const { id } = req.params;
     const { splits } = req.body;
 
     // Mark transaction as split
-    await supabase
+    await db
       .from('transactions')
       .update({ is_split: true })
       .eq('id', id);
@@ -663,7 +678,7 @@ router.post('/:id/splits', async (req, res) => {
       created_at: new Date().toISOString(),
     }));
 
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('transaction_splits')
       .insert(splitRecords)
       .select();
@@ -674,19 +689,20 @@ router.post('/:id/splits', async (req, res) => {
     console.error('Error creating splits:', error);
     res.status(500).json({ message: 'Failed to create splits' });
   }
-});
+}));
 
 // Delete all splits for a transaction
-router.delete('/:id/splits', async (req, res) => {
+router.delete('/:id/splits', asyncHandler(async (req, res) => {
+  const { db } = userContext(req);
   try {
     const { id } = req.params;
 
-    await supabase
+    await db
       .from('transactions')
       .update({ is_split: false })
       .eq('id', id);
 
-    const { error } = await supabase
+    const { error } = await db
       .from('transaction_splits')
       .delete()
       .eq('parent_transaction_id', id);
@@ -697,14 +713,15 @@ router.delete('/:id/splits', async (req, res) => {
     console.error('Error deleting splits:', error);
     res.status(500).json({ message: 'Failed to delete splits' });
   }
-});
+}));
 
 // Add tag to transaction
-router.post('/:id/tags/:tagId', async (req, res) => {
+router.post('/:id/tags/:tagId', asyncHandler(async (req, res) => {
+  const { db } = userContext(req);
   try {
     const { id, tagId } = req.params;
 
-    const { error } = await supabase
+    const { error } = await db
       .from('transaction_tags')
       .insert({ transaction_id: id, tag_id: tagId });
 
@@ -714,10 +731,11 @@ router.post('/:id/tags/:tagId', async (req, res) => {
     console.error('Error adding tag:', error);
     res.status(500).json({ message: 'Failed to add tag' });
   }
-});
+}));
 
 // Bulk add tag to multiple transactions
-router.post('/bulk/tags', async (req, res) => {
+router.post('/bulk/tags', asyncHandler(async (req, res) => {
+  const { db } = userContext(req);
   try {
     const { transactionIds, tagId } = req.body;
 
@@ -730,7 +748,7 @@ router.post('/bulk/tags', async (req, res) => {
     }
 
     // Get existing transaction-tag pairs to avoid duplicates
-    const { data: existing } = await supabase
+    const { data: existing } = await db
       .from('transaction_tags')
       .select('transaction_id')
       .eq('tag_id', tagId)
@@ -742,7 +760,7 @@ router.post('/bulk/tags', async (req, res) => {
       .map(transactionId => ({ transaction_id: transactionId, tag_id: tagId }));
 
     if (newPairs.length > 0) {
-      const { error } = await supabase
+      const { error } = await db
         .from('transaction_tags')
         .insert(newPairs);
 
@@ -754,10 +772,11 @@ router.post('/bulk/tags', async (req, res) => {
     console.error('Error bulk adding tags:', error);
     res.status(500).json({ message: 'Failed to bulk add tags' });
   }
-});
+}));
 
 // Bulk remove tag from multiple transactions
-router.delete('/bulk/tags', async (req, res) => {
+router.delete('/bulk/tags', asyncHandler(async (req, res) => {
+  const { db } = userContext(req);
   try {
     const { transactionIds, tagId } = req.body;
 
@@ -769,7 +788,7 @@ router.delete('/bulk/tags', async (req, res) => {
       return res.status(400).json({ message: 'Tag ID is required' });
     }
 
-    const { error } = await supabase
+    const { error } = await db
       .from('transaction_tags')
       .delete()
       .eq('tag_id', tagId)
@@ -781,14 +800,15 @@ router.delete('/bulk/tags', async (req, res) => {
     console.error('Error bulk removing tags:', error);
     res.status(500).json({ message: 'Failed to bulk remove tags' });
   }
-});
+}));
 
 // Remove tag from transaction
-router.delete('/:id/tags/:tagId', async (req, res) => {
+router.delete('/:id/tags/:tagId', asyncHandler(async (req, res) => {
+  const { db } = userContext(req);
   try {
     const { id, tagId } = req.params;
 
-    const { error } = await supabase
+    const { error } = await db
       .from('transaction_tags')
       .delete()
       .eq('transaction_id', id)
@@ -800,7 +820,7 @@ router.delete('/:id/tags/:tagId', async (req, res) => {
     console.error('Error removing tag:', error);
     res.status(500).json({ message: 'Failed to remove tag' });
   }
-});
+}));
 
 export default router;
 
