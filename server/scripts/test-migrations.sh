@@ -82,4 +82,18 @@ check -d app -f "$sql/post-cleanup-check.sql"
 step "later migrations"
 for f in $(migrations_between 32 1000); do run -d app -f "$f"; done
 
+step "ACCOUNT_COLUMN_LIST matches what signed-in users may read"
+granted="$(run -d app -tA -c "
+  SELECT string_agg(column_name, ',' ORDER BY column_name)
+  FROM information_schema.column_privileges
+  WHERE table_schema = 'public' AND table_name = 'accounts'
+    AND grantee = 'authenticated' AND privilege_type = 'SELECT'")"
+listed="$(cd "$root/server" && npx tsx -e "
+  import('./src/db/columns.ts').then(m => console.log([...m.ACCOUNT_COLUMN_LIST].sort().join(',')))")"
+if [ "$granted" != "$listed" ]; then
+  echo "accounts grant:      $granted" >&2
+  echo "ACCOUNT_COLUMN_LIST: $listed" >&2
+  exit 1
+fi
+
 echo "All migration checks passed."
