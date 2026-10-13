@@ -34,7 +34,21 @@ vi.mock('../../db/supabase.js', () => ({
   },
 }));
 
-const { getItemAccounts, saveCursor } = await import('../plaid-secrets.js');
+const { getItemAccounts, saveCursor, itemOwner } = await import('../plaid-secrets.js');
+
+describe('itemOwner', () => {
+  it('is the user every account of the item belongs to', () => {
+    expect(itemOwner([{ user_id: 'user-1' }, { user_id: 'user-1' }])).toBe('user-1');
+  });
+
+  it('is nobody when the accounts belong to different users', () => {
+    expect(itemOwner([{ user_id: 'user-1' }, { user_id: 'user-2' }])).toBeNull();
+  });
+
+  it('is nobody when the item has no accounts', () => {
+    expect(itemOwner([])).toBeNull();
+  });
+});
 
 beforeEach(() => {
   db.calls = [];

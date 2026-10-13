@@ -31,6 +31,16 @@ export const getItemAccounts = async (plaidItemId: string): Promise<ItemAccount[
   return (data ?? []) as ItemAccount[];
 };
 
+/**
+ * The one user an item's accounts belong to, or null when there are none or they disagree. A
+ * webhook acts as this user; with no single owner it must not act at all, rather than mix two
+ * users' data in one sync.
+ */
+export const itemOwner = (accounts: Pick<ItemAccount, 'user_id'>[]): string | null => {
+  const owners = new Set(accounts.map(account => account.user_id));
+  return owners.size === 1 ? [...owners][0] : null;
+};
+
 /** Save the item's sync cursor on all of the user's accounts under it, keeping them in step. */
 export const saveCursor = async (userId: string, plaidItemId: string, cursor: string): Promise<void> => {
   const { error } = await supabaseAdmin

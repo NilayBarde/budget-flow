@@ -5,6 +5,8 @@ import { buildAccountResolver } from '../services/sync-attribution.js';
 import { applySyncResult } from '../services/sync-transactions.js';
 import { redactError } from '../services/plaid-errors.js';
 import { recordSyncFailure } from '../services/sync-error.js';
+import { adminContext, type DbContext } from '../db/context.js';
+import { getItemAccounts, itemOwner, type ItemAccount } from '../services/plaid-secrets.js';
 
 const router = Router();
 
@@ -16,25 +18,17 @@ const router = Router();
 const WEBHOOK_SYNC_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
 const lastWebhookSyncByItem = new Map<string, number>();
 
-interface ItemAccount {
-  id: string;
-  plaid_item_id: string;
-  plaid_access_token: string;
-  plaid_cursor: string | null;
-  plaid_account_id: string | null;
-  account_type?: string | null;
-}
-
 // Sync an item from its stored cursor and save the result. An item can hold several accounts
 // (an Amex login with two cards): the first row supplies the access token and cursor, and every
 // row drives per card attribution of the transactions.
-const syncItem = async (itemAccounts: ItemAccount[], historicalComplete = false) => {
+const syncItem = async (ctx: DbContext, itemAccounts: ItemAccount[], historicalComplete = false) => {
   const account = itemAccounts[0];
   try {
     const syncResult = await plaidService.syncTransactions(account.plaid_access_token, account.plaid_cursor);
 
     const resolveAccountId = buildAccountResolver(itemAccounts, account.id);
     return await applySyncResult({
+      ctx,
       plaidItemId: account.plaid_item_id,
       syncResult,
       resolveAccountId,
@@ -43,7 +37,7 @@ const syncItem = async (itemAccounts: ItemAccount[], historicalComplete = false)
     });
   } catch (error) {
     // The webhook always answers 200, so without this a failed sync leaves no trace in the app.
-    await recordSyncFailure(account.plaid_item_id, error);
+    await recordSyncFailure(ctx, account.plaid_item_id, error);
     throw error;
   }
 };
@@ -74,15 +68,20 @@ router.post('/plaid', async (req, res) => {
     // Handle TRANSACTIONS webhooks
     if (webhook_type === 'TRANSACTIONS') {
       // An item can have multiple accounts (e.g. an Amex login with two cards).
-      const { data: itemAccounts, error: accountError } = await supabase
-        .from('accounts')
-        .select('*')
-        .eq('plaid_item_id', item_id);
-
-      if (accountError || !itemAccounts || itemAccounts.length === 0) {
+      const itemAccounts = await getItemAccounts(item_id);
+      if (itemAccounts.length === 0) {
         console.error('Account not found for item_id:', item_id);
         return res.status(200).json({ received: true, error: 'Account not found' });
       }
+
+      // A webhook names only the item, so it acts as the user who owns it. Accounts that disagree
+      // about their owner should never happen; syncing would mix two users' data, so skip instead.
+      const owner = itemOwner(itemAccounts);
+      if (!owner) {
+        console.error(`Item ${item_id} has accounts owned by different users; not syncing it`);
+        return res.status(200).json({ received: true, error: 'Ambiguous owner' });
+      }
+      const ctx = adminContext(owner);
 
       const account = itemAccounts[0];
 
@@ -106,7 +105,7 @@ router.post('/plaid', async (req, res) => {
 
           let counts;
           try {
-            counts = await syncItem(itemAccounts, Boolean(historical_update_complete));
+            counts = await syncItem(ctx, itemAccounts, Boolean(historical_update_complete));
           } catch (syncError) {
             // The sync did not complete and the cursor stayed put. Without this the cooldown would
             // block the next webhook for 5 minutes, which is exactly the retry that fixes it.
@@ -119,14 +118,15 @@ router.post('/plaid', async (req, res) => {
       } else if (webhook_code === 'INITIAL_UPDATE') {
         console.log(`Initial update received for account ${account.id}`);
         // Trigger a sync to get the initial 30 days of data
-        const counts = await syncItem(itemAccounts);
+        const counts = await syncItem(ctx, itemAccounts);
         console.log(`Initial sync: +${counts.added} transactions`);
       } else if (webhook_code === 'HISTORICAL_UPDATE') {
         console.log(`Historical update complete for item ${item_id}`);
         // Mark historical sync as complete for every account under the item
-        await supabase
+        await ctx.db
           .from('accounts')
           .update({ historical_sync_complete: true })
+          .eq('user_id', ctx.userId)
           .eq('plaid_item_id', item_id);
       }
     }

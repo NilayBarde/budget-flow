@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
+import { userContext } from '../db/context.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import {
   buildFixedCostSeries,
@@ -122,7 +123,7 @@ router.get('/yearly', asyncHandler(async (req, res) => {
     }
 
     // Paged read: a year has more transactions than one Supabase request returns.
-    res.json(await loadYearlyStats(Number(year)));
+    res.json(await loadYearlyStats(userContext(req), Number(year)));
 }));
 
 // Get spending insights (trends, merchants, velocity, daily breakdown)
