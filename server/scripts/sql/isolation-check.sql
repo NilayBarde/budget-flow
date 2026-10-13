@@ -50,6 +50,26 @@ BEGIN
     RAISE EXCEPTION 'authenticated can update accounts.user_id';
   EXCEPTION WHEN insufficient_privilege THEN NULL;
   END;
+  BEGIN
+    UPDATE accounts SET plaid_item_id = plaid_item_id;
+    RAISE EXCEPTION 'authenticated can update accounts.plaid_item_id';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    INSERT INTO accounts (plaid_item_id, plaid_access_token, institution_name, account_name, account_type)
+    VALUES ('manual-check', 'manual', 'Check', 'Check', 'cash');
+    RAISE EXCEPTION 'authenticated can insert accounts (must go through the service role)';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+END $$;
+
+-- 2b. The owner's id with an email that isn't invited sees nothing: invite-only holds in the database.
+SELECT set_config('request.jwt.claims', json_build_object('sub', current_setting('check.owner'), 'email', 'not-invited@example.com', 'role', 'authenticated')::text, true);
+DO $$
+BEGIN
+  IF (SELECT count(*) FROM transactions) <> 0 THEN
+    RAISE EXCEPTION 'a session whose email is not on user_allowlist can read data';
+  END IF;
 END $$;
 
 -- 3. Someone else sees nothing and cannot write into the owner's data.
