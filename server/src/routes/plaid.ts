@@ -1,6 +1,13 @@
 import { Router } from 'express';
-import { supabase } from '../db/supabase.js';
 import { userContext } from '../db/context.js';
+import { ACCOUNT_COLUMNS } from '../db/columns.js';
+import {
+  findRelinkCandidates,
+  getAccountSecrets,
+  insertAccount,
+  plaidAccountsLinkedByOthers,
+  updateAccountCredentials,
+} from '../services/plaid-secrets.js';
 import * as plaidService from '../services/plaid.js';
 import { applySyncResult } from '../services/sync-transactions.js';
 import { redactError } from '../services/plaid-errors.js';
@@ -14,11 +21,10 @@ import { removeItemIfUnused } from '../services/plaid-items.js';
 
 const router = Router();
 
-const DEFAULT_USER_ID = 'default-user';
-
 // Create link token for Plaid Link
-router.post('/create-link-token', async (req, res) => {
+router.post('/create-link-token', asyncHandler(async (req, res) => {
   try {
+    const { userId } = userContext(req);
     console.log('Creating Plaid link token...');
     console.log('PLAID_CLIENT_ID:', process.env.PLAID_CLIENT_ID ? 'Set' : 'NOT SET');
     console.log('PLAID_SECRET:', process.env.PLAID_SECRET ? 'Set' : 'NOT SET');
@@ -34,7 +40,8 @@ router.post('/create-link-token', async (req, res) => {
     // Use provided webhook URL or fall back to environment variable
     const webhookUrl = webhook_url || process.env.PLAID_WEBHOOK_URL;
 
-    const linkToken = await plaidService.createLinkToken(DEFAULT_USER_ID, redirect_uri, webhookUrl);
+    // Plaid's client_user_id: who the new Item belongs to. Existing Items keep working whatever they were linked as.
+    const linkToken = await plaidService.createLinkToken(userId, redirect_uri, webhookUrl);
 
     console.log('Link token created successfully');
 
@@ -57,37 +64,39 @@ router.post('/create-link-token', async (req, res) => {
     }
     res.status(500).json({ message: 'Failed to create link token' });
   }
-});
+}));
 
 // Create update mode link token to reconnect or change an existing Plaid connection
-router.post('/create-update-link-token', async (req, res) => {
+router.post('/create-update-link-token', asyncHandler(async (req, res) => {
   try {
+    const { db, userId } = userContext(req);
     const { account_id, redirect_uri } = req.body;
 
     if (!account_id) {
       return res.status(400).json({ message: 'Account ID is required' });
     }
 
-    // Get the account's access token
-    const { data: account, error: accountError } = await supabase
+    // Get the account and its access token
+    const { data: account, error: accountError } = await db
       .from('accounts')
-      .select('plaid_access_token, institution_name')
+      .select('institution_name, is_manual')
       .eq('id', account_id)
       .single();
+    const secrets = account ? await getAccountSecrets(userId, account_id) : null;
 
-    if (accountError || !account) {
+    if (accountError || !account || !secrets) {
       return res.status(404).json({ message: 'Account not found' });
     }
 
-    if (!account.plaid_access_token) {
+    if (account.is_manual || !secrets.plaid_access_token) {
       return res.status(400).json({ message: 'Account does not have a Plaid connection' });
     }
 
     console.log(`Creating update link token for ${account.institution_name}...`);
 
     const linkToken = await plaidService.createUpdateLinkToken(
-      DEFAULT_USER_ID,
-      account.plaid_access_token,
+      userId,
+      secrets.plaid_access_token,
       redirect_uri
     );
 
@@ -101,10 +110,10 @@ router.post('/create-update-link-token', async (req, res) => {
     console.error('Error creating update link token:', redactError(error));
     res.status(500).json({ message: 'Failed to create update link token' });
   }
-});
+}));
 
 // Log Plaid Link events for debugging (errors, exits, etc.)
-router.post('/log-link-event', async (req, res) => {
+router.post('/log-link-event', asyncHandler(async (req, res) => {
   try {
     const {
       event_name,
@@ -132,10 +141,16 @@ router.post('/log-link-event', async (req, res) => {
     console.error('Failed to log Plaid Link event:', err);
     res.status(500).json({ message: 'Failed to log Plaid Link event' });
   }
-});
+}));
 
 // Exchange public token for access token
 router.post('/exchange-token', asyncHandler(async (req, res) => {
+  const ctx = userContext(req);
+  const { db, userId } = ctx;
+  // The new Item's token until one of its accounts is stored. Plaid bills an Item monthly from the
+  // moment the public token is exchanged, so if this request fails before anything references the
+  // Item, it is removed again rather than left billing with nothing pointing at it.
+  let unsavedItemToken: string | null = null;
   try {
     const { public_token, metadata } = req.body;
 
@@ -147,6 +162,7 @@ router.post('/exchange-token', asyncHandler(async (req, res) => {
     const exchangeResponse = await plaidService.exchangePublicToken(public_token);
     const accessToken = exchangeResponse.access_token;
     const itemId = exchangeResponse.item_id;
+    unsavedItemToken = accessToken;
 
     // Get account info
     const accountsResponse = await plaidService.getAccounts(accessToken);
@@ -165,13 +181,20 @@ router.post('/exchange-token', asyncHandler(async (req, res) => {
     // any account Plaid kept the id of, plus this institution's other Plaid accounts, including ones
     // the user disconnected (manual now, but they keep their Plaid account id), which this reconnects.
     const plaidAccountIds = plaidAccounts.map(a => a.account_id);
-    const columns = 'id, plaid_account_id, plaid_item_id, plaid_access_token, account_name, account_type';
-    const [byId, byInstitution] = await Promise.all([
-      supabase.from('accounts').select(columns).in('plaid_account_id', plaidAccountIds),
-      supabase.from('accounts').select(columns).eq('institution_name', institutionName),
-    ]);
+
+    // Never take over an account another user linked. Plaid account ids are per Item, so this is all
+    // but impossible; if it happens, refuse instead of moving their history to this user.
+    if (await plaidAccountsLinkedByOthers(userId, plaidAccountIds)) {
+      try {
+        await plaidService.removeItem(accessToken);
+      } catch (removeError) {
+        console.warn('Could not remove the refused Plaid Item:', redactError(removeError));
+      }
+      return res.status(409).json({ message: 'This bank account is already linked by another user.' });
+    }
+
     const relinkable = new Map<string, StoredPlaidAccount>();
-    for (const row of [...(byId.data || []), ...(byInstitution.data || [])] as StoredPlaidAccount[]) {
+    for (const row of await findRelinkCandidates(userId, plaidAccountIds, institutionName)) {
       const wasPlaid = !isManualToken(row.plaid_access_token) || Boolean(row.plaid_account_id);
       if (row.plaid_item_id !== itemId && wasPlaid) relinkable.set(row.id, row);
     }
@@ -198,26 +221,24 @@ router.post('/exchange-token', asyncHandler(async (req, res) => {
 
       if (existingId) {
         // Account already exists — update with new access token/item ID instead of creating a duplicate
-        const { error } = await supabase
-          .from('accounts')
-          .update({
-            plaid_item_id: itemId,
-            plaid_access_token: accessToken,
-            plaid_account_id: plaidAccount.account_id,
-            plaid_cursor: null,
-            // The new Item resends the history: every sync adopts stored copies until it is all in
-            historical_sync_complete: false,
-            relinked_at: new Date().toISOString(),
-            // A snooze was about the replaced connection
-            idle_snoozed_until: null,
-            institution_name: institutionName,
-            // account_name is left alone: the user may have renamed it
-            account_type: plaidAccount.subtype || plaidAccount.type || 'unknown',
-            ...(plaidAccount.balances?.current != null && { current_balance: plaidAccount.balances.current }),
-          })
-          .eq('id', existingId);
-
-        if (error) {
+        try {
+          await updateAccountCredentials(
+            userId,
+            existingId,
+            { plaid_item_id: itemId, plaid_access_token: accessToken, plaid_account_id: plaidAccount.account_id, plaid_cursor: null },
+            {
+              // The new Item resends the history: every sync adopts stored copies until it is all in
+              historical_sync_complete: false,
+              relinked_at: new Date().toISOString(),
+              // A snooze was about the replaced connection
+              idle_snoozed_until: null,
+              institution_name: institutionName,
+              // account_name is left alone: the user may have renamed it
+              account_type: plaidAccount.subtype || plaidAccount.type || 'unknown',
+              ...(plaidAccount.balances?.current != null && { current_balance: plaidAccount.balances.current }),
+            },
+          );
+        } catch (error) {
           console.error(`Failed to update existing account ${plaidAccount.name}:`, redactError(error));
           continue;
         }
@@ -233,7 +254,6 @@ router.post('/exchange-token', asyncHandler(async (req, res) => {
         const accountId = randomUUID();
         const account = {
           id: accountId,
-          user_id: DEFAULT_USER_ID,
           plaid_item_id: itemId,
           plaid_access_token: accessToken,
           institution_name: institutionName,
@@ -244,9 +264,9 @@ router.post('/exchange-token', asyncHandler(async (req, res) => {
           created_at: new Date().toISOString(),
         };
 
-        const { error } = await supabase.from('accounts').insert(account).select().single();
-
-        if (error) {
+        try {
+          await insertAccount(userId, account);
+        } catch (error) {
           console.error(`Failed to create account ${plaidAccount.name}:`, redactError(error));
           continue;
         }
@@ -263,12 +283,13 @@ router.post('/exchange-token', asyncHandler(async (req, res) => {
     if (createdAccounts.length === 0) {
       throw new Error('Failed to create any accounts');
     }
+    unsavedItemToken = null;
 
     // The old Item's pending rows will never post now. The new Item sends today's pending
     // transactions again, so drop the stale copies rather than count them twice.
     const relinkedIds = [...relinked.values()].map(a => a.id);
     if (relinkedIds.length > 0) {
-      const { error: pendingError } = await supabase.from('transactions').delete().in('account_id', relinkedIds).eq('pending', true);
+      const { error: pendingError } = await db.from('transactions').delete().in('account_id', relinkedIds).eq('pending', true);
       if (pendingError) console.warn('Could not clear pending rows from the replaced Item:', redactError(pendingError));
     }
 
@@ -290,7 +311,7 @@ router.post('/exchange-token', asyncHandler(async (req, res) => {
       // The same save every sync path uses: the transactions, the cursor and the sync time. A first
       // link imports a long history, so card payments are paired across all of it.
       const counts = await applySyncResult({
-        ctx: userContext(req),
+        ctx,
         plaidItemId: itemId,
         syncResult,
         resolveAccountId: plaidAccountId => accountIdMap.get(plaidAccountId),
@@ -308,19 +329,27 @@ router.post('/exchange-token', asyncHandler(async (req, res) => {
     } catch (syncError) {
       console.error('Auto-sync failed (accounts created, but transactions need manual sync):', redactError(syncError));
       // Without this the new accounts would show as never synced, with no reason.
-      await recordSyncFailure(userContext(req), itemId, syncError);
+      await recordSyncFailure(ctx, itemId, syncError);
     }
 
     // Return the first created account for backwards compatibility
-    const { data: firstAccount } = await supabase
+    const { data: firstAccount } = await db
       .from('accounts')
-      .select('*')
+      .select(ACCOUNT_COLUMNS)
       .eq('id', createdAccounts[0].id)
       .single();
 
     res.json(firstAccount && toPublicAccount(firstAccount));
   } catch (error) {
     console.error('Error exchanging token:', redactError(error));
+
+    if (unsavedItemToken) {
+      try {
+        await plaidService.removeItem(unsavedItemToken);
+      } catch (removeError) {
+        console.warn('Could not remove the Plaid Item this failed link created:', redactError(removeError));
+      }
+    }
 
     // Extract Plaid error details if available
     const plaidError = error as { response?: { data?: { error_code?: string; error_message?: string; display_message?: string } } };
