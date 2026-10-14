@@ -1,6 +1,6 @@
 # BudgetFlow: Personal Finance Tracker
 
-A personal budget tracking app that connects to your bank accounts via Plaid, auto-categorizes transactions, and helps you manage spending with budget guardrails, a net worth goal, and yearly insights. It is a single-user app (no login), intended to run for one person against their own Supabase project.
+A personal budget tracking app that connects to your bank accounts via Plaid, auto-categorizes transactions, and helps you manage spending with budget guardrails, a net worth goal, and yearly insights. Each person signs in with Google and sees only their own data; it's invite-only, run against your own Supabase project.
 
 ## Features
 
@@ -48,8 +48,8 @@ npm install
 ### 2. Set Up Supabase
 
 1. Create a new project at https://supabase.com
-2. Go to **SQL Editor** and run the contents of `supabase-schema.sql` (a full baseline as of migration 023), then run each file in `migrations/` numbered 024 or higher, in order
-3. Go to **Settings > API** and copy the Project URL and the `service_role` key (the `anon` key also works, but `service_role` is preferred because Row Level Security is enabled on every table and the server is the only client)
+2. Set up Google sign-in and create your own user first, then apply the schema and migrations in the order given in `server/ENV_SETUP.md` (migrations 030 and 031 have to run at specific points, and 030 needs your user to exist)
+3. Go to **Settings > API** and copy the Project URL, the `service_role` key (server only) and the `anon` key (server and client): both keys are required
 
 There is no CLI migration runner. New migrations are named `NNN_description.sql` and are applied by hand in the SQL editor.
 
@@ -68,8 +68,8 @@ Create `server/.env` (see also `server/ENV_SETUP.md`):
 ```env
 # Supabase
 SUPABASE_URL=your_supabase_project_url
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
-# SUPABASE_ANON_KEY=your_anon_key   # fallback if no service role key is set
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key   # server only: webhooks, scripts, Plaid credentials
+SUPABASE_ANON_KEY=your_anon_key                   # signed-in requests run as the user with this
 
 # Plaid
 PLAID_CLIENT_ID=your_plaid_client_id
@@ -83,7 +83,14 @@ PLAID_ENV=sandbox                   # sandbox | development | production
 PORT=3001
 ```
 
-The client needs no env file for local development: it calls `/api`, which the Vite dev server proxies to `http://localhost:3001`. Create `client/.env` only for these cases:
+Create `client/.env` for Google sign-in (the same project's public values):
+
+```env
+VITE_SUPABASE_URL=your_supabase_project_url
+VITE_SUPABASE_ANON_KEY=your_anon_key
+```
+
+API calls go to `/api`, which the Vite dev server proxies to `http://localhost:3001`. Add these only when needed:
 
 ```env
 # Client hosted separately from the API (for example on Vercel)

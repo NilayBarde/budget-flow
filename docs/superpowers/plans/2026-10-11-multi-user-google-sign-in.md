@@ -990,5 +990,5 @@ Additions beyond the original roadmap, from reviews: Plaid webhook signature ver
 Remaining, in order:
 1. Merge PRs 1–7 into `feature/multi-user` in order (retargeting each to `feature/multi-user` as its base merges).
 2. End-to-end checks from spec §5 against a Supabase dev project (needs the project and a Google OAuth client; `server/ENV_SETUP.md`).
-3. Open `feature/multi-user` → `main`. If main moved, merge it in and bump the version above main's again.
+3. Open `feature/multi-user` → `main`. If main moved, merge it in and bump the version above main's again, and if main gained migrations numbered 030 or higher, renumber `030_multi_user.sql` / `031_multi_user_cleanup.sql` (and their mentions in docs, scripts and the harness) to follow main's highest, then rerun `npm run test:migrations --prefix server`.
 4. Roll out with the steps in `server/ENV_SETUP.md` ("Moving an existing install to multi-user").
