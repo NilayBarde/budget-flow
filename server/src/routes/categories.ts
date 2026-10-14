@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { userContext } from '../db/context.js';
 import { randomUUID } from 'node:crypto';
 import { asyncHandler } from '../utils/asyncHandler.js';
+import { pickFields } from '../utils/pickFields.js';
 
 const router = Router();
 
@@ -47,7 +48,11 @@ router.patch(
   asyncHandler(async (req, res) => {
     const { db } = userContext(req);
     const { id } = req.params;
-    const updates = req.body;
+    // Not is_default: that would let a default category be deleted
+    const updates = pickFields(req.body, ['name', 'icon', 'color']);
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ message: 'No valid fields to update' });
+    }
 
     const { data, error } = await db
       .from('categories')
