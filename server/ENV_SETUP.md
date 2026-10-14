@@ -6,9 +6,11 @@ Create a `.env` file in the `server/` directory with the following variables:
 # Supabase Configuration
 # Get these from: https://supabase.com/dashboard/project/YOUR_PROJECT/settings/api
 SUPABASE_URL=https://your-project-id.supabase.co
+# Both keys are required; the server refuses to start without either.
+# Service role: Plaid webhooks, scripts and Plaid credentials (bypasses RLS, server only)
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key-here
-# Fallback if no service role key is set (not recommended, see below)
-# SUPABASE_ANON_KEY=your-anon-key-here
+# Anon key: every signed-in request runs as that user with this key plus their token (RLS applies)
+SUPABASE_ANON_KEY=your-anon-key-here
 
 # Plaid Configuration
 # Get these from: https://dashboard.plaid.com/team/keys
@@ -23,7 +25,14 @@ PLAID_ENV=sandbox
 PORT=3001
 ```
 
-The client needs no env file for local development: it calls `/api` by default, and Vite proxies that to `http://localhost:3001`. `VITE_API_URL` is only needed when the client is hosted separately from the API (for example on Vercel). See the README for `VITE_API_URL` and `VITE_OAUTH_REDIRECT_URI`.
+The client needs a `client/.env` (or, when hosted separately, the host's build env) with the same project's public values, used only for Google sign-in:
+
+```env
+VITE_SUPABASE_URL=https://your-project-id.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key-here
+```
+
+Locally the client calls `/api` and Vite proxies it to `http://localhost:3001`. `VITE_API_URL` is only needed when the client is hosted separately from the API (for example on Vercel). See the README for `VITE_API_URL` and `VITE_OAUTH_REDIRECT_URI`.
 
 ## Getting Your Credentials
 
@@ -32,11 +41,40 @@ The client needs no env file for local development: it calls `/api` by default, 
 1. Go to [supabase.com](https://supabase.com) and create a free account
 2. Create a new project
 3. Go to **Settings > API**
-4. Copy the **Project URL** → `SUPABASE_URL`
-5. Copy the **service_role** key → `SUPABASE_SERVICE_ROLE_KEY`
-6. Go to **SQL Editor** and run the contents of `supabase-schema.sql` (a baseline as of migration 023), then run each file in `migrations/` numbered 024 or higher, in order
+4. Copy the **Project URL** → `SUPABASE_URL` and `VITE_SUPABASE_URL`
+5. Copy the **service_role** key → `SUPABASE_SERVICE_ROLE_KEY` (server only, never in the client)
+6. Copy the **anon** key → `SUPABASE_ANON_KEY` and `VITE_SUPABASE_ANON_KEY`
+7. Create your own user first: **Authentication > Users > Add user**, with your Google account's email, auto-confirmed. Migration 030 makes it the owner of all existing data and stops if it doesn't exist.
+8. Apply the schema: see **Fresh install** or **Moving an existing install to multi-user** below. Migrations 030 and 031 run at specific points, not straight after one another.
 
-Row Level Security is enabled on every table, and the server is the only client. The service role key bypasses RLS, which is why it is preferred. No permissive policies are defined, so with only the anon key, access is denied by default. Never expose the service role key to the client.
+**The owner's email is written into the SQL.** `migrations/030_multi_user.sql`, `server/scripts/sql/isolation-check.sql`, `server/scripts/sql/legacy-writes-check.sql` and `server/scripts/sql/reassign-owner.sql`'s instructions use `nilaybarde@gmail.com`. Setting the app up for a different owner, replace that address in those files (lowercase) before running them.
+
+Every data table has row-level security with an `owner_all` policy: a row is visible only to the signed-in user who owns it, and only while their email is on `user_allowlist`. The anon key is public by design; RLS, not the key, keeps each user's data to themselves. The service role key bypasses RLS: never expose it to the client.
+
+### Google sign-in (one time)
+
+1. **Google Cloud console > APIs & Services > Credentials > Create credentials > OAuth client ID**, type **Web application**. Authorized redirect URI: `https://your-project-id.supabase.co/auth/v1/callback`.
+2. **Supabase > Authentication > Sign In / Providers > Google**: paste the client ID and secret, and enable it.
+3. **Supabase > Authentication > Sign In / Providers > Email**: turn the Email provider off (the app is Google-only; the server also rejects non-Google accounts). Leave **Allow new users to sign up** on: it is project-wide, and turning it off would also stop invited people's first Google sign-in. The allowlist is what keeps everyone else out.
+4. **Supabase > Authentication > URL Configuration**: set **Site URL** to the deployed client URL, and add `http://localhost:5173/**` and `https://your-client-host/**` to **Redirect URLs**. The `/**` lets sign-in return to the page you asked for (a Plaid bank-link return included) instead of always the home page.
+5. **Supabase > Settings > JWT Keys**: migrate to asymmetric signing keys, so the server verifies tokens locally instead of calling Supabase Auth on every request.
+
+### Inviting someone
+
+Only emails on the allowlist can use the app (the server checks it on every request, and the database policies check it on every query). In the SQL editor:
+
+```sql
+INSERT INTO user_allowlist (email) VALUES ('friend@example.com');  -- lowercase
+```
+
+They sign in with that Google account and start with the default categories and nothing else.
+
+To remove someone:
+1. Have them delete their accounts in the app first (or disconnect them). That is what removes their bank connections at Plaid; deleting their data from the database alone leaves those connections live and billed.
+2. Delete their row from `user_allowlist`. They lose access on their next request.
+3. Optionally delete their user in **Authentication > Users**, which deletes all their remaining data. Do this after step 2: a user deleted while still on the allowlist can simply sign in again.
+
+Only invite people after migration 031 has run (see below).
 
 ### Plaid
 
@@ -54,4 +92,24 @@ Row Level Security is enabled on every table, and the server is the only client.
 
 ### Plaid Webhooks (optional)
 
-Set `PLAID_WEBHOOK_URL` to a publicly reachable `/api/webhooks/plaid` URL to get automatic transaction updates. Localhost URLs will not work unless you tunnel to them. Existing items can be pointed at a new URL with `POST /api/accounts/:id/update-webhook`.
+Set `PLAID_WEBHOOK_URL` to a publicly reachable `/api/webhooks/plaid` URL to get automatic transaction updates. Localhost URLs will not work unless you tunnel to them. Existing items can be pointed at a new URL with `POST /api/accounts/:id/update-webhook`. The server verifies Plaid's signature on every webhook and rejects anything unsigned, altered or older than five minutes.
+
+## Fresh install
+
+1. Do the **Google sign-in (one time)** steps above and **Add user** with your own Google email (Supabase step 7).
+2. In the SQL editor run `supabase-schema.sql`, then every migration from 024 up to and including `030_multi_user.sql`, in order.
+3. Set the env vars, start or deploy the app, and sign in with Google. **If you see an error or an empty app**, see step 5 of the next section.
+4. Run `migrations/031_multi_user_cleanup.sql` and any later migrations. Only now invite anyone else.
+
+## Moving an existing install to multi-user
+
+Linked banks keep working throughout: nothing is re-linked. In order:
+
+1. Do the **Google sign-in (one time)** steps above, and **Add user** with your own Google email (Supabase step 7).
+2. Set `SUPABASE_ANON_KEY` on the server and `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` on the client host.
+3. Run `migrations/030_multi_user.sql`, then `server/scripts/sql/isolation-check.sql` and `server/scripts/sql/legacy-writes-check.sql` (both roll back and raise on any failure). The app keeps working, except linking a bank or adding a manual account, until the next step.
+4. Deploy the new server and client.
+5. Sign in with Google and check your data is there. **If you see an error or an empty app**, look in Authentication > Users for two rows with your email: put both ids into `server/scripts/sql/reassign-owner.sql` and run it, then delete the hand-made user.
+6. Run `migrations/031_multi_user_cleanup.sql`. Only now invite anyone else.
+
+`npm run test:migrations --prefix server` rehearses steps 3 to 6 against a throwaway local Postgres.

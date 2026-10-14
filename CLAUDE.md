@@ -35,10 +35,11 @@ npm run build        # builds client to client/dist (served by Express in prod)
 **Env files**: `server/.env` (not `.env` at root). Client uses `client/.env` with `VITE_` prefix.
 
 Required vars (see `server/ENV_SETUP.md`):
-- `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (preferred) or `SUPABASE_ANON_KEY`
+- `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` and `SUPABASE_ANON_KEY` (both keys; the server won't start without them)
 - `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV` (sandbox/development/production)
 - `PORT` (defaults to 3001)
-- Client: no env file needed locally (the client calls `/api` and the Vite dev server proxies it to `http://localhost:3001`). Set `VITE_API_URL` in `client/.env` (or the host's build env) only when the client is hosted separately from the API, for example on Vercel
+- Client: `client/.env` needs `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` for Google sign-in. API calls go to `/api` and the Vite dev server proxies them to `http://localhost:3001`; set `VITE_API_URL` only when the client is hosted separately from the API, for example on Vercel
+- One-time Google/Supabase sign-in setup, inviting users, and moving an existing install to multi-user: `server/ENV_SETUP.md`
 
 ## Versioning
 
