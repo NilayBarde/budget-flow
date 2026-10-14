@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { usePlaidLink } from 'react-plaid-link';
 import { Spinner } from '../components/ui';
 import { useExchangePlaidToken } from '../hooks';
+import { PLAID_LINK_TOKEN_STORAGE_KEY } from '../utils/constants';
 
-const AMEX_TOKEN_STORAGE_KEY = 'plaid_link_token_amex';
+const AMEX_TOKEN_STORAGE_KEY = PLAID_LINK_TOKEN_STORAGE_KEY;
 
 /**
  * OAuth Callback Page

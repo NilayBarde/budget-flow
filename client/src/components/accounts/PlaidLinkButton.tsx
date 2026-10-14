@@ -5,9 +5,10 @@ import { Plus } from 'lucide-react';
 import { Button } from '../ui';
 import { logPlaidLinkEvent } from '../../services/api';
 import { useCreatePlaidLinkToken, useExchangePlaidToken } from '../../hooks';
+import { PLAID_LINK_TOKEN_STORAGE_KEY } from '../../utils/constants';
 
 const AMEX_INSTITUTION_NAME = 'american express';
-const AMEX_TOKEN_STORAGE_KEY = 'plaid_link_token_amex';
+const AMEX_TOKEN_STORAGE_KEY = PLAID_LINK_TOKEN_STORAGE_KEY;
 const AMEX_TOKEN_TTL_MS = 30 * 60 * 1000;
 
 // Type for Plaid metadata
