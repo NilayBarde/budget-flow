@@ -54,7 +54,7 @@ Every data table has row-level security with an `owner_all` policy: a row is vis
 1. **Google Cloud console > APIs & Services > Credentials > Create credentials > OAuth client ID**, type **Web application**. Authorized redirect URI: `https://your-project-id.supabase.co/auth/v1/callback`.
 2. **Supabase > Authentication > Sign In / Providers > Google**: paste the client ID and secret, and enable it.
 3. **Supabase > Authentication > Sign In / Providers > Email**: turn off **Allow new users to sign up** (the app is Google-only; the server also rejects non-Google accounts).
-4. **Supabase > Authentication > URL Configuration**: add `http://localhost:5173` and your deployed client URL to **Redirect URLs**, and set **Site URL** to the deployed client URL.
+4. **Supabase > Authentication > URL Configuration**: set **Site URL** to the deployed client URL, and add `http://localhost:5173/**` and `https://your-client-host/**` to **Redirect URLs**. The `/**` lets sign-in return to the page you asked for (a Plaid bank-link return included) instead of always the home page.
 5. **Supabase > Settings > JWT Keys**: migrate to asymmetric signing keys, so the server verifies tokens locally instead of calling Supabase Auth on every request.
 
 ### Inviting someone
