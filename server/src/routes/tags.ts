@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { userContext } from '../db/context.js';
 import { randomUUID } from 'node:crypto';
 import { asyncHandler } from '../utils/asyncHandler.js';
+import { pickFields } from '../utils/pickFields.js';
 
 const router = Router();
 
@@ -46,7 +47,10 @@ router.patch(
   asyncHandler(async (req, res) => {
     const { db } = userContext(req);
     const { id } = req.params;
-    const updates = req.body;
+    const updates = pickFields(req.body, ['name', 'color']);
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ message: 'No valid fields to update' });
+    }
 
     const { data, error } = await db.from('tags').update(updates).eq('id', id).select().single();
 

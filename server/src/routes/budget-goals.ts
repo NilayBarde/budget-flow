@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { userContext } from '../db/context.js';
 import { randomUUID } from 'node:crypto';
 import { asyncHandler } from '../utils/asyncHandler.js';
+import { pickFields } from '../utils/pickFields.js';
 import { computeCategorySpend, type SpendRow } from '../services/category-spend.js';
 
 const router = Router();
@@ -35,7 +36,7 @@ router.get(
 
     // Count expenses and returns (returns reduce category spending)
     // Include splits to calculate "my share" for split transactions
-    const { data: transactions } = await db
+    const { data: transactions, error: transactionsError } = await db
       .from('transactions')
       .select(`
         category_id, 
@@ -47,6 +48,8 @@ router.get(
       .gte('date', startDate)
       .lte('date', endDate)
       .in('transaction_type', ['expense', 'return']);
+    // Without the transactions every goal would show $0 spent, which reads as "on budget"
+    if (transactionsError) throw transactionsError;
 
     // Sum by category via the shared service (split-aware, two-pass returns netting)
     const spentByCategory = computeCategorySpend((transactions || []) as SpendRow[]);
@@ -118,7 +121,10 @@ router.patch(
   asyncHandler(async (req, res) => {
     const { db } = userContext(req);
     const { id } = req.params;
-    const updates = req.body;
+    const updates = pickFields(req.body, ['limit_amount', 'category_id', 'month', 'year']);
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ message: 'No valid fields to update' });
+    }
 
     const { data, error } = await db
       .from('budget_goals')

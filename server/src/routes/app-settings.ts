@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { userContext } from '../db/context.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
+import { SERVER_MANAGED_SETTING_KEYS } from '../services/setting-keys.js';
 
 const router = Router();
 
@@ -48,6 +49,9 @@ router.put(
 
     if (value === undefined || value === null) {
       return res.status(400).json({ message: 'Value is required' });
+    }
+    if (SERVER_MANAGED_SETTING_KEYS.has(key)) {
+      return res.status(400).json({ message: `${key} is managed by the server` });
     }
 
     const { data, error } = await db

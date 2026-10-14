@@ -2,6 +2,8 @@ import { Router } from 'express';
 import type { Db } from '../db/supabase.js';
 import { userContext, type DbContext } from '../db/context.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
+import { fetchAllRows } from '../utils/paginate.js';
+import { RECURRING_REFRESHED_KEY as LAST_REFRESHED_KEY } from '../services/setting-keys.js';
 import { detectRecurringSeries, type DetectionTxn, type DetectedSeries } from '../services/recurring-detection.js';
 import { resolveCreditOffsets } from '../services/credit-matching.js';
 import { getMyShareAmount, type SplitShare } from '../services/category-spend.js';
@@ -13,7 +15,6 @@ const router = Router();
 // at least two occurrences to establish cadence.
 const DETECTION_WINDOW_DAYS = 400;
 const REFRESH_STALE_MS = 24 * 60 * 60 * 1000;
-const LAST_REFRESHED_KEY = 'recurring_last_refreshed';
 const FEE_PATTERN = /membership fee|annual fee/i;
 const PERK_CREDIT_PATTERN = /credit/i;
 const NOT_PERK_PATTERN = /dispute/i;
@@ -28,35 +29,41 @@ const isoDaysAgo = (days: number): string => {
   return d.toISOString().slice(0, 10);
 };
 
+interface WindowRow {
+  id: string;
+  date: string;
+  amount: number;
+  merchant_name: string;
+  merchant_display_name: string | null;
+  transaction_type: string;
+  is_split: boolean;
+  splits: SplitShare[] | null;
+  account: { account_name: string } | null;
+}
+
 const fetchWindowTransactions = async (db: Db): Promise<WindowTxn[]> => {
   const since = isoDaysAgo(DETECTION_WINDOW_DAYS);
-  const rows: WindowTxn[] = [];
-  const PAGE = 1000;
-  for (let offset = 0; ; offset += PAGE) {
-    const { data, error } = await db
-      .from('transactions')
-      .select(
-        'date, amount, merchant_name, merchant_display_name, transaction_type, is_split, splits:transaction_splits(amount, is_my_share), account:accounts(account_name)'
-      )
-      .gte('date', since)
-      .range(offset, offset + PAGE - 1);
-    if (error) throw error;
-    for (const t of data || []) {
-      rows.push({
-        merchant: t.merchant_display_name || t.merchant_name,
-        amount: getMyShareAmount({
-          amount: t.amount,
-          is_split: t.is_split,
-          splits: t.splits as SplitShare[] | null,
-        }),
-        date: t.date,
-        transaction_type: t.transaction_type,
-        accountName: (t.account as unknown as { account_name: string } | null)?.account_name ?? null,
-      });
-    }
-    if (!data || data.length < PAGE) break;
-  }
-  return rows;
+  // Paged in a stable order, so no transaction is skipped or counted twice across pages
+  const rows = await fetchAllRows<WindowRow>(
+    (from, to) =>
+      db
+        .from('transactions')
+        .select(
+          'id, date, amount, merchant_name, merchant_display_name, transaction_type, is_split, splits:transaction_splits(amount, is_my_share), account:accounts(account_name)'
+        )
+        .gte('date', since)
+        .order('date')
+        .order('id')
+        .range(from, to) as unknown as PromiseLike<{ data: WindowRow[] | null; error: unknown }>,
+    { keyOf: row => row.id },
+  );
+  return rows.map(t => ({
+    merchant: t.merchant_display_name || t.merchant_name,
+    amount: getMyShareAmount({ amount: t.amount, is_split: t.is_split, splits: t.splits }),
+    date: t.date,
+    transaction_type: t.transaction_type,
+    accountName: t.account?.account_name ?? null,
+  }));
 };
 
 interface RefreshResult {
@@ -138,9 +145,11 @@ const refreshRecurringTable = async ({ db, userId }: DbContext, today: string): 
     if (staleError) throw staleError;
   }
 
-  await db
+  const { error: markerError } = await db
     .from('app_settings')
     .upsert({ user_id: userId, key: LAST_REFRESHED_KEY, value: new Date().toISOString() }, { onConflict: 'user_id,key' });
+  // The refresh itself worked; without the marker the next overview just refreshes again
+  if (markerError) console.warn('Could not record the recurring refresh time:', markerError.message);
 
   return { charges, credits, matchedCreditNames, txns };
 };
