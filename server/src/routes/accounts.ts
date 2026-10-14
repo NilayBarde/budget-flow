@@ -182,11 +182,16 @@ router.post('/:id/sync', asyncHandler(async (req, res) => {
         institution_name: string;
         current_balance: number | null;
         historical_sync_complete: boolean | null;
+        is_manual: boolean;
       }>();
     const secrets = account ? await getAccountSecrets(userId, id) : null;
 
     if (accountError || !account || !secrets) {
       return res.status(404).json({ message: 'Account not found' });
+    }
+    // Manual and disconnected accounts have no Plaid token, only the 'manual' placeholder
+    if (account.is_manual) {
+      return res.status(400).json({ message: 'Account is not connected to Plaid' });
     }
 
     // Record sync timestamp before making Plaid calls
@@ -506,7 +511,7 @@ router.post('/:id/refresh-accounts', asyncHandler(async (req, res) => {
         // Update existing account with plaid_account_id and balance if missing
         const { data: existing } = await db
           .from('accounts')
-          .select('id, plaid_account_id')
+          .select('id, plaid_account_id, account_type')
           .eq('plaid_item_id', existingAccount.plaid_item_id)
           .or(`plaid_account_id.eq.${plaidAccount.account_id},account_name.eq.${plaidAccount.name}`)
           .single();
@@ -518,7 +523,8 @@ router.post('/:id/refresh-accounts', asyncHandler(async (req, res) => {
             { plaid_account_id: plaidAccount.account_id },
             {
               current_balance: plaidAccount.balances?.current ?? null,
-              account_type: plaidAccount.subtype || plaidAccount.type || existing.plaid_account_id,
+              // Plaid sometimes sends neither; keep the stored type rather than blanking it
+              account_type: plaidAccount.subtype || plaidAccount.type || existing.account_type,
             },
           );
           updatedAccounts.push(plaidAccount.name);

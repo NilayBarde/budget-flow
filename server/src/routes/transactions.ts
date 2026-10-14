@@ -400,7 +400,7 @@ router.patch('/:id', asyncHandler(async (req, res) => {
         existingMapping?.default_transaction_type ||
         null;
 
-      await db
+      const { error: mappingError } = await db
         .from('merchant_mappings')
         .upsert({
           id: existingMapping?.id || randomUUID(),
@@ -413,6 +413,8 @@ router.patch('/:id', asyncHandler(async (req, res) => {
         }, {
           onConflict: 'user_id,original_name',
         });
+      // The rule is what makes the app learn this correction; failing quietly would lose it
+      if (mappingError) throw mappingError;
 
       // If applyToAll is true, update all transactions from the same merchant
       if (applyToAll && transaction.merchant_name) {
@@ -491,7 +493,7 @@ router.patch('/:id', asyncHandler(async (req, res) => {
             : 0;
         }
 
-        await db
+        const { error: recurringError } = await db
           .from('recurring_transactions')
           .upsert({
             user_id: userId,
@@ -508,6 +510,7 @@ router.patch('/:id', asyncHandler(async (req, res) => {
           }, {
             onConflict: 'user_id,merchant_display_name',
           });
+        if (recurringError) throw recurringError;
       } else {
         // Unmarking as recurring: check if any transactions for this merchant are still recurring
         const { count } = await db

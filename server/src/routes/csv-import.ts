@@ -208,7 +208,8 @@ interface CsvImport {
 
 // Preview CSV import (parse and show what will be imported)
 router.post('/:accountId/preview', upload.single('file'), asyncHandler(async (req, res) => {
-  const { db } = userContext(req);
+  const ctx = userContext(req);
+  const { db } = ctx;
   try {
     const { accountId } = req.params;
     const file = req.file;
@@ -283,7 +284,7 @@ router.post('/:accountId/preview', upload.single('file'), asyncHandler(async (re
     const categoryNameById = new Map(categories?.map(c => [c.id, c.name]) || []);
 
     // Get merchant mappings so the preview reflects the user's previous corrections
-    const merchantMappings = await loadMerchantMappings(userContext(req));
+    const merchantMappings = await loadMerchantMappings(ctx);
 
     // Parse transactions
     const transactions: ParsedTransaction[] = [];
@@ -380,7 +381,8 @@ router.post('/:accountId/preview', upload.single('file'), asyncHandler(async (re
 
 // Import transactions from CSV
 router.post('/:accountId/import', upload.single('file'), asyncHandler(async (req, res) => {
-  const { db } = userContext(req);
+  const ctx = userContext(req);
+  const { db } = ctx;
   try {
     const { accountId } = req.params;
     const { skipDuplicates = true } = req.body;
@@ -453,7 +455,7 @@ router.post('/:accountId/import', upload.single('file'), asyncHandler(async (req
     const { data: categories } = await db.from('categories').select('id, name');
     const categoryMap = new Map(categories?.map(c => [c.name, c.id]) || []);
 
-    const merchantMappings = await loadMerchantMappings(userContext(req));
+    const merchantMappings = await loadMerchantMappings(ctx);
 
     // Create import record
     const importId = randomUUID();
