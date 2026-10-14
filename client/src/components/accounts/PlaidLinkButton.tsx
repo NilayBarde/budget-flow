@@ -8,7 +8,6 @@ import { useCreatePlaidLinkToken, useExchangePlaidToken } from '../../hooks';
 import { PLAID_LINK_TOKEN_STORAGE_KEY } from '../../utils/constants';
 
 const AMEX_INSTITUTION_NAME = 'american express';
-const AMEX_TOKEN_STORAGE_KEY = PLAID_LINK_TOKEN_STORAGE_KEY;
 const AMEX_TOKEN_TTL_MS = 30 * 60 * 1000;
 
 // Type for Plaid metadata
@@ -84,7 +83,7 @@ const isAmexInstitution = (institutionName?: string) =>
 
 const getStoredAmexLinkToken = () => {
   try {
-    const storedValue = localStorage.getItem(AMEX_TOKEN_STORAGE_KEY);
+    const storedValue = localStorage.getItem(PLAID_LINK_TOKEN_STORAGE_KEY);
     if (!storedValue) return;
 
     const parsed = JSON.parse(storedValue) as StoredLinkToken;
@@ -95,20 +94,20 @@ const getStoredAmexLinkToken = () => {
     if (expiration) {
       const expirationDate = new Date(expiration);
       if (Number.isNaN(expirationDate.getTime()) || expirationDate <= new Date()) {
-        localStorage.removeItem(AMEX_TOKEN_STORAGE_KEY);
+        localStorage.removeItem(PLAID_LINK_TOKEN_STORAGE_KEY);
         return;
       }
     } else {
       const storedAtDate = new Date(storedAt);
       if (Number.isNaN(storedAtDate.getTime()) || Date.now() - storedAtDate.getTime() > AMEX_TOKEN_TTL_MS) {
-        localStorage.removeItem(AMEX_TOKEN_STORAGE_KEY);
+        localStorage.removeItem(PLAID_LINK_TOKEN_STORAGE_KEY);
         return;
       }
     }
 
     return parsed;
   } catch {
-    localStorage.removeItem(AMEX_TOKEN_STORAGE_KEY);
+    localStorage.removeItem(PLAID_LINK_TOKEN_STORAGE_KEY);
     return;
   }
 };
@@ -121,11 +120,11 @@ const persistAmexLinkToken = (token: string, expiration?: string, institution?: 
     institution,
   };
 
-  localStorage.setItem(AMEX_TOKEN_STORAGE_KEY, JSON.stringify(payload));
+  localStorage.setItem(PLAID_LINK_TOKEN_STORAGE_KEY, JSON.stringify(payload));
 };
 
 const clearAmexLinkToken = () => {
-  localStorage.removeItem(AMEX_TOKEN_STORAGE_KEY);
+  localStorage.removeItem(PLAID_LINK_TOKEN_STORAGE_KEY);
 };
 
 // Inner component that only renders when we have a token

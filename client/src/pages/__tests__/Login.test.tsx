@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { AuthContext, type AuthContextValue } from '../../hooks/AuthContext';
 import { Login } from '../Login';
@@ -9,7 +9,7 @@ const renderLogin = (auth: Partial<AuthContextValue>, from?: string) => {
     session: null,
     loading: false,
     notice: null,
-    signInWithGoogle: vi.fn(async () => {}),
+    signInWithGoogle: vi.fn(async () => true),
     signOut: vi.fn(async () => {}),
     ...auth,
   };
@@ -30,12 +30,21 @@ const renderLogin = (auth: Partial<AuthContextValue>, from?: string) => {
 const signedIn = { user: { email: 'me@example.com' } } as unknown as AuthContextValue['session'];
 
 describe('Login', () => {
-  it('starts Google sign-in', () => {
-    const auth = renderLogin({});
+  it('starts Google sign-in, returning to the page that was asked for', () => {
+    const auth = renderLogin({}, '/transactions');
 
     fireEvent.click(screen.getByRole('button', { name: /continue with google/i }));
 
-    expect(auth.signInWithGoogle).toHaveBeenCalled();
+    expect(auth.signInWithGoogle).toHaveBeenCalledWith('/transactions');
+  });
+
+  it('lets the button be used again when sign-in could not start', async () => {
+    renderLogin({ signInWithGoogle: vi.fn(async () => false) });
+    const button = screen.getByRole('button', { name: /continue with google/i }) as HTMLButtonElement;
+
+    fireEvent.click(button);
+
+    await waitFor(() => expect(button.disabled).toBe(false));
   });
 
   it('says why the last session ended', () => {

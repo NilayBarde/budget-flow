@@ -8,7 +8,7 @@ const withAuth = (session: AuthContextValue['session']) => {
     session,
     loading: false,
     notice: null,
-    signInWithGoogle: vi.fn(async () => {}),
+    signInWithGoogle: vi.fn(async () => true),
     signOut: vi.fn(async () => {}),
   };
   render(
