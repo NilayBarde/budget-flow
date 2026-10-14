@@ -3,7 +3,7 @@ import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 
 vi.mock('../plaid.js', () => ({ plaidClient: {} }));
 
-const { verifyPlaidWebhook } = await import('../plaid-webhook-verification.js');
+const { verifyPlaidWebhook, createKeyCache } = await import('../plaid-webhook-verification.js');
 
 // A key pair standing in for Plaid's, and a signer that builds a Plaid-Verification JWT.
 const plaidKeys = generateKeyPairSync('ec', { namedCurve: 'P-256' });
@@ -77,5 +77,41 @@ describe('verifyPlaidWebhook', () => {
       throw new Error('Plaid unavailable');
     });
     expect(await verify(token(), body, getKey)).toBe(false);
+  });
+});
+
+describe('the verification key cache', () => {
+  const key = (expired_at: number | null = null) => ({ kid: 'key-1', kty: 'EC', expired_at });
+
+  it('reuses a key for an hour, then asks Plaid again so a retirement is noticed', async () => {
+    let now = 0;
+    const fetchKey = vi.fn(async () => key());
+    const getKey = createKeyCache({ fetchKey, now: () => now });
+
+    await getKey('key-1');
+    now += 30 * 60 * 1000;
+    await getKey('key-1');
+    expect(fetchKey).toHaveBeenCalledTimes(1);
+
+    now += 31 * 60 * 1000;
+    await getKey('key-1');
+    expect(fetchKey).toHaveBeenCalledTimes(2);
+  });
+
+  it('never caches a retired key', async () => {
+    const fetchKey = vi.fn(async () => key(1700000000));
+    const getKey = createKeyCache({ fetchKey, now: () => 0 });
+
+    await getKey('key-1');
+    await getKey('key-1');
+    expect(fetchKey).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps keys apart by kid', async () => {
+    const fetchKey = vi.fn(async (kid: string) => ({ ...key(), kid }));
+    const getKey = createKeyCache({ fetchKey, now: () => 0 });
+
+    expect((await getKey('a')).kid).toBe('a');
+    expect((await getKey('b')).kid).toBe('b');
   });
 });

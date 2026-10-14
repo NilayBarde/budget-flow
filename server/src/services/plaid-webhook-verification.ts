@@ -12,17 +12,39 @@ const MAX_AGE_SECONDS = 5 * 60;
 // A JSON Web Key as Plaid returns it (EC P-256: kty, crv, x, y), plus Plaid's own fields.
 type VerificationKey = Record<string, unknown> & { kid?: string; expired_at?: number | null };
 
-// Plaid rotates keys rarely, so a key is fetched once per kid and kept.
-const keyCache = new Map<string, VerificationKey>();
+// How long a fetched key is trusted before asking Plaid again. Plaid retires a key by setting
+// expired_at; a key kept forever would go on verifying webhooks after that.
+const KEY_TTL_MS = 60 * 60 * 1000;
 
-const fetchVerificationKey = async (keyId: string): Promise<VerificationKey> => {
-  const cached = keyCache.get(keyId);
-  if (cached) return cached;
-  const response = await plaidClient.webhookVerificationKeyGet({ key_id: keyId });
-  const key = response.data.key as unknown as VerificationKey;
-  keyCache.set(keyId, key);
-  return key;
+/**
+ * Caches verification keys by kid for KEY_TTL_MS. A retired key is never cached, so every webhook
+ * signed with it re-asks Plaid (and is rejected).
+ */
+export const createKeyCache = ({
+  fetchKey,
+  now = Date.now,
+}: {
+  fetchKey: (keyId: string) => Promise<VerificationKey>;
+  now?: () => number;
+}) => {
+  const cache = new Map<string, { key: VerificationKey; fetchedAt: number }>();
+  return async (keyId: string): Promise<VerificationKey> => {
+    const cached = cache.get(keyId);
+    if (cached && now() - cached.fetchedAt < KEY_TTL_MS) return cached.key;
+
+    const key = await fetchKey(keyId);
+    if (key.expired_at) cache.delete(keyId);
+    else cache.set(keyId, { key, fetchedAt: now() });
+    return key;
+  };
 };
+
+const fetchVerificationKey = createKeyCache({
+  fetchKey: async keyId => {
+    const response = await plaidClient.webhookVerificationKeyGet({ key_id: keyId });
+    return response.data.key as unknown as VerificationKey;
+  },
+});
 
 const decodePart = (part: string): Record<string, unknown> | null => {
   try {
