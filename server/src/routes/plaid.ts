@@ -79,7 +79,7 @@ router.post('/create-update-link-token', asyncHandler(async (req, res) => {
     // Get the account and its access token
     const { data: account, error: accountError } = await db
       .from('accounts')
-      .select('institution_name')
+      .select('institution_name, is_manual')
       .eq('id', account_id)
       .single();
     const secrets = account ? await getAccountSecrets(userId, account_id) : null;
@@ -88,7 +88,7 @@ router.post('/create-update-link-token', asyncHandler(async (req, res) => {
       return res.status(404).json({ message: 'Account not found' });
     }
 
-    if (!secrets.plaid_access_token) {
+    if (account.is_manual || !secrets.plaid_access_token) {
       return res.status(400).json({ message: 'Account does not have a Plaid connection' });
     }
 
@@ -147,6 +147,10 @@ router.post('/log-link-event', asyncHandler(async (req, res) => {
 router.post('/exchange-token', asyncHandler(async (req, res) => {
   const ctx = userContext(req);
   const { db, userId } = ctx;
+  // The new Item's token until one of its accounts is stored. Plaid bills an Item monthly from the
+  // moment the public token is exchanged, so if this request fails before anything references the
+  // Item, it is removed again rather than left billing with nothing pointing at it.
+  let unsavedItemToken: string | null = null;
   try {
     const { public_token, metadata } = req.body;
 
@@ -158,6 +162,7 @@ router.post('/exchange-token', asyncHandler(async (req, res) => {
     const exchangeResponse = await plaidService.exchangePublicToken(public_token);
     const accessToken = exchangeResponse.access_token;
     const itemId = exchangeResponse.item_id;
+    unsavedItemToken = accessToken;
 
     // Get account info
     const accountsResponse = await plaidService.getAccounts(accessToken);
@@ -278,6 +283,7 @@ router.post('/exchange-token', asyncHandler(async (req, res) => {
     if (createdAccounts.length === 0) {
       throw new Error('Failed to create any accounts');
     }
+    unsavedItemToken = null;
 
     // The old Item's pending rows will never post now. The new Item sends today's pending
     // transactions again, so drop the stale copies rather than count them twice.
@@ -336,6 +342,14 @@ router.post('/exchange-token', asyncHandler(async (req, res) => {
     res.json(firstAccount && toPublicAccount(firstAccount));
   } catch (error) {
     console.error('Error exchanging token:', redactError(error));
+
+    if (unsavedItemToken) {
+      try {
+        await plaidService.removeItem(unsavedItemToken);
+      } catch (removeError) {
+        console.warn('Could not remove the Plaid Item this failed link created:', redactError(removeError));
+      }
+    }
 
     // Extract Plaid error details if available
     const plaidError = error as { response?: { data?: { error_code?: string; error_message?: string; display_message?: string } } };
