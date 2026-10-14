@@ -15,14 +15,28 @@ vi.mock('../pages/Accounts', () => ({ Accounts: () => <p>accounts page</p> }));
 vi.mock('../pages/Settings', () => ({ Settings: () => <p>settings page</p> }));
 vi.mock('../pages/Tags', () => ({ Tags: () => <p>tags page</p> }));
 vi.mock('../pages/OAuthCallback', () => ({ OAuthCallback: () => <p>oauth page</p> }));
+vi.mock('../pages/Login', () => ({ Login: () => <p>login page</p> }));
 
 const { AppRoutes } = await import('../App');
+const { AuthContext } = await import('../hooks/AuthContext');
+type AuthValue = NonNullable<React.ContextType<typeof AuthContext>>;
 
-const visit = (path: string) =>
+const signedIn = { user: { email: 'me@example.com', user_metadata: {} } } as unknown as AuthValue['session'];
+const authValue = (session: AuthValue['session'], loading = false): AuthValue => ({
+  session,
+  loading,
+  notice: null,
+  signInWithGoogle: async () => true,
+  signOut: async () => {},
+});
+
+const visit = (path: string, session: AuthValue['session'] = signedIn, loading = false) =>
   render(
-    <MemoryRouter initialEntries={[path]}>
-      <AppRoutes />
-    </MemoryRouter>,
+    <AuthContext.Provider value={authValue(session, loading)}>
+      <MemoryRouter initialEntries={[path]}>
+        <AppRoutes />
+      </MemoryRouter>
+    </AuthContext.Provider>,
   );
 
 describe('AppRoutes', () => {
@@ -82,5 +96,25 @@ describe('AppRoutes', () => {
 
     await screen.findByText('oauth page');
     expect(screen.queryByRole('navigation', { name: 'Main' })).toBeNull();
+  });
+
+  it.each(['/', '/transactions', '/settings/tags', '/oauth-callback'])('sends a signed-out visitor at %s to the login page', async path => {
+    visit(path, null);
+
+    expect(await screen.findByText('login page')).toBeTruthy();
+    expect(screen.queryByRole('navigation', { name: 'Main' })).toBeNull();
+  });
+
+  it('waits for the stored session before deciding, instead of flashing the login page', async () => {
+    visit('/', null, true);
+
+    expect(screen.queryByText('login page')).toBeNull();
+    expect(screen.queryByText('dashboard page')).toBeNull();
+  });
+
+  it('shows the login page itself without signing in', async () => {
+    visit('/login', null);
+
+    expect(await screen.findByText('login page')).toBeTruthy();
   });
 });

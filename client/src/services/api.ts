@@ -18,6 +18,33 @@ import type {
   MerchantRule,
 } from '../types';
 
+// Set by AuthProvider. Kept as hooks rather than an import so this module (and its tests) never
+// load the Supabase client.
+type AccessTokenProvider = () => Promise<string | null>;
+type AuthFailureHandler = (status: 401 | 403, message: string) => void;
+
+let getAccessToken: AccessTokenProvider = async () => null;
+let onAuthFailure: AuthFailureHandler = () => {};
+
+export const configureApiAuth = (options: { getAccessToken: AccessTokenProvider; onAuthFailure: AuthFailureHandler }) => {
+  getAccessToken = options.getAccessToken;
+  onAuthFailure = options.onAuthFailure;
+};
+
+const authHeaders = async (): Promise<Record<string, string>> => {
+  const token = await getAccessToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
+// The error for a failed response. A 401 (signed out or expired) or 403 (not invited) also goes to
+// the auth layer, which signs out and shows the login page with the server's message.
+const responseError = async (response: Response, fallback: string): Promise<Error> => {
+  const body = await response.json().catch(() => ({}));
+  const message: string = body.message || fallback;
+  if (response.status === 401 || response.status === 403) onAuthFailure(response.status, message);
+  return new Error(message);
+};
+
 const fetchApi = async <T>(
   endpoint: string,
   options: RequestInit = {}
@@ -26,13 +53,13 @@ const fetchApi = async <T>(
     ...options,
     headers: {
       'Content-Type': 'application/json',
+      ...(await authHeaders()),
       ...options.headers,
     },
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Request failed' }));
-    throw new Error(error.message || 'Request failed');
+    throw await responseError(response, 'Request failed');
   }
 
   // Handle empty responses (e.g., 201 Created with no body, 204 No Content)
@@ -385,22 +412,26 @@ export const getYearlyStats = (year: number) =>
 export const getInsights = () =>
   fetchApi<InsightsData>('/stats/insights');
 
+// A multipart POST (file uploads). No Content-Type header: the browser sets it with the boundary.
+const fetchForm = async <T>(endpoint: string, body: FormData, failureMessage: string): Promise<T> => {
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    method: 'POST',
+    headers: await authHeaders(),
+    body,
+  });
+
+  if (!response.ok) {
+    throw await responseError(response, failureMessage);
+  }
+
+  return response.json();
+};
+
 // CSV Import
 export const previewCsvImport = async (accountId: string, file: File): Promise<CsvPreviewResponse> => {
   const formData = new FormData();
   formData.append('file', file);
-
-  const response = await fetch(`${API_BASE_URL}/csv-import/${accountId}/preview`, {
-    method: 'POST',
-    body: formData,
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Preview failed' }));
-    throw new Error(error.message || 'Preview failed');
-  }
-
-  return response.json();
+  return fetchForm<CsvPreviewResponse>(`/csv-import/${accountId}/preview`, formData, 'Preview failed');
 };
 
 export const importCsv = async (
@@ -411,18 +442,7 @@ export const importCsv = async (
   const formData = new FormData();
   formData.append('file', file);
   formData.append('skipDuplicates', String(skipDuplicates));
-
-  const response = await fetch(`${API_BASE_URL}/csv-import/${accountId}/import`, {
-    method: 'POST',
-    body: formData,
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Import failed' }));
-    throw new Error(error.message || 'Import failed');
-  }
-
-  return response.json();
+  return fetchForm<CsvImportResponse>(`/csv-import/${accountId}/import`, formData, 'Import failed');
 };
 
 export const getCsvImports = (accountId: string) =>
@@ -437,18 +457,7 @@ export const backfillCsvReferences = async (
 ): Promise<{ success: boolean; updated: number; skipped: number; total: number }> => {
   const formData = new FormData();
   formData.append('file', file);
-
-  const response = await fetch(`${API_BASE_URL}/csv-import/${accountId}/backfill-references`, {
-    method: 'POST',
-    body: formData,
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Backfill failed' }));
-    throw new Error(error.message || 'Backfill failed');
-  }
-
-  return response.json();
+  return fetchForm(`/csv-import/${accountId}/backfill-references`, formData, 'Backfill failed');
 };
 
 // App Settings

@@ -2,6 +2,7 @@ import { NavLink } from 'react-router-dom';
 import { PiggyBank, X } from 'lucide-react';
 import clsx from 'clsx';
 import { NAV_ITEMS, SETTINGS_ITEM, MOBILE_NAV_ITEMS } from '../../utils/navigation';
+import { UserMenu } from './UserMenu';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -71,8 +72,8 @@ export const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
           ))}
         </nav>
 
-        {/* Settings - bottom of sidebar */}
-        <div className="p-4 border-t border-midnight-700">
+        {/* Settings and the signed-in user - bottom of sidebar */}
+        <div className="p-4 border-t border-midnight-700 space-y-3">
           <NavLink
             to={SETTINGS_ITEM.to}
             onClick={onClose}
@@ -87,6 +88,7 @@ export const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
             <SETTINGS_ITEM.icon className="h-5 w-5 flex-shrink-0" />
             {SETTINGS_ITEM.label}
           </NavLink>
+          <UserMenu />
         </div>
       </aside>
 
