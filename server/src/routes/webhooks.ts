@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { supabase } from '../db/supabase.js';
+import { supabaseAdmin } from '../db/supabase.js';
 import * as plaidService from '../services/plaid.js';
 import { buildAccountResolver } from '../services/sync-attribution.js';
 import { applySyncResult } from '../services/sync-transactions.js';
@@ -56,7 +56,7 @@ router.post('/plaid', async (req, res) => {
       // again (common for OAuth banks like American Express, which re-auth often).
       const reauthCodes = ['ITEM_LOGIN_REQUIRED', 'ERROR', 'PENDING_EXPIRATION', 'PENDING_DISCONNECT'];
       if (reauthCodes.includes(webhook_code)) {
-        const { data: flagged } = await supabase
+        const { data: flagged } = await supabaseAdmin
           .from('accounts')
           .update({ needs_reauth: true, reauth_detected_at: new Date().toISOString() })
           .eq('plaid_item_id', item_id)

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { supabase } from '../db/supabase.js';
+import { userContext } from '../db/context.js';
 import { randomUUID } from 'node:crypto';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { computeCategorySpend, type SpendRow } from '../services/category-spend.js';
@@ -10,6 +10,7 @@ const router = Router();
 router.get(
   '/',
   asyncHandler(async (req, res) => {
+    const { db } = userContext(req);
     const { month, year } = req.query;
 
     if (!month || !year) {
@@ -17,7 +18,7 @@ router.get(
     }
 
     // Get budget goals with category info
-    const { data: goals, error } = await supabase
+    const { data: goals, error } = await db
       .from('budget_goals')
       .select(`
         *,
@@ -34,7 +35,7 @@ router.get(
 
     // Count expenses and returns (returns reduce category spending)
     // Include splits to calculate "my share" for split transactions
-    const { data: transactions } = await supabase
+    const { data: transactions } = await db
       .from('transactions')
       .select(`
         category_id, 
@@ -64,11 +65,12 @@ router.get(
 router.post(
   '/',
   asyncHandler(async (req, res) => {
+    const { db } = userContext(req);
     const { category_id, month, year, limit_amount } = req.body;
     const skipExisting = req.query.skipExisting === 'true';
 
     // Check if goal already exists for this category/month/year
-    const { data: existing } = await supabase
+    const { data: existing } = await db
       .from('budget_goals')
       .select('id')
       .eq('category_id', category_id)
@@ -79,7 +81,7 @@ router.post(
     if (existing) {
       // If skipExisting flag is set, just return the existing goal without error
       if (skipExisting) {
-        const { data: existingGoal } = await supabase
+        const { data: existingGoal } = await db
           .from('budget_goals')
           .select(`*, category:categories(*)`)
           .eq('id', existing.id)
@@ -89,7 +91,7 @@ router.post(
       return res.status(400).json({ message: 'Budget goal already exists for this category and month' });
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('budget_goals')
       .insert({
         id: randomUUID(),
@@ -114,10 +116,11 @@ router.post(
 router.patch(
   '/:id',
   asyncHandler(async (req, res) => {
+    const { db } = userContext(req);
     const { id } = req.params;
     const updates = req.body;
 
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('budget_goals')
       .update(updates)
       .eq('id', id)
@@ -136,9 +139,10 @@ router.patch(
 router.delete(
   '/:id',
   asyncHandler(async (req, res) => {
+    const { db } = userContext(req);
     const { id } = req.params;
 
-    const { error } = await supabase.from('budget_goals').delete().eq('id', id);
+    const { error } = await db.from('budget_goals').delete().eq('id', id);
 
     if (error) throw error;
     res.status(204).send();

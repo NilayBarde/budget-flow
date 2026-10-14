@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { supabase } from '../db/supabase.js';
+import { userContext } from '../db/context.js';
 import { randomUUID } from 'node:crypto';
 import { asyncHandler } from '../utils/asyncHandler.js';
 
@@ -8,8 +8,9 @@ const router = Router();
 // Get all merchant mappings
 router.get(
   '/',
-  asyncHandler(async (_req, res) => {
-    const { data, error } = await supabase
+  asyncHandler(async (req, res) => {
+    const { db } = userContext(req);
+    const { data, error } = await db
       .from('merchant_mappings')
       .select('*')
       .order('display_name');
@@ -23,9 +24,10 @@ router.get(
 router.post(
   '/',
   asyncHandler(async (req, res) => {
+    const { db } = userContext(req);
     const { original_name, display_name, default_category_id, default_transaction_type } = req.body;
 
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('merchant_mappings')
       .insert({
         id: randomUUID(),
@@ -47,9 +49,10 @@ router.post(
 router.delete(
   '/:id',
   asyncHandler(async (req, res) => {
+    const { db } = userContext(req);
     const { id } = req.params;
 
-    const { error } = await supabase.from('merchant_mappings').delete().eq('id', id);
+    const { error } = await db.from('merchant_mappings').delete().eq('id', id);
 
     if (error) throw error;
     res.status(204).send();
