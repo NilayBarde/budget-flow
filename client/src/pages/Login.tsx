@@ -9,17 +9,18 @@ export const Login = () => {
   const location = useLocation();
   const [redirecting, setRedirecting] = useState(false);
 
+  const from = (location.state as { from?: string } | null)?.from;
+
   if (loading) return <Spinner className="py-12" />;
   if (session) {
-    const from = (location.state as { from?: string } | null)?.from;
     return <Navigate to={from && from.startsWith('/') && !from.startsWith('//') ? from : '/'} replace />;
   }
 
   const handleSignIn = async () => {
     setRedirecting(true);
-    await signInWithGoogle();
-    // Normally the browser is already on its way to Google; this only runs if starting failed
-    setRedirecting(false);
+    // On success the browser is leaving for Google, so the button stays busy; on failure the
+    // notice above says why and the button can be used again
+    if (!(await signInWithGoogle(from))) setRedirecting(false);
   };
 
   return (

@@ -26,7 +26,7 @@ const authValue = (session: AuthValue['session'], loading = false): AuthValue =>
   session,
   loading,
   notice: null,
-  signInWithGoogle: async () => {},
+  signInWithGoogle: async () => true,
   signOut: async () => {},
 });
 
