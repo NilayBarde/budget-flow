@@ -1,5 +1,7 @@
 import { Router } from 'express';
-import { supabase } from '../db/supabase.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
+import { userContext } from '../db/context.js';
+import { ACCOUNT_COLUMNS } from '../db/columns.js';
 import { isInvestmentAccountType } from '../services/account-types.js';
 import { toPublicAccount } from '../services/account-redaction.js';
 
@@ -23,10 +25,11 @@ const isLiabilityAccount = (accountType: string): boolean => {
 };
 
 // GET /investments/summary - Get portfolio totals and net worth based on ACCOUNT BALANCES only
-router.get('/summary', async (req, res) => {
+router.get('/summary', asyncHandler(async (req, res) => {
+  const { db } = userContext(req);
   try {
     // Get all account balances
-    const { data: accounts, error: accountsError } = await supabase
+    const { data: accounts, error: accountsError } = await db
       .from('accounts')
       .select('id, current_balance, account_type, institution_name, account_name, exclude_from_investments');
 
@@ -92,22 +95,24 @@ router.get('/summary', async (req, res) => {
     console.error('Error fetching investment summary:', error);
     res.status(500).json({ message: 'Failed to fetch investment summary' });
   }
-});
+}));
 
 // PATCH /investments/accounts/:accountId/exclude - Toggle account exclusion from investments
-router.patch('/accounts/:accountId/exclude', async (req, res) => {
+router.patch('/accounts/:accountId/exclude', asyncHandler(async (req, res) => {
+  const { db } = userContext(req);
   try {
     const { accountId } = req.params;
     const { exclude_from_investments, investment_exclusion_note } = req.body;
 
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('accounts')
       .update({
         exclude_from_investments: exclude_from_investments ?? true,
         investment_exclusion_note: investment_exclusion_note || null,
       })
       .eq('id', accountId)
-      .select()
+      // Not select(): signed-in users can't read the Plaid credential columns
+      .select(ACCOUNT_COLUMNS)
       .single();
 
     if (error) throw error;
@@ -117,6 +122,6 @@ router.patch('/accounts/:accountId/exclude', async (req, res) => {
     console.error('Error updating account exclusion:', error);
     res.status(500).json({ message: 'Failed to update account' });
   }
-});
+}));
 
 export default router;

@@ -298,5 +298,5 @@ Work happens on a long-lived `feature/multi-user` branch cut from main. Each ste
 
 - **Broad mechanical change** (~170 DB call sites across 22 files). Mitigated by the type change: removing the `supabase` export makes every un-migrated call site a compile error.
 - **Column grants on `accounts`** must be maintained when columns are added. Documented in CLAUDE.md; a forgotten grant fails loudly (permission denied), not silently.
-- **Plaid webhook is unauthenticated (existing gap).** `/api/webhooks/plaid` doesn't verify Plaid's `Plaid-Verification` JWT today. With several users, a forged webhook could trigger paid syncs for anyone's item (no data exposure, since sync writes only to the item's owner). Follow-up: verify webhook signatures. Not part of this change.
+- **Plaid webhook signatures (closed in PR 5).** `/api/webhooks/plaid` was unauthenticated, which with several users would let a forged webhook flag any user's item for reconnect or trigger paid syncs. It now verifies Plaid's `Plaid-Verification` ES256 JWT over the raw body (`services/plaid-webhook-verification.ts`), rejecting anything unsigned, altered, older than five minutes or signed with a retired key.
 - **Service-role paths bypass RLS.** Confined to webhooks, scripts, `plaid-secrets.ts` and `ensureUserSetup`, all of which filter or stamp `user_id` explicitly and have tests asserting it.

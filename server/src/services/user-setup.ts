@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '../db/supabase.js';
+import { SETUP_MARKER_KEY } from './setting-keys.js';
 
 // The categories every new user starts with (the same set supabase-schema.sql seeds).
 export const DEFAULT_CATEGORIES = [
@@ -17,10 +18,9 @@ export const DEFAULT_CATEGORIES = [
   { name: 'Other', icon: 'more-horizontal', color: '#64748b' },
 ] as const;
 
-// The app_settings key recording that a user has had their defaults (migration 030 sets it for the
-// owner). A marker rather than "has no categories", so deleting every category doesn't bring the
-// defaults back.
-export const SETUP_MARKER_KEY = 'user_defaults_seeded';
+// SETUP_MARKER_KEY records that a user has had their defaults (migration 030 sets it for the owner).
+// A marker rather than "has no categories", so deleting every category doesn't bring them back.
+export { SETUP_MARKER_KEY };
 
 // Seeds a user's default categories the first time they sign in. Runs as the service role because
 // it happens before anything of theirs exists, so it stamps user_id itself. Safe to call repeatedly
