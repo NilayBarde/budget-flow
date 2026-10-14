@@ -9,6 +9,8 @@ declare global {
       userId?: string;
       /** Supabase client acting as the signed-in user (RLS applies). */
       db?: Db;
+      /** The request body exactly as received, for checking signatures over it (Plaid webhooks). */
+      rawBody?: Buffer;
     }
   }
 }

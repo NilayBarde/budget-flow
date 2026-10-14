@@ -7,6 +7,7 @@ import { redactError } from '../services/plaid-errors.js';
 import { recordSyncFailure } from '../services/sync-error.js';
 import { adminContext, type DbContext } from '../db/context.js';
 import { getItemAccounts, itemOwner, type ItemAccount } from '../services/plaid-secrets.js';
+import { verifyPlaidWebhook } from '../services/plaid-webhook-verification.js';
 
 const router = Router();
 
@@ -44,6 +45,13 @@ const syncItem = async (ctx: DbContext, itemAccounts: ItemAccount[], historicalC
 
 // Plaid webhook endpoint
 router.post('/plaid', async (req, res) => {
+  // Anyone can reach this route, and it acts for whichever user owns the item it names, so only a
+  // webhook Plaid signed (over this exact body, in the last few minutes) is acted on.
+  if (!(await verifyPlaidWebhook(req.get('plaid-verification'), req.rawBody))) {
+    console.warn('Rejected a Plaid webhook that failed signature verification');
+    return res.status(401).json({ message: 'Invalid webhook signature' });
+  }
+
   try {
     const { webhook_type, webhook_code, item_id, initial_update_complete, historical_update_complete } = req.body;
 
