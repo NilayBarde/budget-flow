@@ -103,6 +103,29 @@ const revertSettlementType = async (txn: VenmoTransactionRow): Promise<void> => 
   if (error) throw error;
 };
 
+/**
+ * Record a match: flip the payment to a settlement transfer, then insert one settlement row per
+ * split. The two writes are not atomic, so the order decides what a failure in between leaves
+ * behind. Flip first, and the worst case is a flagged transfer with no rows — inert, and reset by
+ * the next pass's orphan heal. Rows first would risk rows settling a split while the payment still
+ * counts as income, counting the money twice.
+ */
+const writeSettlement = async (venmoTransactionId: string, splitAmounts: Record<string, number>): Promise<void> => {
+  const { error: updateError } = await supabase
+    .from('transactions')
+    .update({ transaction_type: 'transfer', is_venmo_settlement: true, category_id: null, needs_review: false })
+    .eq('id', venmoTransactionId);
+  if (updateError) throw updateError;
+
+  const rows = Object.entries(splitAmounts).map(([splitId, amount]) => ({
+    split_id: splitId,
+    venmo_transaction_id: venmoTransactionId,
+    amount,
+  }));
+  const { error: insertError } = await supabase.from('transaction_split_settlements').insert(rows);
+  if (insertError) throw insertError;
+};
+
 interface SplitRow {
   id: string;
   parent_transaction_id: string;
@@ -276,19 +299,7 @@ export const reconcileVenmoSettlements = async ({
 
   if (apply) {
     for (const match of matches) {
-      const rows = match.splitIds.map((splitId) => ({
-        split_id: splitId,
-        venmo_transaction_id: match.venmoTransactionId,
-        amount: match.splitAmounts[splitId],
-      }));
-      const { error: insertError } = await supabase.from('transaction_split_settlements').insert(rows);
-      if (insertError) throw insertError;
-
-      const { error: updateError } = await supabase
-        .from('transactions')
-        .update({ transaction_type: 'transfer', is_venmo_settlement: true, category_id: null, needs_review: false })
-        .eq('id', match.venmoTransactionId);
-      if (updateError) throw updateError;
+      await writeSettlement(match.venmoTransactionId, match.splitAmounts);
     }
   }
 
@@ -364,19 +375,7 @@ export const linkVenmoSettlement = async (venmoTransactionId: string, splitIds: 
     throw new VenmoSettlementValidationError("Chosen splits' amount does not match the transaction amount");
   }
 
-  const rows = splitIds.map((splitId) => ({
-    split_id: splitId,
-    venmo_transaction_id: venmoTransactionId,
-    amount: splitAmounts[splitId],
-  }));
-  const { error: insertError } = await supabase.from('transaction_split_settlements').insert(rows);
-  if (insertError) throw insertError;
-
-  const { error: updateError } = await supabase
-    .from('transactions')
-    .update({ transaction_type: 'transfer', is_venmo_settlement: true, category_id: null, needs_review: false })
-    .eq('id', venmoTransactionId);
-  if (updateError) throw updateError;
+  await writeSettlement(venmoTransactionId, splitAmounts);
 };
 
 /**

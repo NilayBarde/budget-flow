@@ -11,6 +11,10 @@ const state = {
   updates: [] as { table: string; values: Record<string, unknown>; id: string }[],
   gteCalls: [] as { table: string; col: string; val: string }[],
   rangeCalls: [] as { table: string; from: number; to: number }[],
+  /** Every write, in order, as `table:op`. */
+  writes: [] as string[],
+  /** Make every insert into this table fail, like a dropped connection mid-match. */
+  failInsertInto: null as string | null,
 };
 
 const resetState = () => {
@@ -22,6 +26,8 @@ const resetState = () => {
   state.updates = [];
   state.gteCalls = [];
   state.rangeCalls = [];
+  state.writes = [];
+  state.failInsertInto = null;
 };
 
 // The real PostgREST default: a SELECT returns at most this many rows, without saying so.
@@ -71,12 +77,15 @@ vi.mock('../../db/supabase.js', () => ({
           return builder;
         },
         insert: (rows: Record<string, unknown>[]) => {
+          state.writes.push(`${table}:insert`);
+          if (state.failInsertInto === table) return Promise.resolve({ data: null, error: { message: 'insert failed' } });
           state.inserts.push({ table, rows });
           tableData(table).push(...rows);
           return Promise.resolve({ data: rows, error: null });
         },
         update: (values: Record<string, unknown>) => ({
           eq: (col: string, val: unknown) => {
+            state.writes.push(`${table}:update`);
             const row = tableData(table).find((r) => r[col] === val);
             if (row) {
               Object.assign(row, values);
@@ -232,6 +241,42 @@ describe('venmo-settlement-reconciliation', () => {
     });
     const results = await reconcileVenmoSettlements({ apply: true });
     expect(results).toEqual([{ venmoTransactionId: 'venmo-deposit', splitIds: ['split-theirs'], totalAmount: 25 }]);
+  });
+
+  describe('if a match is interrupted between its two writes', () => {
+    it('flips the payment before inserting the settlement rows', async () => {
+      seedBasicScenario();
+      await reconcileVenmoSettlements({ apply: true });
+      expect(state.writes).toEqual(['transactions:update', 'transaction_split_settlements:insert']);
+    });
+
+    it('leaves only an inert transfer, which the next pass heals and rematches', async () => {
+      seedBasicScenario();
+      // As sync would store a Venmo deposit before it is matched.
+      Object.assign(state.transactions.find((t) => t.id === 'venmo-deposit')!, {
+        transaction_type: 'return',
+        merchant_name: 'Venmo',
+        original_description: null,
+        plaid_category: null,
+      });
+      state.failInsertInto = 'transaction_split_settlements';
+
+      await expect(reconcileVenmoSettlements({ apply: true })).rejects.toMatchObject({ message: 'insert failed' });
+      // The payment was already flipped out of the totals when the rows failed: it counts nowhere
+      // and the split still counts in full, so nothing is counted twice.
+      expect(state.settlements).toEqual([]);
+      expect(state.transactions.find((t) => t.id === 'venmo-deposit')).toMatchObject({
+        transaction_type: 'transfer',
+        is_venmo_settlement: true,
+      });
+
+      state.failInsertInto = null;
+      await reconcileVenmoSettlements({ apply: true });
+      expect(state.settlements).toEqual([
+        expect.objectContaining({ split_id: 'split-theirs', venmo_transaction_id: 'venmo-deposit', amount: 25 }),
+      ]);
+      expect(state.transactions.find((t) => t.id === 'venmo-deposit')).toMatchObject({ is_venmo_settlement: true });
+    });
   });
 
   describe('healing a settlement whose split links were removed', () => {

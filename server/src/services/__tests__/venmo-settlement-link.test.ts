@@ -6,6 +6,8 @@ const state = {
   settlements: [] as Record<string, unknown>[],
   inserts: [] as { table: string; rows: Record<string, unknown>[] }[],
   deletes: [] as { table: string; column: string; value: unknown }[],
+  /** Every insert/update, in order, as `table:op`. */
+  writes: [] as string[],
 };
 
 const resetState = () => {
@@ -14,6 +16,7 @@ const resetState = () => {
   state.settlements = [];
   state.inserts = [];
   state.deletes = [];
+  state.writes = [];
 };
 
 const tableData = (table: string): Record<string, unknown>[] => {
@@ -38,12 +41,14 @@ vi.mock('../../db/supabase.js', () => ({
           return builder;
         },
         insert: (rows: Record<string, unknown>[]) => {
+          state.writes.push(`${table}:insert`);
           state.inserts.push({ table, rows });
           tableData(table).push(...rows);
           return Promise.resolve({ data: rows, error: null });
         },
         update: (values: Record<string, unknown>) => ({
           eq: (col: string, val: unknown) => {
+            state.writes.push(`${table}:update`);
             const row = tableData(table).find((r) => r[col] === val);
             if (row) Object.assign(row, values);
             return Promise.resolve({ data: null, error: null });
@@ -82,6 +87,11 @@ describe('linkVenmoSettlement', () => {
       expect.objectContaining({ split_id: 'split-1', venmo_transaction_id: 'venmo-txn', amount: 25 }),
     ]);
     expect(state.transactions[0]).toMatchObject({ transaction_type: 'transfer', is_venmo_settlement: true });
+  });
+
+  it('flips the payment before inserting the settlement rows, so an interruption cannot double-count', async () => {
+    await linkVenmoSettlement('venmo-txn', ['split-1']);
+    expect(state.writes).toEqual(['transactions:update', 'transaction_split_settlements:insert']);
   });
 
   it('rejects when the chosen splits do not sum to the transaction amount', async () => {
