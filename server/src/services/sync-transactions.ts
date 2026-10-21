@@ -5,6 +5,7 @@ import { detectTransactionType, type TransactionType } from './transaction-type.
 import { loadManuallyTypedIds, loadMerchantMappings, resolveTransactionType, type MerchantMapping } from './merchant-mappings.js';
 import { reconcilePendingTransaction } from './pending-reconciliation.js';
 import { reconcileCardPaymentsAfterSync } from './card-payment-reconciliation.js';
+import { reconcileVenmoSettlementsAfterSync } from './venmo-settlement-reconciliation.js';
 import { redactError } from './plaid-errors.js';
 import type { SyncResult } from './plaid.js';
 
@@ -357,6 +358,7 @@ export const applySyncResult = async ({
 
   await recordSuccessfulSync(plaidItemId, syncResult.nextCursor, historicalComplete);
   await reconcileCardPaymentsAfterSync(reconcileSinceDate === undefined ? {} : { sinceDate: reconcileSinceDate });
+  await reconcileVenmoSettlementsAfterSync(reconcileSinceDate === undefined ? {} : { sinceDate: reconcileSinceDate });
 
   return counts;
 };

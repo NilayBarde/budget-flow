@@ -104,6 +104,10 @@ const reconcileCardPayments = vi.fn(async () => undefined);
 vi.mock('../card-payment-reconciliation.js', () => ({
   reconcileCardPaymentsAfterSync: (...args: unknown[]) => (reconcileCardPayments as (...a: unknown[]) => unknown)(...args),
 }));
+const reconcileVenmoSettlements = vi.fn(async () => undefined);
+vi.mock('../venmo-settlement-reconciliation.js', () => ({
+  reconcileVenmoSettlementsAfterSync: (...args: unknown[]) => (reconcileVenmoSettlements as (...a: unknown[]) => unknown)(...args),
+}));
 
 const { buildNewTransactionRow, buildTransactionUpdate, applySyncResult } = await import('../sync-transactions.js');
 
