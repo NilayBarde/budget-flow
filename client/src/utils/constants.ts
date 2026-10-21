@@ -20,3 +20,7 @@ export const CHART_TOOLTIP_STYLE = {
 
 export const CHART_LABEL_STYLE = { color: '#f1f5f9', fontWeight: 500 } as const;
 export const CHART_ITEM_STYLE = { color: '#cbd5e1' } as const;
+
+// Where an in-progress Plaid Link token is kept across the OAuth redirect (Amex and other OAuth
+// banks). Cleared on sign-out so the next person on this browser can't resume someone else's link.
+export const PLAID_LINK_TOKEN_STORAGE_KEY = 'plaid_link_token_amex';

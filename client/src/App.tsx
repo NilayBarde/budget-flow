@@ -7,6 +7,8 @@ import { legacyRedirectRoutes } from './routes/legacyRedirects';
 import { NET_WORTH_TABS, INSIGHTS_TABS, SETTINGS_TABS } from './utils/navigation';
 import { Spinner } from './components/ui';
 import { MonthProvider } from './hooks';
+import { AuthProvider } from './hooks/AuthProvider';
+import { RequireAuth } from './components/auth/RequireAuth';
 
 // Eagerly prefetch the Dashboard chunk since it's the landing page — avoids a
 // network waterfall (main bundle → React render → lazy import → Dashboard fetch).
@@ -22,6 +24,7 @@ const Tags = lazy(() => import('./pages/Tags').then(m => ({ default: m.Tags })))
 const Settings = lazy(() => import('./pages/Settings').then(m => ({ default: m.Settings })));
 const OAuthCallback = lazy(() => import('./pages/OAuthCallback').then(m => ({ default: m.OAuthCallback })));
 const Investments = lazy(() => import('./pages/Investments').then(m => ({ default: m.Investments })));
+const Login = lazy(() => import('./pages/Login').then(m => ({ default: m.Login })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -36,7 +39,8 @@ const queryClient = new QueryClient({
 export const AppRoutes = () => (
   <Suspense fallback={<Spinner className="py-12" />}>
     <Routes>
-      <Route path="/" element={<Layout />}>
+      <Route path="/login" element={<Login />} />
+      <Route path="/" element={<RequireAuth><Layout /></RequireAuth>}>
         <Route index element={<Dashboard />} />
         <Route path="transactions" element={<Transactions />} />
         <Route path="plan" element={<FinancialPlan />} />
@@ -57,7 +61,8 @@ export const AppRoutes = () => (
         {/* The old addresses keep working and land on the page's new home. */}
         {legacyRedirectRoutes}
       </Route>
-      <Route path="/oauth-callback" element={<OAuthCallback />} />
+      {/* Finishing a bank link calls the API, so it needs the session too */}
+      <Route path="/oauth-callback" element={<RequireAuth><OAuthCallback /></RequireAuth>} />
     </Routes>
   </Suspense>
 );
@@ -65,11 +70,13 @@ export const AppRoutes = () => (
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <MonthProvider>
-        <BrowserRouter>
-          <AppRoutes />
-        </BrowserRouter>
-      </MonthProvider>
+      <AuthProvider>
+        <MonthProvider>
+          <BrowserRouter>
+            <AppRoutes />
+          </BrowserRouter>
+        </MonthProvider>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }

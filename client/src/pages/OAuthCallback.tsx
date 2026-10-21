@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { usePlaidLink } from 'react-plaid-link';
 import { Spinner } from '../components/ui';
 import { useExchangePlaidToken } from '../hooks';
+import { PLAID_LINK_TOKEN_STORAGE_KEY } from '../utils/constants';
 
-const AMEX_TOKEN_STORAGE_KEY = 'plaid_link_token_amex';
 
 /**
  * OAuth Callback Page
@@ -15,7 +15,7 @@ const AMEX_TOKEN_STORAGE_KEY = 'plaid_link_token_amex';
 // Retrieve stored link token synchronously on initial render
 const getStoredLinkToken = (): { token: string | null; error: string | null } => {
   try {
-    const storedValue = localStorage.getItem(AMEX_TOKEN_STORAGE_KEY);
+    const storedValue = localStorage.getItem(PLAID_LINK_TOKEN_STORAGE_KEY);
     if (storedValue) {
       const parsed = JSON.parse(storedValue);
       if (parsed?.token) {
@@ -48,7 +48,7 @@ export const OAuthCallback = () => {
     console.log('OAuth flow completed successfully');
     try {
       await exchangeToken.mutateAsync({ publicToken, metadata });
-      localStorage.removeItem(AMEX_TOKEN_STORAGE_KEY);
+      localStorage.removeItem(PLAID_LINK_TOKEN_STORAGE_KEY);
       navigate('/accounts');
     } catch (err) {
       console.error('Failed to exchange token:', err);
