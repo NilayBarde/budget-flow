@@ -10,14 +10,15 @@
  * Dry run by default, writes nothing. Pass --apply to save the changes.
  *
  * Usage (from server/):
- *   npx tsx --env-file=.env src/scripts/reconcile-card-payments.ts            # preview
- *   npx tsx --env-file=.env src/scripts/reconcile-card-payments.ts --apply    # save
+ *   npx tsx --env-file=.env src/scripts/reconcile-card-payments.ts --user-email you@example.com            # preview
+ *   npx tsx --env-file=.env src/scripts/reconcile-card-payments.ts --user-email you@example.com --apply    # save
  */
 import {
   reconcileCardPayments,
   retypeInvestmentsReadingAsCardBills,
   type PairedTransaction,
 } from '../services/card-payment-reconciliation.js';
+import { scriptContext } from './script-user.js';
 
 const print = (label: string, rows: PairedTransaction[], apply: boolean) => {
   console.log(`== ${label}: ${apply ? 'retyped' : 'would retype'} ${rows.length} transaction(s) as transfers ==`);
@@ -37,10 +38,11 @@ const print = (label: string, rows: PairedTransaction[], apply: boolean) => {
 
 const main = async () => {
   const apply = process.argv.includes('--apply');
+  const ctx = await scriptContext();
 
   // Bills first, so a bill typed as an investment is already a transfer when pairing runs.
-  print('Card bills typed as investments', await retypeInvestmentsReadingAsCardBills({ apply }), apply);
-  print('Card payment legs', await reconcileCardPayments({ sinceDate: null, apply }), apply);
+  print('Card bills typed as investments', await retypeInvestmentsReadingAsCardBills(ctx, { apply }), apply);
+  print('Card payment legs', await reconcileCardPayments(ctx, { sinceDate: null, apply }), apply);
 
   if (!apply) console.log('Dry run only. Re-run with --apply to save.');
 };

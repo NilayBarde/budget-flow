@@ -1,23 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { MerchantMapping } from '../merchant-mappings.js';
 
-// Mock the supabase module before importing the module under test
+// A fake client handed to the services through their context
 const mockIn = vi.fn();
-const mockSelect = vi.fn();
+const mockEq = vi.fn();
+const mockSelect = vi.fn(() => ({ eq: mockEq }));
 const mockFrom = vi.fn(() => ({ select: mockSelect }));
+const ctx = { db: { from: mockFrom }, userId: 'user-1' } as never;
 
-// `select('*')` is awaited directly, while `select(...).in(...)` is chained
-const selectResolvesTo = (data: unknown) => mockSelect.mockResolvedValue({ data });
+// `select('*').eq(user)` is awaited directly, while `select(...).eq(user).in(...)` is chained
+const selectResolvesTo = (data: unknown) => mockEq.mockResolvedValue({ data });
 const selectInResolvesTo = (data: unknown) => {
-  mockSelect.mockReturnValue({ in: mockIn });
+  mockEq.mockReturnValue({ in: mockIn });
   mockIn.mockResolvedValue({ data });
 };
 
-vi.mock('../../db/supabase.js', () => ({
-  supabase: { from: mockFrom },
-}));
-
-// Import AFTER the mock is set up
 const { loadMerchantMappings, loadManuallyTypedIds, resolveTransactionType } =
   await import('../merchant-mappings.js');
 
@@ -38,15 +35,23 @@ describe('loadMerchantMappings', () => {
   it('finds a mapping case-insensitively', async () => {
     selectResolvesTo([mapping()]);
 
-    const mappings = await loadMerchantMappings();
+    const mappings = await loadMerchantMappings(ctx);
 
     expect(mappings.find('empower finance transfer')?.display_name).toBe('Empower');
+  });
+
+  it("loads only the user's own rules", async () => {
+    selectResolvesTo([]);
+
+    await loadMerchantMappings(ctx);
+
+    expect(mockEq).toHaveBeenCalledWith('user_id', 'user-1');
   });
 
   it('falls back to the next candidate name when the first has no mapping', async () => {
     selectResolvesTo([mapping()]);
 
-    const mappings = await loadMerchantMappings();
+    const mappings = await loadMerchantMappings(ctx);
 
     // Plaid often returns no merchant_name, so the mapping was stored under `name`
     expect(mappings.find(null, 'EMPOWER FINANCE TRANSFER')?.display_name).toBe('Empower');
@@ -56,7 +61,7 @@ describe('loadMerchantMappings', () => {
   it('returns undefined for an unknown merchant', async () => {
     selectResolvesTo([mapping()]);
 
-    const mappings = await loadMerchantMappings();
+    const mappings = await loadMerchantMappings(ctx);
 
     expect(mappings.find('Starbucks')).toBeUndefined();
   });
@@ -64,15 +69,15 @@ describe('loadMerchantMappings', () => {
   it('handles an empty mappings table', async () => {
     selectResolvesTo(null);
 
-    const mappings = await loadMerchantMappings();
+    const mappings = await loadMerchantMappings(ctx);
 
     expect(mappings.find('Starbucks')).toBeUndefined();
   });
 
   it('fails when the rules cannot be read, instead of syncing as if there were none', async () => {
-    mockSelect.mockResolvedValue({ data: null, error: { message: 'connection reset' } });
+    mockEq.mockResolvedValue({ data: null, error: { message: 'connection reset' } });
 
-    await expect(loadMerchantMappings()).rejects.toMatchObject({ message: 'connection reset' });
+    await expect(loadMerchantMappings(ctx)).rejects.toMatchObject({ message: 'connection reset' });
   });
 });
 
@@ -88,35 +93,37 @@ describe('loadManuallyTypedIds', () => {
       { plaid_transaction_id: 'tx-3', type_manually_set: null },
     ]);
 
-    const ids = await loadManuallyTypedIds([
+    const ids = await loadManuallyTypedIds(ctx, [
       { transaction_id: 'tx-1' },
       { transaction_id: 'tx-2' },
       { transaction_id: 'tx-3' },
     ]);
 
     expect([...ids]).toEqual(['tx-1']);
+    expect(mockEq).toHaveBeenCalledWith('user_id', 'user-1');
   });
 
   it('skips the query entirely when there are no transactions', async () => {
     selectInResolvesTo([]);
 
-    const ids = await loadManuallyTypedIds([]);
+    const ids = await loadManuallyTypedIds(ctx, []);
 
     expect(ids.size).toBe(0);
     expect(mockFrom).not.toHaveBeenCalled();
   });
 
   it('fails when the flags cannot be read, so a Plaid update cannot overwrite a type the user set', async () => {
-    mockSelect.mockReturnValue({ in: mockIn });
+    mockEq.mockReturnValue({ in: mockIn });
     mockIn.mockResolvedValue({ data: null, error: { message: 'connection reset' } });
 
-    await expect(loadManuallyTypedIds([{ transaction_id: 'tx-1' }])).rejects.toMatchObject({ message: 'connection reset' });
+    await expect(loadManuallyTypedIds(ctx, [{ transaction_id: 'tx-1' }])).rejects.toMatchObject({ message: 'connection reset' });
   });
 
   it('batches large id lists into multiple queries', async () => {
     selectInResolvesTo([]);
 
     await loadManuallyTypedIds(
+      ctx,
       Array.from({ length: 450 }, (_, i) => ({ transaction_id: `tx-${i}` })),
     );
 

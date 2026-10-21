@@ -6,7 +6,7 @@ import type { MerchantMapping } from '../merchant-mappings.js';
 // it ended up with, and results come from `db`, so tests can assert both what was written and when.
 interface Op {
   table: string;
-  op: 'select' | 'insert' | 'update' | 'delete';
+  op: 'select' | 'insert' | 'update' | 'delete' | 'save_cursor';
   payload?: unknown;
   filters: [string, unknown][];
 }
@@ -108,7 +108,16 @@ const makeBuilder = (table: string) => {
   return builder;
 };
 
-vi.mock('../../db/supabase.js', () => ({ supabase: { from: (table: string) => makeBuilder(table) } }));
+const ctx = { db: { from: (table: string) => makeBuilder(table) }, userId: 'user-1' } as never;
+
+// The cursor goes through the service-role helper; recorded in the same log so its order shows.
+const cursorSave = { fails: false };
+vi.mock('../plaid-secrets.js', () => ({
+  saveCursor: async (userId: string, plaidItemId: string, cursor: string, otherFields: Record<string, unknown> = {}) => {
+    db.ops.push({ table: 'accounts', op: 'save_cursor', payload: { ...otherFields, plaid_cursor: cursor }, filters: [['user_id', userId], ['plaid_item_id', plaidItemId]] });
+    if (cursorSave.fails) throw new Error('cursor save failed');
+  },
+}));
 
 // The helpers below are tested on their own, so here they are stubs with a recorded call.
 const rules = { list: [] as MerchantMapping[], lockedIds: new Set<string>() };
@@ -516,6 +525,7 @@ const emptySync = (overrides: Partial<SyncResult> = {}): SyncResult => ({
 
 const apply = (syncResult: SyncResult, overrides: Partial<Parameters<typeof applySyncResult>[0]> = {}) =>
   applySyncResult({
+    ctx,
     plaidItemId: 'item-1',
     syncResult,
     resolveAccountId: (plaidAccountId: string) => (plaidAccountId === 'plaid-acct' ? 'acct-1' : undefined),
@@ -527,6 +537,26 @@ const opsOf = (table: string, op: Op['op']) => db.ops.filter(o => o.table === ta
 const filterValue = (o: Op, column: string) => o.filters.find(([c]) => c === column)?.[1];
 
 describe('applySyncResult', () => {
+  it("stays inside the item owner's data: every query is filtered by user and every new row is theirs", async () => {
+    db.ops = [];
+    db.existingByPlaidId = new Map([['moved', { id: 'row-1', account_id: 'other-acct' }], ['m1', { id: 'row-2', account_id: 'acct-1' }]]);
+    db.relinkedAccounts = [{ id: 'acct-1', relinked_at: '2026-09-01' }];
+
+    await apply(emptySync({
+      added: [tx(), tx({ transaction_id: 'moved' })],
+      modified: [tx({ transaction_id: 'm1' })],
+      removed: [{ transaction_id: 'gone' }],
+    }), { historicalComplete: true });
+
+    expect(db.ops.length).toBeGreaterThan(5);
+    for (const op of db.ops.filter(o => o.op !== 'insert')) {
+      expect(op.filters[0], `${op.table} ${op.op}`).toEqual(['user_id', 'user-1']);
+    }
+    for (const insert of opsOf('transactions', 'insert')) {
+      expect(insert.payload).toMatchObject({ user_id: 'user-1' });
+    }
+  });
+
   beforeEach(() => {
     db.ops = [];
     db.existingByPlaidId = new Map();
@@ -652,14 +682,14 @@ describe('applySyncResult', () => {
 
       expect(counts).toMatchObject({ added: 0, adopted: 0 });
       // The sync still records success, so the cursor moves on
-      expect(opsOf('accounts', 'update').length).toBeGreaterThan(0);
+      expect(opsOf('accounts', 'save_cursor')).toHaveLength(1);
     });
 
     it('stops adopting once the history is complete', async () => {
       await apply(emptySync(), { historicalComplete: true });
 
-      const historyUpdate = opsOf('accounts', 'update').find(o => (o.payload as Record<string, unknown>).historical_sync_complete);
-      expect(historyUpdate?.payload).toEqual({ historical_sync_complete: true, relinked_at: null });
+      const [write] = opsOf('accounts', 'save_cursor');
+      expect(write.payload).toMatchObject({ historical_sync_complete: true, relinked_at: null });
     });
   });
 
@@ -684,7 +714,7 @@ describe('applySyncResult', () => {
     expect(insert.category_id).toBe('cat-custom');
     expect(insert.merchant_display_name).toBe('My Cafe');
     expect(reconcilePending).toHaveBeenCalledTimes(2);
-    expect(reconcilePending).toHaveBeenCalledWith(insert.id, 12.5, 'p1');
+    expect(reconcilePending).toHaveBeenCalledWith(ctx, insert.id, 12.5, 'p1');
     expect(counts.reconciled).toBe(1);
   });
 
@@ -754,15 +784,26 @@ describe('applySyncResult', () => {
   });
 
   describe('recording a successful sync', () => {
-    const stateWrites = () => opsOf('accounts', 'update');
+    const stateWrites = () => opsOf('accounts', 'save_cursor');
 
-    it('saves the cursor on every account of the item, stamps the sync time and clears the reconnect flag', async () => {
+    it("saves the cursor, the sync time and the cleared reconnect flag in one write, on this user's item only", async () => {
       await apply(emptySync({ nextCursor: 'cursor-9' }));
 
       const [write] = stateWrites();
-      expect(filterValue(write, 'plaid_item_id')).toBe('item-1');
+      expect(stateWrites()).toHaveLength(1);
+      expect(opsOf('accounts', 'update')).toEqual([]);
+      expect(write.filters).toEqual([['user_id', 'user-1'], ['plaid_item_id', 'item-1']]);
       expect(write.payload).toMatchObject({ plaid_cursor: 'cursor-9', needs_reauth: false, reauth_detected_at: null });
       expect(Date.parse((write.payload as { last_synced_at: string }).last_synced_at)).not.toBeNaN();
+    });
+
+    it('fails the sync when the cursor and status cannot be saved', async () => {
+      cursorSave.fails = true;
+      try {
+        await expect(apply(emptySync())).rejects.toThrow('cursor save failed');
+      } finally {
+        cursorSave.fails = false;
+      }
     });
 
     it('clears the last failure, since this sync proved the item works', async () => {
@@ -774,33 +815,32 @@ describe('applySyncResult', () => {
 
     it('marks the history complete only when told, and never writes false', async () => {
       await apply(emptySync());
-      expect(stateWrites()).toHaveLength(1);
       expect(JSON.stringify(stateWrites().map(w => w.payload))).not.toContain('historical_sync_complete');
 
       db.ops = [];
       await apply(emptySync(), { historicalComplete: true });
-      expect(stateWrites().map(w => w.payload)).toContainEqual({ historical_sync_complete: true, relinked_at: null });
+      expect(stateWrites()[0].payload).toMatchObject({ historical_sync_complete: true, relinked_at: null });
     });
 
     it('runs after every transaction is saved, and the card payment pairing after that', async () => {
       await apply(emptySync({ added: [tx()], removed: [{ transaction_id: 'gone' }] }));
 
       const order = db.ops.map(o => `${o.table}:${o.op}`).filter(step => !step.endsWith(':select'));
-      expect(order).toEqual(['transactions:insert', 'transactions:delete', 'accounts:update']);
+      expect(order).toEqual(['transactions:insert', 'transactions:delete', 'accounts:save_cursor']);
       expect(reconcileCardPayments).toHaveBeenCalledTimes(1);
     });
 
     it('passes the pairing look back through, so a first link can scan its whole history', async () => {
       await apply(emptySync(), { reconcileSinceDate: null });
 
-      expect(reconcileCardPayments).toHaveBeenCalledWith({ sinceDate: null });
+      expect(reconcileCardPayments).toHaveBeenCalledWith(ctx, { sinceDate: null });
     });
   });
 
   it('passes no look back by default, so the pairing uses its own short window', async () => {
     await apply(emptySync());
 
-    expect(reconcileCardPayments).toHaveBeenCalledWith({});
+    expect(reconcileCardPayments).toHaveBeenCalledWith(ctx, {});
   });
 
   describe('when a save fails', () => {
@@ -893,7 +933,7 @@ describe('applySyncResult', () => {
 
       expect(counts.added).toBe(1);
       // The sync still succeeds and records its cursor.
-      expect(opsOf('accounts', 'update')).toHaveLength(1);
+      expect(opsOf('accounts', 'save_cursor')).toHaveLength(1);
       // The other sync owns that row, so this one does not reconcile its pending predecessor.
       expect(reconcilePending).toHaveBeenCalledTimes(1);
     });
@@ -936,7 +976,7 @@ describe('applySyncResult', () => {
       const counts = await apply(emptySync({ added: [tx({ transaction_id: 'posted', pending_transaction_id: 'p9' })] }));
 
       expect(opsOf('transactions', 'insert')).toHaveLength(0);
-      expect(reconcilePending).toHaveBeenCalledWith('row-9', 12.5, 'p9');
+      expect(reconcilePending).toHaveBeenCalledWith(ctx, 'row-9', 12.5, 'p9');
       expect(counts.added).toBe(0);
     });
 

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
+import { userContext } from '../db/context.js';
 import * as plaidService from '../services/plaid.js';
 import { applySyncResult } from '../services/sync-transactions.js';
 import { redactError } from '../services/plaid-errors.js';
@@ -289,6 +290,7 @@ router.post('/exchange-token', asyncHandler(async (req, res) => {
       // The same save every sync path uses: the transactions, the cursor and the sync time. A first
       // link imports a long history, so card payments are paired across all of it.
       const counts = await applySyncResult({
+        ctx: userContext(req),
         plaidItemId: itemId,
         syncResult,
         resolveAccountId: plaidAccountId => accountIdMap.get(plaidAccountId),
@@ -306,7 +308,7 @@ router.post('/exchange-token', asyncHandler(async (req, res) => {
     } catch (syncError) {
       console.error('Auto-sync failed (accounts created, but transactions need manual sync):', redactError(syncError));
       // Without this the new accounts would show as never synced, with no reason.
-      await recordSyncFailure(itemId, syncError);
+      await recordSyncFailure(userContext(req), itemId, syncError);
     }
 
     // Return the first created account for backwards compatibility

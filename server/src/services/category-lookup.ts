@@ -1,4 +1,4 @@
-import { supabase } from '../db/supabase.js';
+import type { DbContext } from '../db/context.js';
 import type { TransactionType } from './transaction-type.js';
 
 /** Map of transaction types to their auto-assigned category names. */
@@ -13,14 +13,16 @@ const TYPE_CATEGORY_MAP: Partial<Record<TransactionType, string>> = {
  * Only 'income' and 'investment' types have auto-assigned categories.
  */
 export const getCategoryIdForType = async (
+  { db, userId }: DbContext,
   type: TransactionType,
 ): Promise<string | null> => {
   const categoryName = TYPE_CATEGORY_MAP[type];
   if (!categoryName) return null;
 
-  const { data } = await supabase
+  const { data } = await db
     .from('categories')
     .select('id')
+    .eq('user_id', userId)
     .eq('name', categoryName)
     .single();
 

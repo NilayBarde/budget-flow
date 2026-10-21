@@ -60,7 +60,7 @@ const makeBuilder = (table: string) => {
   return builder;
 };
 
-vi.mock('../../db/supabase.js', () => ({ supabase: { from: (table: string) => makeBuilder(table) } }));
+const ctx = { db: { from: (table: string) => makeBuilder(table) }, userId: 'user-1' } as never;
 
 const { reconcilePendingTransaction } = await import('../pending-reconciliation.js');
 
@@ -92,29 +92,44 @@ describe('reconcilePendingTransaction', () => {
   it('copies the splits onto the posted row, scaled to its total, then removes the pending row', async () => {
     db.pending = splitPending;
 
-    expect(await reconcilePendingTransaction('posted-row', 50, 'plaid-pending')).toBe(true);
+    expect(await reconcilePendingTransaction(ctx, 'posted-row', 50, 'plaid-pending')).toBe(true);
 
     const [insert] = opsOf('transaction_splits', 'insert');
     const rows = insert.payload as { parent_transaction_id: string; amount: number }[];
     expect(rows.map(r => r.parent_transaction_id)).toEqual(['posted-row', 'posted-row']);
     expect(rows.reduce((total, r) => total + r.amount, 0)).toBeCloseTo(50, 2);
-    expect(opsOf('transactions', 'delete').map(o => o.filters)).toEqual([[['id', 'pending-row']]]);
+    expect(opsOf('transactions', 'delete').map(o => o.filters)).toEqual([[['user_id', 'user-1'], ['id', 'pending-row']]]);
+  });
+
+  it("stays inside the user's data: every query is filtered and every copied row is theirs", async () => {
+    db.pending = splitPending;
+
+    await reconcilePendingTransaction(ctx, 'posted-row', 50, 'plaid-pending');
+
+    for (const op of db.ops.filter(o => o.op !== 'insert' && o.op !== 'upsert')) {
+      expect(op.filters[0]).toEqual(['user_id', 'user-1']);
+    }
+    const splits = opsOf('transaction_splits', 'insert')[0].payload as { user_id: string }[];
+    expect(splits.map(s => s.user_id)).toEqual(['user-1', 'user-1']);
+    expect(opsOf('transaction_tags', 'upsert')[0].payload).toEqual([
+      { user_id: 'user-1', transaction_id: 'posted-row', tag_id: 'tag-1' },
+    ]);
   });
 
   it('carries a "do not split" decision onto the posted row, so a dismissed charge does not come back when it posts', async () => {
     db.pending = { ...splitPending, is_split: false, splits: null, category_id: null, split_dismissed: true };
 
-    await reconcilePendingTransaction('posted-row', 50, 'plaid-pending');
+    await reconcilePendingTransaction(ctx, 'posted-row', 50, 'plaid-pending');
 
     const [carry] = opsOf('transactions', 'update');
     expect(carry.payload).toEqual({ split_dismissed: true });
-    expect(carry.filters).toEqual([['id', 'posted-row']]);
+    expect(carry.filters).toEqual([['user_id', 'user-1'], ['id', 'posted-row']]);
   });
 
   it('does not write a dismissal when the pending row had none', async () => {
     db.pending = { ...splitPending, is_split: false, splits: null, category_id: null, split_dismissed: false };
 
-    await reconcilePendingTransaction('posted-row', 50, 'plaid-pending');
+    await reconcilePendingTransaction(ctx, 'posted-row', 50, 'plaid-pending');
 
     expect(opsOf('transactions', 'update')).toHaveLength(0);
   });
@@ -125,7 +140,7 @@ describe('reconcilePendingTransaction', () => {
     db.pending = splitPending;
     db.splitCountByParent = { 'posted-row': 2 };
 
-    expect(await reconcilePendingTransaction('posted-row', 50, 'plaid-pending')).toBe(true);
+    expect(await reconcilePendingTransaction(ctx, 'posted-row', 50, 'plaid-pending')).toBe(true);
 
     expect(opsOf('transaction_splits', 'insert')).toHaveLength(0);
     expect(opsOf('transactions', 'delete')).toHaveLength(1);
@@ -135,21 +150,21 @@ describe('reconcilePendingTransaction', () => {
     db.pending = splitPending;
     db.splitCountByParent = { 'some-other-row': 5 };
 
-    await reconcilePendingTransaction('posted-row', 50, 'plaid-pending');
+    await reconcilePendingTransaction(ctx, 'posted-row', 50, 'plaid-pending');
 
     expect(opsOf('transaction_splits', 'insert')).toHaveLength(1);
   });
 
   describe('when a write fails, the pending row is kept so its edits are not lost', () => {
     const expectKeptAndThrown = async () => {
-      await expect(reconcilePendingTransaction('posted-row', 50, 'plaid-pending')).rejects.toBeTruthy();
+      await expect(reconcilePendingTransaction(ctx, 'posted-row', 50, 'plaid-pending')).rejects.toBeTruthy();
       expect(opsOf('transactions', 'delete')).toHaveLength(0);
     };
 
     it('when the pending row cannot be looked up, which must not read as "no pending row"', async () => {
       db.pending = splitPending;
       db.fail.add('lookup');
-      await expect(reconcilePendingTransaction('posted-row', 50, 'plaid-pending')).rejects.toBeTruthy();
+      await expect(reconcilePendingTransaction(ctx, 'posted-row', 50, 'plaid-pending')).rejects.toBeTruthy();
       expect(db.ops.filter(o => o.op !== 'select')).toEqual([]);
     });
 
@@ -196,19 +211,19 @@ describe('reconcilePendingTransaction', () => {
     db.pending = splitPending;
     db.fail.add('delete');
 
-    await expect(reconcilePendingTransaction('posted-row', 50, 'plaid-pending')).rejects.toBeTruthy();
+    await expect(reconcilePendingTransaction(ctx, 'posted-row', 50, 'plaid-pending')).rejects.toBeTruthy();
   });
 
   it('does nothing once the pending row is gone, so running it again is harmless', async () => {
     db.pending = null;
 
-    expect(await reconcilePendingTransaction('posted-row', 50, 'plaid-pending')).toBe(false);
+    expect(await reconcilePendingTransaction(ctx, 'posted-row', 50, 'plaid-pending')).toBe(false);
 
     expect(db.ops.filter(o => o.op !== 'select')).toEqual([]);
   });
 
   it('does nothing when the posted transaction has no pending predecessor', async () => {
-    expect(await reconcilePendingTransaction('posted-row', 50, null)).toBe(false);
+    expect(await reconcilePendingTransaction(ctx, 'posted-row', 50, null)).toBe(false);
     expect(db.ops).toEqual([]);
   });
 });

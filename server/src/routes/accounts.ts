@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { supabase } from '../db/supabase.js';
+import { userContext } from '../db/context.js';
 import * as plaidService from '../services/plaid.js';
 import { buildAccountResolver } from '../services/sync-attribution.js';
 import { applySyncResult } from '../services/sync-transactions.js';
@@ -61,7 +62,7 @@ router.get('/', asyncHandler(async (req, res) => {
 // a failed lookup leaves it out rather than failing the accounts list.
 const findIdleAccounts = async (accounts: IdleCheckAccount[]) => {
   try {
-    const plaidAccounts = accounts.filter(a => !isManualToken(a.plaid_access_token));
+    const plaidAccounts = accounts.filter(a => !a.is_manual);
     const withDates = await Promise.all(plaidAccounts.map(async account => {
       const { data: newest, error } = await supabase
         .from('transactions')
@@ -210,7 +211,7 @@ router.post('/:id/sync', async (req, res) => {
       );
     } catch (syncError) {
       console.error(`Transaction sync failed for account ${id}:`, redactError(syncError));
-      await recordSyncFailure(account.plaid_item_id, syncError);
+      await recordSyncFailure(userContext(req), account.plaid_item_id, syncError);
       // If balance was updated, we can still return success for the balance part
       if (latestBalance !== account.current_balance) {
         await supabase.from('accounts').update({ current_balance: latestBalance }).eq('id', id);
@@ -242,6 +243,7 @@ router.post('/:id/sync', async (req, res) => {
 
     const historicalComplete = syncResult.transactionsUpdateStatus === 'HISTORICAL_UPDATE_COMPLETE';
     const counts = await applySyncResult({
+      ctx: userContext(req),
       plaidItemId: account.plaid_item_id,
       syncResult,
       resolveAccountId: buildAccountResolver(itemAccounts || [], id),
@@ -277,7 +279,7 @@ router.post('/:id/sync', async (req, res) => {
         .select('plaid_item_id')
         .eq('id', req.params.id)
         .single();
-      await recordSyncFailure(failedAccount?.plaid_item_id, error);
+      await recordSyncFailure(userContext(req), failedAccount?.plaid_item_id, error);
     } catch (recordError) {
       console.error('Could not record the sync failure:', redactError(recordError));
     }

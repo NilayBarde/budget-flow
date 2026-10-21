@@ -1,4 +1,4 @@
-import { supabase } from '../db/supabase.js';
+import type { DbContext } from '../db/context.js';
 import { fetchAllRows } from '../utils/paginate.js';
 import { getMyShareAmount } from './category-spend.js';
 import {
@@ -139,10 +139,10 @@ export const buildYearlyStats = (year: number, transactions: YearlyRow[]): Yearl
  * from one request, so it is read page by page; reading it in one request silently dropped the later
  * rows and made income and spending wrong.
  */
-export const loadYearlyStats = async (year: number): Promise<YearlyStats> => {
+export const loadYearlyStats = async ({ db, userId }: DbContext, year: number): Promise<YearlyStats> => {
   const transactions = await fetchAllRows<YearlyRow>(
     (from, to) =>
-      supabase
+      db
         .from('transactions')
         .select(`
           id,
@@ -155,6 +155,7 @@ export const loadYearlyStats = async (year: number): Promise<YearlyStats> => {
           category:categories(id, name, color, icon),
           splits:transaction_splits(amount, is_my_share)
         `)
+        .eq('user_id', userId)
         .gte('date', `${year}-01-01`)
         .lte('date', `${year}-12-31`)
         // A stable order is what makes paging safe: without it rows can be skipped or repeated.

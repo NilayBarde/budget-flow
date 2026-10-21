@@ -9,10 +9,11 @@
  * Dry run by default, writes nothing. Pass --apply to save the changes.
  *
  * Usage (from server/):
- *   npx tsx --env-file=.env src/scripts/fill-blank-categories.ts            # preview
- *   npx tsx --env-file=.env src/scripts/fill-blank-categories.ts --apply    # save
+ *   npx tsx --env-file=.env src/scripts/fill-blank-categories.ts --user-email you@example.com            # preview
+ *   npx tsx --env-file=.env src/scripts/fill-blank-categories.ts --user-email you@example.com --apply    # save
  */
-import { supabase } from '../db/supabase.js';
+import type { DbContext } from '../db/context.js';
+import { scriptContext } from './script-user.js';
 import { fetchAllRows } from '../utils/paginate.js';
 import { planCategoryBackfill, type BackfillRow } from '../services/category-backfill.js';
 
@@ -20,12 +21,13 @@ const APPLY = process.argv.includes('--apply');
 // 50 ids keep the request URL well under the limit gateways in front of PostgREST enforce (200 ids is about 7.5 KB).
 const UPDATE_CHUNK_SIZE = 50;
 
-const loadRows = () =>
+const loadRows = ({ db, userId }: DbContext) =>
   fetchAllRows<BackfillRow & { merchant_display_name: string | null }>(
     (from, to) =>
-      supabase
+      db
         .from('transactions')
         .select('id, merchant_name, merchant_display_name, transaction_type, category_id, plaid_category, original_description')
+        .eq('user_id', userId)
         .order('date')
         .order('id')
         .range(from, to) as never,
@@ -33,18 +35,23 @@ const loadRows = () =>
   );
 
 const main = async () => {
-  const { data: categories, error: categoryError } = await supabase.from('categories').select('id, name');
+  const ctx = await scriptContext();
+  const { db, userId } = ctx;
+  const { data: categories, error: categoryError } = await db.from('categories').select('id, name').eq('user_id', userId);
   if (categoryError) throw categoryError;
   const categoryIdByName = new Map((categories ?? []).map(c => [c.name, c.id]));
   const categoryNameById = new Map((categories ?? []).map(c => [c.id, c.name]));
 
-  const { data: mappings, error: mappingError } = await supabase.from('merchant_mappings').select('original_name, default_category_id');
+  const { data: mappings, error: mappingError } = await db
+    .from('merchant_mappings')
+    .select('original_name, default_category_id')
+    .eq('user_id', userId);
   if (mappingError) throw mappingError;
   const ruleCategoryByMerchant = new Map(
     (mappings ?? []).filter(m => m.default_category_id).map(m => [m.original_name.trim().toLowerCase(), m.default_category_id as string]),
   );
 
-  const rows = await loadRows();
+  const rows = await loadRows(ctx);
   const plan = planCategoryBackfill({ rows, ruleCategoryByMerchant, categoryIdByName });
 
   const blank = rows.filter(r => (r.transaction_type === 'expense' || r.transaction_type === 'return') && !r.category_id);
@@ -84,9 +91,10 @@ const main = async () => {
   for (const [categoryId, ids] of idsByCategory) {
     for (let i = 0; i < ids.length; i += UPDATE_CHUNK_SIZE) {
       const chunk = ids.slice(i, i + UPDATE_CHUNK_SIZE);
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('transactions')
         .update({ category_id: categoryId, needs_review: false })
+        .eq('user_id', userId)
         .in('id', chunk)
         .is('category_id', null)
         .select('id');

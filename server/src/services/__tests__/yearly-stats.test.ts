@@ -14,14 +14,20 @@ interface Row {
 
 // A fake table that behaves like PostgREST: it returns at most 1000 rows, and only a different slice
 // when .range(from, to) is used. This is the behavior that made the yearly totals wrong.
-const db = { rows: [] as Row[], rangeCalls: [] as [number, number][], ordered: [] as string[] };
+const db = { rows: [] as Row[], rangeCalls: [] as [number, number][], ordered: [] as string[], filters: [] as [string, unknown][] };
 
-vi.mock('../../db/supabase.js', () => ({
-  supabase: {
+// Handed to the service through its context
+const ctx = {
+  userId: 'user-1',
+  db: {
     from: () => {
       let range: [number, number] | null = null;
       const builder: Record<string, unknown> = {
         select: () => builder,
+        eq: (column: string, value: unknown) => {
+          db.filters.push([column, value]);
+          return builder;
+        },
         gte: () => builder,
         lte: () => builder,
         order: (column: string) => {
@@ -41,7 +47,7 @@ vi.mock('../../db/supabase.js', () => ({
       return builder;
     },
   },
-}));
+} as never;
 
 const { buildYearlyStats, loadYearlyStats } = await import('../yearly-stats.js');
 
@@ -173,7 +179,7 @@ describe('loadYearlyStats', () => {
     db.rangeCalls = [];
     db.ordered = [];
 
-    const stats = await loadYearlyStats(2026);
+    const stats = await loadYearlyStats(ctx, 2026);
 
     expect(stats.monthly_totals[4].income).toBe(400);
     expect(stats.monthly_totals[0].spent).toBe(1500);
@@ -186,7 +192,7 @@ describe('loadYearlyStats', () => {
     // The paycheck is the last row of page one and, after a row was inserted mid read, the first of page two.
     db.rows = [...filler, paycheck, paycheck, income(2, '2026-05-13')];
 
-    const stats = await loadYearlyStats(2026);
+    const stats = await loadYearlyStats(ctx, 2026);
 
     expect(stats.monthly_totals[4].income).toBe(200);
   });
@@ -195,8 +201,17 @@ describe('loadYearlyStats', () => {
     db.rows = Array.from({ length: 1200 }, () => row({}));
     db.ordered = [];
 
-    await loadYearlyStats(2026);
+    await loadYearlyStats(ctx, 2026);
 
     expect(db.ordered.slice(0, 2)).toEqual(['date', 'id']);
+  });
+
+  it("reads only the user's own transactions", async () => {
+    db.rows = [row({})];
+    db.filters = [];
+
+    await loadYearlyStats(ctx, 2026);
+
+    expect(db.filters).toEqual([['user_id', 'user-1']]);
   });
 });

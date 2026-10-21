@@ -1,4 +1,4 @@
-import { supabase } from '../db/supabase.js';
+import type { DbContext } from '../db/context.js';
 import { findCardPaymentCounterparts, type PairingRow } from './card-payment-pairing.js';
 import type { PlaidPFC } from './categorizer.js';
 import { loadMerchantMappings } from './merchant-mappings.js';
@@ -49,15 +49,17 @@ const toPaired = (t: TransactionRow): PairedTransaction => ({
 });
 
 const loadTransactions = async (
+  { db, userId }: DbContext,
   sinceDate: string | null,
   transactionType?: TransactionType,
 ): Promise<TransactionRow[]> => {
   // Keyed by id so a row returned twice across pages is only counted once.
   const rows = new Map<string, TransactionRow>();
   for (let from = 0; ; from += PAGE_SIZE) {
-    let query = supabase
+    let query = db
       .from('transactions')
       .select('id, account_id, amount, date, merchant_name, original_description, transaction_type, type_manually_set, plaid_category')
+      .eq('user_id', userId)
       // id breaks date ties so pages never skip or repeat a row
       .order('date', { ascending: false })
       .order('id')
@@ -78,11 +80,16 @@ const loadTransactions = async (
  * typed in the meantime is never overwritten. `onlyIfCurrently` limits the write to rows that
  * still have that type; without it, rows that became a transfer or an investment are skipped.
  */
-const retypeAsTransfers = async (ids: string[], onlyIfCurrently?: TransactionType): Promise<void> => {
+const retypeAsTransfers = async (
+  { db, userId }: DbContext,
+  ids: string[],
+  onlyIfCurrently?: TransactionType,
+): Promise<void> => {
   for (let i = 0; i < ids.length; i += UPDATE_CHUNK_SIZE) {
-    const guarded = supabase
+    const guarded = db
       .from('transactions')
       .update({ transaction_type: 'transfer', category_id: null, needs_review: false })
+      .eq('user_id', userId)
       .in('id', ids.slice(i, i + UPDATE_CHUNK_SIZE))
       .or('type_manually_set.is.null,type_manually_set.eq.false');
     const { error } = await (onlyIfCurrently
@@ -96,17 +103,21 @@ const retypeAsTransfers = async (ids: string[], onlyIfCurrently?: TransactionTyp
  * Type both legs of every credit card payment as a transfer. See card-payment-pairing for the
  * matching rules. Returns the rows that were (or, when apply is false, would be) retyped.
  */
-export const reconcileCardPayments = async ({
-  sinceDate = new Date(Date.now() - DEFAULT_LOOKBACK_DAYS * DAY_MS).toISOString().slice(0, 10),
-  apply = true,
-}: ReconcileOptions = {}): Promise<PairedTransaction[]> => {
-  const { data: accounts, error: accountsError } = await supabase
+export const reconcileCardPayments = async (
+  ctx: DbContext,
+  {
+    sinceDate = new Date(Date.now() - DEFAULT_LOOKBACK_DAYS * DAY_MS).toISOString().slice(0, 10),
+    apply = true,
+  }: ReconcileOptions = {},
+): Promise<PairedTransaction[]> => {
+  const { data: accounts, error: accountsError } = await ctx.db
     .from('accounts')
-    .select('id, account_type, institution_name, account_name');
+    .select('id, account_type, institution_name, account_name')
+    .eq('user_id', ctx.userId);
   if (accountsError) throw accountsError;
   const accountsById = new Map((accounts ?? []).map(a => [a.id, a]));
 
-  const [transactions, mappings] = await Promise.all([loadTransactions(sinceDate), loadMerchantMappings()]);
+  const [transactions, mappings] = await Promise.all([loadTransactions(ctx, sinceDate), loadMerchantMappings(ctx)]);
   const pairingRows: PairingRow[] = transactions.map(t => {
     const account = accountsById.get(t.account_id);
     return {
@@ -130,7 +141,7 @@ export const reconcileCardPayments = async ({
   const idsToRetype = new Set(findCardPaymentCounterparts(pairingRows));
   const changed = transactions.filter(t => idsToRetype.has(t.id));
 
-  if (apply) await retypeAsTransfers([...idsToRetype]);
+  if (apply) await retypeAsTransfers(ctx, [...idsToRetype]);
 
   return changed.map(toPaired);
 };
@@ -142,10 +153,11 @@ export const reconcileCardPayments = async ({
  * and only when the raw bank text now reads as a transfer; real contributions
  * ("Robinhood - Debits") still detect as investments and are left alone.
  */
-export const retypeInvestmentsReadingAsCardBills = async ({
-  apply = true,
-}: Pick<ReconcileOptions, 'apply'> = {}): Promise<PairedTransaction[]> => {
-  const [investments, mappings] = await Promise.all([loadTransactions(null, 'investment'), loadMerchantMappings()]);
+export const retypeInvestmentsReadingAsCardBills = async (
+  ctx: DbContext,
+  { apply = true }: Pick<ReconcileOptions, 'apply'> = {},
+): Promise<PairedTransaction[]> => {
+  const [investments, mappings] = await Promise.all([loadTransactions(ctx, null, 'investment'), loadMerchantMappings(ctx)]);
   const cardBills = investments.filter(
     t =>
       !t.type_manually_set &&
@@ -155,7 +167,7 @@ export const retypeInvestmentsReadingAsCardBills = async ({
         'transfer',
   );
 
-  if (apply) await retypeAsTransfers(cardBills.map(t => t.id), 'investment');
+  if (apply) await retypeAsTransfers(ctx, cardBills.map(t => t.id), 'investment');
 
   return cardBills.map(toPaired);
 };
@@ -165,9 +177,12 @@ export const retypeInvestmentsReadingAsCardBills = async ({
  * pass, so a failure here must never fail the sync that triggered it. Pass sinceDate: null after
  * a first link, which imports a long history.
  */
-export const reconcileCardPaymentsAfterSync = async (options: Pick<ReconcileOptions, 'sinceDate'> = {}): Promise<void> => {
+export const reconcileCardPaymentsAfterSync = async (
+  ctx: DbContext,
+  options: Pick<ReconcileOptions, 'sinceDate'> = {},
+): Promise<void> => {
   try {
-    const changed = await reconcileCardPayments(options);
+    const changed = await reconcileCardPayments(ctx, options);
     if (changed.length > 0) console.log(`Paired ${changed.length} credit card payment row(s) as transfers`);
   } catch (error) {
     console.error('Card payment reconciliation failed:', error instanceof Error ? error.message : error);
