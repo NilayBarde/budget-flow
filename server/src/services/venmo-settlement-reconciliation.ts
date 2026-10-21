@@ -1,4 +1,5 @@
 import { supabase } from '../db/supabase.js';
+import { fetchAllRows } from '../utils/paginate.js';
 import { detectTransactionType, isVenmoAccount } from './transaction-type.js';
 import type { PlaidPFC } from './categorizer.js';
 import {
@@ -30,6 +31,22 @@ export interface VenmoSettlementResult {
 const AMOUNT_TOLERANCE = 0.01;
 const DEFAULT_LOOKBACK_DAYS = 90;
 const DAY_MS = 24 * 60 * 60 * 1000;
+// Keeps the generated `.in(...)` query URL bounded, same as merchant-mappings' ID_BATCH_SIZE.
+const ID_BATCH_SIZE = 200;
+
+/** Runs `query` over `ids` in batches and concatenates the rows. */
+const selectInBatches = async <T>(
+  ids: string[],
+  query: (batch: string[]) => PromiseLike<{ data: unknown; error: unknown }>,
+): Promise<T[]> => {
+  const rows: T[] = [];
+  for (let i = 0; i < ids.length; i += ID_BATCH_SIZE) {
+    const { data, error } = await query(ids.slice(i, i + ID_BATCH_SIZE));
+    if (error) throw error;
+    rows.push(...((data ?? []) as T[]));
+  }
+  return rows;
+};
 
 interface SplitRow {
   id: string;
@@ -48,30 +65,30 @@ interface TransactionDateRow {
  * transaction_splits — nothing here writes to a split, ever.
  */
 export const loadUnsettledSplits = async (): Promise<UnsettledSplit[]> => {
-  const { data: splitRows, error: splitsError } = await supabase
-    .from('transaction_splits')
-    .select('id, parent_transaction_id, amount, is_my_share')
-    .eq('is_my_share', false);
-  if (splitsError) throw splitsError;
-  const splits = (splitRows ?? []) as SplitRow[];
+  const splits = await fetchAllRows<SplitRow>(
+    (from, to) =>
+      supabase
+        .from('transaction_splits')
+        .select('id, parent_transaction_id, amount, is_my_share')
+        .eq('is_my_share', false)
+        .order('id')
+        .range(from, to),
+    { keyOf: (s) => s.id },
+  );
   if (splits.length === 0) return [];
 
   const parentIds = [...new Set(splits.map((s) => s.parent_transaction_id))];
-  const { data: parentRows, error: parentsError } = await supabase
-    .from('transactions')
-    .select('id, date')
-    .in('id', parentIds);
-  if (parentsError) throw parentsError;
-  const datesByTransactionId = new Map(((parentRows ?? []) as TransactionDateRow[]).map((t) => [t.id, t.date]));
+  const parentRows = await selectInBatches<TransactionDateRow>(parentIds, (ids) =>
+    supabase.from('transactions').select('id, date').in('id', ids),
+  );
+  const datesByTransactionId = new Map(parentRows.map((t) => [t.id, t.date]));
 
   const splitIds = splits.map((s) => s.id);
-  const { data: settlementRows, error: settlementsError } = await supabase
-    .from('transaction_split_settlements')
-    .select('split_id, amount')
-    .in('split_id', splitIds);
-  if (settlementsError) throw settlementsError;
+  const settlementRows = await selectInBatches<{ split_id: string; amount: number }>(splitIds, (ids) =>
+    supabase.from('transaction_split_settlements').select('split_id, amount').in('split_id', ids),
+  );
   const settledBySplitId = new Map<string, number>();
-  for (const row of (settlementRows ?? []) as { split_id: string; amount: number }[]) {
+  for (const row of settlementRows) {
     settledBySplitId.set(row.split_id, (settledBySplitId.get(row.split_id) ?? 0) + row.amount);
   }
 
@@ -102,14 +119,24 @@ const loadUnmatchedVenmoTransactions = async (sinceDate: string | null): Promise
     .map((a) => a.id);
   if (venmoAccountIds.length === 0) return [];
 
-  const { data, error } = await supabase
-    .from('transactions')
-    .select('id, amount, date, type_manually_set')
-    .in('account_id', venmoAccountIds)
-    .eq('is_venmo_settlement', false);
-  if (error) throw error;
-  const rows = (data ?? []) as VenmoCandidateRow[];
-  return sinceDate ? rows.filter((t) => t.date >= sinceDate) : rows;
+  // The date filter runs in the database, before Supabase's 1000-row page cap applies, and every
+  // page is read: filtering after the fact would silently miss rows cut off by the cap.
+  return fetchAllRows<VenmoCandidateRow>(
+    (from, to) => {
+      let query = supabase
+        .from('transactions')
+        .select('id, amount, date, type_manually_set')
+        .in('account_id', venmoAccountIds)
+        .eq('is_venmo_settlement', false)
+        // id breaks date ties so pages never skip or repeat a row
+        .order('date', { ascending: false })
+        .order('id')
+        .range(from, to);
+      if (sinceDate) query = query.gte('date', sinceDate);
+      return query;
+    },
+    { keyOf: (t) => t.id },
+  );
 };
 
 /**
