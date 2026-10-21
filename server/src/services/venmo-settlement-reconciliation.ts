@@ -49,6 +49,60 @@ const selectInBatches = async <T>(
   return rows;
 };
 
+/** The Venmo transaction does not exist. The route maps this to 404. */
+export class VenmoTransactionNotFoundError extends Error {
+  constructor() {
+    super('Venmo transaction not found');
+    this.name = 'VenmoTransactionNotFoundError';
+  }
+}
+
+/** A link or unlink request that cannot be applied as asked. The route maps this to 400. */
+export class VenmoSettlementValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'VenmoSettlementValidationError';
+  }
+}
+
+interface VenmoTransactionRow {
+  id: string;
+  amount: number;
+  is_venmo_settlement: boolean | null;
+  merchant_name: string | null;
+  original_description: string | null;
+  plaid_category: PlaidPFC | null;
+}
+
+const VENMO_TRANSACTION_COLUMNS = 'id, amount, is_venmo_settlement, merchant_name, original_description, plaid_category';
+
+const loadVenmoTransaction = async (venmoTransactionId: string): Promise<VenmoTransactionRow> => {
+  const { data, error } = await supabase.from('transactions').select(VENMO_TRANSACTION_COLUMNS).eq('id', venmoTransactionId);
+  if (error) throw error;
+  const txn = (data as VenmoTransactionRow[] | null)?.[0];
+  if (!txn) throw new VenmoTransactionNotFoundError();
+  return txn;
+};
+
+/**
+ * Undo a settlement's type flip: re-detect the type as if the match never happened and clear the
+ * flag. The match cleared the category and what it was before is not recorded, so the row is
+ * flagged for review instead of silently staying uncategorized. Shared by unlink and the orphan
+ * heal pass so both reset a payment the same way.
+ */
+const revertSettlementType = async (txn: VenmoTransactionRow): Promise<void> => {
+  const revertedType = detectTransactionType(
+    txn.amount,
+    [txn.merchant_name ?? '', txn.original_description ?? ''],
+    txn.plaid_category,
+  );
+  const { error } = await supabase
+    .from('transactions')
+    .update({ transaction_type: revertedType, is_venmo_settlement: false, needs_review: true })
+    .eq('id', txn.id);
+  if (error) throw error;
+};
+
 interface SplitRow {
   id: string;
   parent_transaction_id: string;
@@ -154,6 +208,35 @@ const loadUnmatchedVenmoTransactions = async (sinceDate: string | null): Promise
 };
 
 /**
+ * A Venmo transaction flagged as a settlement whose settlement rows are all gone. That happens when
+ * the split it settled is deleted ("Remove All Splits", or pending reconciliation recreating a
+ * pending row's splits under new ids) — the rows cascade away with the split. Left alone, the
+ * payment would stay a transfer settling nothing, and since candidates exclude flagged rows it
+ * could never be matched again. Each orphan is reset exactly as an unlink would reset it.
+ */
+const healOrphanedSettlements = async (): Promise<void> => {
+  const flagged = await fetchAllRows<VenmoTransactionRow>(
+    (from, to) =>
+      supabase
+        .from('transactions')
+        .select(VENMO_TRANSACTION_COLUMNS)
+        .eq('is_venmo_settlement', true)
+        .order('id')
+        .range(from, to),
+    { keyOf: (t) => t.id },
+  );
+  if (flagged.length === 0) return;
+
+  const linkedRows = await selectInBatches<{ venmo_transaction_id: string }>(
+    flagged.map((t) => t.id),
+    (ids) => supabase.from('transaction_split_settlements').select('venmo_transaction_id').in('venmo_transaction_id', ids),
+  );
+  const linkedIds = new Set(linkedRows.map((r) => r.venmo_transaction_id));
+  const orphans = flagged.filter((t) => !linkedIds.has(t.id));
+  for (const orphan of orphans) await revertSettlementType(orphan);
+};
+
+/**
  * Match unmatched Venmo transactions to unsettled splits and, when apply is true, write the
  * settlement links and retype the matched Venmo transactions as transfers. Never writes to
  * transaction_splits. Safe to re-run: already-settled splits and already-flagged Venmo
@@ -163,6 +246,10 @@ export const reconcileVenmoSettlements = async ({
   sinceDate = daysAgo(DEFAULT_LOOKBACK_DAYS),
   apply = true,
 }: ReconcileVenmoOptions = {}): Promise<VenmoSettlementResult[]> => {
+  // Reset orphans before loading candidates, so a healed payment can be rematched in this pass.
+  // Healing writes, so a dry run skips it.
+  if (apply) await healOrphanedSettlements();
+
   // A Venmo payment can settle a split up to the matcher's window before it, so reach that much
   // further back for splits than for Venmo transactions.
   const splitsSinceDate = sinceDate
@@ -227,59 +314,6 @@ export const reconcileVenmoSettlementsAfterSync = async (options: { sinceDate?: 
   } catch (error) {
     console.error('Venmo settlement reconciliation failed:', error instanceof Error ? error.message : error);
   }
-};
-
-/** The Venmo transaction does not exist. The route maps this to 404. */
-export class VenmoTransactionNotFoundError extends Error {
-  constructor() {
-    super('Venmo transaction not found');
-    this.name = 'VenmoTransactionNotFoundError';
-  }
-}
-
-/** A link or unlink request that cannot be applied as asked. The route maps this to 400. */
-export class VenmoSettlementValidationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'VenmoSettlementValidationError';
-  }
-}
-
-interface VenmoTransactionRow {
-  id: string;
-  amount: number;
-  is_venmo_settlement: boolean | null;
-  merchant_name: string | null;
-  original_description: string | null;
-  plaid_category: PlaidPFC | null;
-}
-
-const VENMO_TRANSACTION_COLUMNS = 'id, amount, is_venmo_settlement, merchant_name, original_description, plaid_category';
-
-const loadVenmoTransaction = async (venmoTransactionId: string): Promise<VenmoTransactionRow> => {
-  const { data, error } = await supabase.from('transactions').select(VENMO_TRANSACTION_COLUMNS).eq('id', venmoTransactionId);
-  if (error) throw error;
-  const txn = (data as VenmoTransactionRow[] | null)?.[0];
-  if (!txn) throw new VenmoTransactionNotFoundError();
-  return txn;
-};
-
-/**
- * Undo a settlement's type flip: re-detect the type as if the match never happened and clear the
- * flag. The match cleared the category and what it was before is not recorded, so the row is
- * flagged for review instead of silently staying uncategorized.
- */
-const revertSettlementType = async (txn: VenmoTransactionRow): Promise<void> => {
-  const revertedType = detectTransactionType(
-    txn.amount,
-    [txn.merchant_name ?? '', txn.original_description ?? ''],
-    txn.plaid_category,
-  );
-  const { error } = await supabase
-    .from('transactions')
-    .update({ transaction_type: revertedType, is_venmo_settlement: false, needs_review: true })
-    .eq('id', txn.id);
-  if (error) throw error;
 };
 
 /**

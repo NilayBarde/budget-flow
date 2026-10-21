@@ -234,6 +234,77 @@ describe('venmo-settlement-reconciliation', () => {
     expect(results).toEqual([{ venmoTransactionId: 'venmo-deposit', splitIds: ['split-theirs'], totalAmount: 25 }]);
   });
 
+  describe('healing a settlement whose split links were removed', () => {
+    // The deposit was matched (flagged, typed transfer) but its settlement rows cascaded away when
+    // the split was deleted or recreated under a new id.
+    const orphanTheDeposit = () => {
+      Object.assign(state.transactions.find((t) => t.id === 'venmo-deposit')!, {
+        is_venmo_settlement: true,
+        transaction_type: 'transfer',
+        category_id: null,
+        needs_review: false,
+        merchant_name: 'Venmo',
+        original_description: null,
+        plaid_category: null,
+      });
+    };
+
+    it('resets an orphaned payment and rematches it in the same pass', async () => {
+      seedBasicScenario();
+      orphanTheDeposit();
+      // The split was recreated (pending reconciliation copies splits under new ids).
+      state.splits = state.splits.map((s) => (s.id === 'split-theirs' ? { ...s, id: 'split-theirs-new' } : s));
+
+      const results = await reconcileVenmoSettlements({ apply: true });
+
+      expect(results).toEqual([{ venmoTransactionId: 'venmo-deposit', splitIds: ['split-theirs-new'], totalAmount: 25 }]);
+      expect(state.settlements).toEqual([
+        expect.objectContaining({ split_id: 'split-theirs-new', venmo_transaction_id: 'venmo-deposit', amount: 25 }),
+      ]);
+      expect(state.transactions.find((t) => t.id === 'venmo-deposit')).toMatchObject({
+        transaction_type: 'transfer',
+        is_venmo_settlement: true,
+      });
+    });
+
+    it('leaves an orphan with nothing left to match as a normal, rematchable payment', async () => {
+      seedBasicScenario();
+      orphanTheDeposit();
+      // "Remove All Splits": the split is gone for good.
+      state.splits = [];
+
+      const results = await reconcileVenmoSettlements({ apply: true });
+
+      expect(results).toEqual([]);
+      expect(state.transactions.find((t) => t.id === 'venmo-deposit')).toMatchObject({
+        transaction_type: 'return',
+        is_venmo_settlement: false,
+        needs_review: true,
+      });
+    });
+
+    it('does not touch a settlement that still has its rows', async () => {
+      seedBasicScenario();
+      orphanTheDeposit();
+      state.settlements = [{ id: 's1', split_id: 'split-theirs', venmo_transaction_id: 'venmo-deposit', amount: 25 }];
+
+      await reconcileVenmoSettlements({ apply: true });
+
+      expect(state.updates).toEqual([]);
+      expect(state.transactions.find((t) => t.id === 'venmo-deposit')).toMatchObject({ is_venmo_settlement: true });
+    });
+
+    it('writes nothing on a dry run', async () => {
+      seedBasicScenario();
+      orphanTheDeposit();
+      state.splits = [];
+
+      await reconcileVenmoSettlements({ apply: false });
+
+      expect(state.updates).toEqual([]);
+    });
+  });
+
   describe('reading candidates past the 1000-row page cap', () => {
     it('filters Venmo transactions by date in the query itself', async () => {
       seedBasicScenario();
