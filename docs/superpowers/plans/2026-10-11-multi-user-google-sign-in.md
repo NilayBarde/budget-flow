@@ -970,3 +970,25 @@ Before each: `git fetch origin && git merge origin/main` into `feature/multi-use
 | 5 | Routes part 2 — the other nine — same treatment; delete the deprecated `supabase` export; scripts take `--user-email` (§3) | PR 2, PR 3 | compile-time guarantee no route uses the admin client |
 | 6 | Client: `services/supabase.ts`, `AuthProvider`/`AuthContext`, `RequireAuth` (Layout and `/oauth-callback`), `/login`, bearer header + `fetchForm` + 401/403 handling in `api.ts`, user menu, sign-out clears query cache and the Plaid link token (§1, §4). End-to-end checks against the Supabase dev project | PRs 2–5 | — |
 | 7 | Into main: `ENV_SETUP.md`, CLAUDE.md (Database/RLS rules, accounts grant rule), minor version bump, end-to-end checklist from spec §5 | all | release |
+
+## Status (2026-10-13)
+
+All seven PRs are open, each reviewed with `/code-review` and its findings addressed or answered on the PR:
+
+| PR | GitHub | Branch | Base |
+|---|---|---|---|
+| 1 | #68 | `multi-user/01-db-foundation` | `feature/multi-user` |
+| 2 | #69 | `multi-user/02-auth-middleware` | PR 1 |
+| 3 | #70 | `multi-user/03-services` | PR 2 |
+| 4 | #71 | `multi-user/04-routes-core` | PR 3 |
+| 5 | #72 | `multi-user/05-routes-rest` | PR 4 |
+| 6 | #73 | `multi-user/06-client-auth` | PR 5 |
+| 7 | #74 | `multi-user/07-release-docs` | PR 6 |
+
+Additions beyond the original roadmap, from reviews: Plaid webhook signature verification (PR 5), owner reassignment as a tested script (PR 1), allowlist enforced in the database and cross-user reference policies (PR 1), scripts' `--user-email` (moved to PR 3).
+
+Remaining, in order:
+1. Merge PRs 1–7 into `feature/multi-user` in order (retargeting each to `feature/multi-user` as its base merges).
+2. End-to-end checks from spec §5 against a Supabase dev project (needs the project and a Google OAuth client; `server/ENV_SETUP.md`).
+3. Open `feature/multi-user` → `main`. If main moved, merge it in and bump the version above main's again, and if main gained migrations numbered 030 or higher, renumber `030_multi_user.sql` / `031_multi_user_cleanup.sql` (and their mentions in docs, scripts and the harness) to follow main's highest, then rerun `npm run test:migrations --prefix server`.
+4. Roll out with the steps in `server/ENV_SETUP.md` ("Moving an existing install to multi-user").
