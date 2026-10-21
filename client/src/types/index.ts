@@ -116,6 +116,15 @@ export interface TransactionSplit {
   created_at: string;
 }
 
+export interface PendingVenmoSettlement {
+  splitId: string;
+  transactionId: string;
+  /** The parent transaction's merchant_display_name/merchant_name. */
+  description: string;
+  date: string;
+  remainingAmount: number;
+}
+
 export interface Tag {
   id: string;
   name: string;
