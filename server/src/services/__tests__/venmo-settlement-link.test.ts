@@ -65,7 +65,9 @@ vi.mock('../../db/supabase.js', () => ({
   },
 }));
 
-const { linkVenmoSettlement, unlinkVenmoSettlement } = await import('../venmo-settlement-reconciliation.js');
+const { linkVenmoSettlement, unlinkVenmoSettlement, VenmoSettlementValidationError, VenmoTransactionNotFoundError } = await import(
+  '../venmo-settlement-reconciliation.js'
+);
 
 describe('linkVenmoSettlement', () => {
   beforeEach(() => {
@@ -102,9 +104,34 @@ describe('linkVenmoSettlement', () => {
   });
 });
 
-describe('unlinkVenmoSettlement', () => {
-  it('removes the settlement rows and reverts the transaction type', async () => {
+describe('linkVenmoSettlement guards', () => {
+  beforeEach(() => {
     resetState();
+    state.splits = [
+      { id: 'split-1', parent_transaction_id: 'dinner', amount: 50, is_my_share: false },
+      { id: 'split-2', parent_transaction_id: 'lunch', amount: 50, is_my_share: false },
+    ];
+  });
+
+  it('refuses to link a Venmo payment that already settles another split', async () => {
+    // One $50 deposit already settled split-1; linking it to split-2 too would settle $100 with $50.
+    state.transactions = [{ id: 'venmo-txn', amount: -50, is_venmo_settlement: true, transaction_type: 'transfer' }];
+    state.settlements = [{ id: 's1', split_id: 'split-1', venmo_transaction_id: 'venmo-txn', amount: 50 }];
+
+    await expect(linkVenmoSettlement('venmo-txn', ['split-2'])).rejects.toBeInstanceOf(VenmoSettlementValidationError);
+    expect(state.inserts).toEqual([]);
+    expect(state.settlements).toHaveLength(1);
+  });
+
+  it('reports an unknown transaction as not found, not as a bad request', async () => {
+    await expect(linkVenmoSettlement('missing', ['split-1'])).rejects.toBeInstanceOf(VenmoTransactionNotFoundError);
+  });
+});
+
+describe('unlinkVenmoSettlement', () => {
+  beforeEach(resetState);
+
+  it('removes the settlement rows and reverts the transaction type', async () => {
     state.transactions = [
       { id: 'venmo-txn', amount: -25, is_venmo_settlement: true, transaction_type: 'transfer', merchant_name: 'Venmo', original_description: null, plaid_category: null },
     ];
@@ -114,5 +141,31 @@ describe('unlinkVenmoSettlement', () => {
 
     expect(state.settlements).toEqual([]);
     expect(state.transactions[0]).toMatchObject({ is_venmo_settlement: false, transaction_type: 'return' });
+  });
+
+  it('flags the reverted transaction for review, since the match cleared its category', async () => {
+    state.transactions = [
+      { id: 'venmo-txn', amount: -25, is_venmo_settlement: true, transaction_type: 'transfer', category_id: null, needs_review: false, merchant_name: 'Venmo', original_description: null, plaid_category: null },
+    ];
+    state.settlements = [{ id: 's1', split_id: 'split-1', venmo_transaction_id: 'venmo-txn', amount: 25 }];
+
+    await unlinkVenmoSettlement('venmo-txn');
+
+    expect(state.transactions[0]).toMatchObject({ needs_review: true });
+  });
+
+  it('refuses to touch a transaction that is not a settlement, keeping its hand-set type', async () => {
+    state.transactions = [
+      { id: 'groceries', amount: -25, is_venmo_settlement: false, transaction_type: 'income', type_manually_set: true, merchant_name: 'Venmo', original_description: null, plaid_category: null },
+    ];
+
+    await expect(unlinkVenmoSettlement('groceries')).rejects.toBeInstanceOf(VenmoSettlementValidationError);
+    expect(state.transactions[0]).toMatchObject({ transaction_type: 'income', is_venmo_settlement: false });
+    expect(state.deletes).toEqual([]);
+  });
+
+  it('reports an unknown transaction as not found', async () => {
+    await expect(unlinkVenmoSettlement('missing')).rejects.toBeInstanceOf(VenmoTransactionNotFoundError);
+    expect(state.deletes).toEqual([]);
   });
 });

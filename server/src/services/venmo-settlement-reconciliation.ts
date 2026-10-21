@@ -229,23 +229,75 @@ export const reconcileVenmoSettlementsAfterSync = async (options: { sinceDate?: 
   }
 };
 
+/** The Venmo transaction does not exist. The route maps this to 404. */
+export class VenmoTransactionNotFoundError extends Error {
+  constructor() {
+    super('Venmo transaction not found');
+    this.name = 'VenmoTransactionNotFoundError';
+  }
+}
+
+/** A link or unlink request that cannot be applied as asked. The route maps this to 400. */
+export class VenmoSettlementValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'VenmoSettlementValidationError';
+  }
+}
+
+interface VenmoTransactionRow {
+  id: string;
+  amount: number;
+  is_venmo_settlement: boolean | null;
+  merchant_name: string | null;
+  original_description: string | null;
+  plaid_category: PlaidPFC | null;
+}
+
+const VENMO_TRANSACTION_COLUMNS = 'id, amount, is_venmo_settlement, merchant_name, original_description, plaid_category';
+
+const loadVenmoTransaction = async (venmoTransactionId: string): Promise<VenmoTransactionRow> => {
+  const { data, error } = await supabase.from('transactions').select(VENMO_TRANSACTION_COLUMNS).eq('id', venmoTransactionId);
+  if (error) throw error;
+  const txn = (data as VenmoTransactionRow[] | null)?.[0];
+  if (!txn) throw new VenmoTransactionNotFoundError();
+  return txn;
+};
+
+/**
+ * Undo a settlement's type flip: re-detect the type as if the match never happened and clear the
+ * flag. The match cleared the category and what it was before is not recorded, so the row is
+ * flagged for review instead of silently staying uncategorized.
+ */
+const revertSettlementType = async (txn: VenmoTransactionRow): Promise<void> => {
+  const revertedType = detectTransactionType(
+    txn.amount,
+    [txn.merchant_name ?? '', txn.original_description ?? ''],
+    txn.plaid_category,
+  );
+  const { error } = await supabase
+    .from('transactions')
+    .update({ transaction_type: revertedType, is_venmo_settlement: false, needs_review: true })
+    .eq('id', txn.id);
+  if (error) throw error;
+};
+
 /**
  * Manual override for a match the auto-matcher missed. Validates the chosen splits sum to the
  * transaction's amount and aren't already settled, exactly like the auto-matcher would, then
  * writes the same settlement rows and type flip reconcileVenmoSettlements applies.
  */
 export const linkVenmoSettlement = async (venmoTransactionId: string, splitIds: string[]): Promise<void> => {
-  const { data: txnData, error: txnError } = await supabase
-    .from('transactions')
-    .select('id, amount')
-    .eq('id', venmoTransactionId);
-  if (txnError) throw txnError;
-  const txn = (txnData as { id: string; amount: number }[] | null)?.[0];
-  if (!txn) throw new Error('Venmo transaction not found');
+  const txn = await loadVenmoTransaction(venmoTransactionId);
+  // One payment settles one set of splits. Linking it again would let a single $50 deposit
+  // settle a second $50 split, dropping money it never covered out of the totals.
+  if (txn.is_venmo_settlement) {
+    throw new VenmoSettlementValidationError('This Venmo transaction already settles a split; unlink it first');
+  }
   // Same direction rule reconcileVenmoSettlements enforces: a split is only ever settled by
   // money arriving, never by money sent out. Without this, linking the wrong transaction would
   // flip a real expense to a transfer and silently drop it out of spending totals.
-  if (txn.amount >= 0) throw new Error('Only an incoming Venmo payment can settle a split');
+  if (txn.amount >= 0) throw new VenmoSettlementValidationError('Only an incoming Venmo payment can settle a split');
 
   const { data: splitRows, error: splitsError } = await supabase
     .from('transaction_splits')
@@ -253,7 +305,7 @@ export const linkVenmoSettlement = async (venmoTransactionId: string, splitIds: 
     .in('id', splitIds);
   if (splitsError) throw splitsError;
   const splits = (splitRows ?? []) as { id: string; amount: number }[];
-  if (splits.length !== splitIds.length) throw new Error('One or more splits not found');
+  if (splits.length !== splitIds.length) throw new VenmoSettlementValidationError('One or more splits not found');
 
   const { data: settlementRows, error: settlementsError } = await supabase
     .from('transaction_split_settlements')
@@ -269,13 +321,13 @@ export const linkVenmoSettlement = async (venmoTransactionId: string, splitIds: 
   let total = 0;
   for (const split of splits) {
     const remaining = Math.abs(split.amount) - (settledBySplitId.get(split.id) ?? 0);
-    if (remaining <= AMOUNT_TOLERANCE) throw new Error(`Split ${split.id} is already settled`);
+    if (remaining <= AMOUNT_TOLERANCE) throw new VenmoSettlementValidationError(`Split ${split.id} is already settled`);
     splitAmounts[split.id] = remaining;
     total += remaining;
   }
 
   if (Math.abs(total - Math.abs(txn.amount)) > AMOUNT_TOLERANCE) {
-    throw new Error("Chosen splits' amount does not match the transaction amount");
+    throw new VenmoSettlementValidationError("Chosen splits' amount does not match the transaction amount");
   }
 
   const rows = splitIds.map((splitId) => ({
@@ -296,33 +348,23 @@ export const linkVenmoSettlement = async (venmoTransactionId: string, splitIds: 
 /**
  * Reverts a (manual or automatic) match: deletes its settlement rows and re-detects the
  * transaction's type as if the match had never happened. Never touches transaction_splits.
+ * Refuses a transaction that is not a settlement, so it can never re-detect (and overwrite) the
+ * type of an unrelated or hand-typed transaction.
  */
 export const unlinkVenmoSettlement = async (venmoTransactionId: string): Promise<void> => {
+  const txn = await loadVenmoTransaction(venmoTransactionId);
+  if (!txn.is_venmo_settlement) {
+    throw new VenmoSettlementValidationError('This transaction is not linked to a split settlement');
+  }
+
+  // Rows first: if the type revert then fails, the transaction is left flagged with no rows,
+  // which the next reconcile pass heals. The other order could leave rows settling a split while
+  // the payment counts as income again.
   const { error: deleteError } = await supabase
     .from('transaction_split_settlements')
     .delete()
     .eq('venmo_transaction_id', venmoTransactionId);
   if (deleteError) throw deleteError;
 
-  const { data: txnData, error: txnError } = await supabase
-    .from('transactions')
-    .select('id, amount, merchant_name, original_description, plaid_category')
-    .eq('id', venmoTransactionId);
-  if (txnError) throw txnError;
-  const txn = (txnData as
-    | { id: string; amount: number; merchant_name: string | null; original_description: string | null; plaid_category: PlaidPFC | null }[]
-    | null)?.[0];
-  if (!txn) throw new Error('Venmo transaction not found');
-
-  const revertedType = detectTransactionType(
-    txn.amount,
-    [txn.merchant_name ?? '', txn.original_description ?? ''],
-    txn.plaid_category,
-  );
-
-  const { error: updateError } = await supabase
-    .from('transactions')
-    .update({ transaction_type: revertedType, is_venmo_settlement: false })
-    .eq('id', venmoTransactionId);
-  if (updateError) throw updateError;
+  await revertSettlementType(txn);
 };
