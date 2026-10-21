@@ -584,6 +584,37 @@ describe('applySyncResult', () => {
     expect(counts.modified).toBe(2);
   });
 
+  it('keeps a matched Venmo settlement a transfer when Plaid modifies it, so its money is not counted twice', async () => {
+    // A Venmo deposit (money in) that the matcher linked to a split. Fresh detection would call it
+    // a return, which would count the repayment again on top of the split that already excludes it.
+    db.existingByPlaidId.set('venmo-in', {
+      id: 'row-v',
+      account_id: 'acct-1',
+      merchant_name: 'Venmo',
+      merchant_display_name: 'Venmo',
+      transaction_type: 'transfer',
+      original_description: 'VENMO CASHOUT',
+      category_id: null,
+      plaid_category: null,
+      is_venmo_settlement: true,
+    });
+    const deposit = { transaction_id: 'venmo-in', amount: -25, merchant_name: 'Venmo', name: 'Venmo', original_description: 'VENMO', personal_finance_category: undefined };
+
+    await apply(emptySync({ modified: [tx(deposit)] }));
+
+    const update = opsOf('transactions', 'update').find(o => filterValue(o, 'plaid_transaction_id') === 'venmo-in')!.payload as Record<string, unknown>;
+    expect(update).toMatchObject({ amount: -25 });
+    expect(update).not.toHaveProperty('transaction_type');
+    expect(update).not.toHaveProperty('is_venmo_settlement');
+
+    // The same modification on a row that is not a settlement is re-detected as usual.
+    db.ops = [];
+    db.existingByPlaidId.set('venmo-in', { ...db.existingByPlaidId.get('venmo-in')!, is_venmo_settlement: false });
+    await apply(emptySync({ modified: [tx(deposit)] }));
+    const reDetected = opsOf('transactions', 'update').find(o => filterValue(o, 'plaid_transaction_id') === 'venmo-in')!.payload as Record<string, unknown>;
+    expect(reDetected.transaction_type).toBe('return');
+  });
+
   it('deletes removed transactions by Plaid id', async () => {
     const counts = await apply(emptySync({ removed: [{ transaction_id: 'gone-1' }, { transaction_id: 'gone-2' }] }));
 
