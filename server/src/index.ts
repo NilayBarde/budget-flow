@@ -36,6 +36,7 @@ const { default: csvImportRouter } = await import('./routes/csv-import.js');
 const { default: investmentsRouter } = await import('./routes/investments.js');
 const { default: appSettingsRouter } = await import('./routes/app-settings.js');
 const { default: exportRouter } = await import('./routes/export.js');
+const { default: venmoSettlementsRouter } = await import('./routes/venmo-settlements.js');
 
 console.log('Routes loaded successfully');
 
@@ -62,6 +63,7 @@ app.use('/api/csv-import', csvImportRouter);
 app.use('/api/investments', investmentsRouter);
 app.use('/api/settings', appSettingsRouter);
 app.use('/api/export', exportRouter);
+app.use('/api/venmo-settlements', venmoSettlementsRouter);
 
 console.log('Routes registered');
 

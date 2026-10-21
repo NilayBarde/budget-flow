@@ -1,5 +1,6 @@
 import { supabase } from '../db/supabase.js';
-import { isVenmoAccount } from './transaction-type.js';
+import { detectTransactionType, isVenmoAccount } from './transaction-type.js';
+import type { PlaidPFC } from './categorizer.js';
 import {
   findSettlementMatches,
   type SplitCandidate,
@@ -178,4 +179,102 @@ export const reconcileVenmoSettlementsAfterSync = async (
   } catch (error) {
     console.error('Venmo settlement reconciliation failed:', error instanceof Error ? error.message : error);
   }
+};
+
+/**
+ * Manual override for a match the auto-matcher missed. Validates the chosen splits sum to the
+ * transaction's amount and aren't already settled, exactly like the auto-matcher would, then
+ * writes the same settlement rows and type flip reconcileVenmoSettlements applies.
+ */
+export const linkVenmoSettlement = async (venmoTransactionId: string, splitIds: string[]): Promise<void> => {
+  const { data: txnData, error: txnError } = await supabase
+    .from('transactions')
+    .select('id, amount')
+    .eq('id', venmoTransactionId);
+  if (txnError) throw txnError;
+  const txn = (txnData as { id: string; amount: number }[] | null)?.[0];
+  if (!txn) throw new Error('Venmo transaction not found');
+  // Same direction rule reconcileVenmoSettlements enforces: a split is only ever settled by
+  // money arriving, never by money sent out. Without this, linking the wrong transaction would
+  // flip a real expense to a transfer and silently drop it out of spending totals.
+  if (txn.amount >= 0) throw new Error('Only an incoming Venmo payment can settle a split');
+
+  const { data: splitRows, error: splitsError } = await supabase
+    .from('transaction_splits')
+    .select('id, amount')
+    .in('id', splitIds);
+  if (splitsError) throw splitsError;
+  const splits = (splitRows ?? []) as { id: string; amount: number }[];
+  if (splits.length !== splitIds.length) throw new Error('One or more splits not found');
+
+  const { data: settlementRows, error: settlementsError } = await supabase
+    .from('transaction_split_settlements')
+    .select('split_id, amount')
+    .in('split_id', splitIds);
+  if (settlementsError) throw settlementsError;
+  const settledBySplitId = new Map<string, number>();
+  for (const row of (settlementRows ?? []) as { split_id: string; amount: number }[]) {
+    settledBySplitId.set(row.split_id, (settledBySplitId.get(row.split_id) ?? 0) + row.amount);
+  }
+
+  const splitAmounts: Record<string, number> = {};
+  let total = 0;
+  for (const split of splits) {
+    const remaining = Math.abs(split.amount) - (settledBySplitId.get(split.id) ?? 0);
+    if (remaining <= AMOUNT_TOLERANCE) throw new Error(`Split ${split.id} is already settled`);
+    splitAmounts[split.id] = remaining;
+    total += remaining;
+  }
+
+  if (Math.abs(total - Math.abs(txn.amount)) > AMOUNT_TOLERANCE) {
+    throw new Error("Chosen splits' amount does not match the transaction amount");
+  }
+
+  const rows = splitIds.map((splitId) => ({
+    split_id: splitId,
+    venmo_transaction_id: venmoTransactionId,
+    amount: splitAmounts[splitId],
+  }));
+  const { error: insertError } = await supabase.from('transaction_split_settlements').insert(rows);
+  if (insertError) throw insertError;
+
+  const { error: updateError } = await supabase
+    .from('transactions')
+    .update({ transaction_type: 'transfer', is_venmo_settlement: true, category_id: null, needs_review: false })
+    .eq('id', venmoTransactionId);
+  if (updateError) throw updateError;
+};
+
+/**
+ * Reverts a (manual or automatic) match: deletes its settlement rows and re-detects the
+ * transaction's type as if the match had never happened. Never touches transaction_splits.
+ */
+export const unlinkVenmoSettlement = async (venmoTransactionId: string): Promise<void> => {
+  const { error: deleteError } = await supabase
+    .from('transaction_split_settlements')
+    .delete()
+    .eq('venmo_transaction_id', venmoTransactionId);
+  if (deleteError) throw deleteError;
+
+  const { data: txnData, error: txnError } = await supabase
+    .from('transactions')
+    .select('id, amount, merchant_name, original_description, plaid_category')
+    .eq('id', venmoTransactionId);
+  if (txnError) throw txnError;
+  const txn = (txnData as
+    | { id: string; amount: number; merchant_name: string | null; original_description: string | null; plaid_category: PlaidPFC | null }[]
+    | null)?.[0];
+  if (!txn) throw new Error('Venmo transaction not found');
+
+  const revertedType = detectTransactionType(
+    txn.amount,
+    [txn.merchant_name ?? '', txn.original_description ?? ''],
+    txn.plaid_category,
+  );
+
+  const { error: updateError } = await supabase
+    .from('transactions')
+    .update({ transaction_type: revertedType, is_venmo_settlement: false })
+    .eq('id', venmoTransactionId);
+  if (updateError) throw updateError;
 };
