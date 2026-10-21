@@ -5,6 +5,7 @@ import { SyncHealthBanner } from '../components/dashboard/SyncHealthBanner';
 import { RecentActivity } from '../components/dashboard/RecentActivity';
 import { BudgetStatus } from '../components/dashboard/BudgetStatus';
 import { LargeUnsplitTransactions } from '../components/dashboard/LargeUnsplitTransactions';
+import { PendingVenmoSettlementsCard } from '../components/dashboard/PendingVenmoSettlementsCard';
 import { useMonthlyStats, useMonthNavigation, usePrefetchAdjacentMonths } from '../hooks';
 import { MONTHS } from '../utils/constants';
 
@@ -99,6 +100,8 @@ export const Dashboard = () => {
               month={currentDate.month}
               year={currentDate.year}
             />
+
+            <PendingVenmoSettlementsCard />
           </div>
         </div>
       </div>
