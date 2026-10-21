@@ -68,6 +68,12 @@ describe('loadMerchantMappings', () => {
 
     expect(mappings.find('Starbucks')).toBeUndefined();
   });
+
+  it('fails when the rules cannot be read, instead of syncing as if there were none', async () => {
+    mockSelect.mockResolvedValue({ data: null, error: { message: 'connection reset' } });
+
+    await expect(loadMerchantMappings()).rejects.toMatchObject({ message: 'connection reset' });
+  });
 });
 
 describe('loadManuallyTypedIds', () => {
@@ -98,6 +104,13 @@ describe('loadManuallyTypedIds', () => {
 
     expect(ids.size).toBe(0);
     expect(mockFrom).not.toHaveBeenCalled();
+  });
+
+  it('fails when the flags cannot be read, so a Plaid update cannot overwrite a type the user set', async () => {
+    mockSelect.mockReturnValue({ in: mockIn });
+    mockIn.mockResolvedValue({ data: null, error: { message: 'connection reset' } });
+
+    await expect(loadManuallyTypedIds([{ transaction_id: 'tx-1' }])).rejects.toMatchObject({ message: 'connection reset' });
   });
 
   it('batches large id lists into multiple queries', async () => {
