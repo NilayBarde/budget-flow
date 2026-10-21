@@ -361,7 +361,10 @@ export const applySyncResult = async ({
 
   await recordSuccessfulSync(plaidItemId, syncResult.nextCursor, historicalComplete);
   await reconcileCardPaymentsAfterSync(reconcileSinceDate === undefined ? {} : { sinceDate: reconcileSinceDate });
-  await reconcileVenmoSettlementsAfterSync(reconcileSinceDate === undefined ? {} : { sinceDate: reconcileSinceDate });
+  // Unlike card pairing, Venmo matching never auto-applies across all history: a first link's
+  // null look back falls back to the matcher's own bounded window, and a full backfill is run by
+  // hand as a dry run first.
+  await reconcileVenmoSettlementsAfterSync(reconcileSinceDate ? { sinceDate: reconcileSinceDate } : {});
 
   return counts;
 };

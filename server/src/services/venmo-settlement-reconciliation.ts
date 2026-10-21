@@ -215,12 +215,14 @@ export const reconcileVenmoSettlements = async ({
 /**
  * The call the sync pipeline makes once a sync's transactions are saved. Reconciliation is a
  * cleanup pass, so a failure here must never fail the sync that triggered it.
+ *
+ * This applies matches without review, so it never scans unbounded history: with no sinceDate it
+ * uses the default lookback. A full-history backfill goes through reconcileVenmoSettlements with
+ * apply: false first, per the spec.
  */
-export const reconcileVenmoSettlementsAfterSync = async (
-  options: Pick<ReconcileVenmoOptions, 'sinceDate'> = {},
-): Promise<void> => {
+export const reconcileVenmoSettlementsAfterSync = async (options: { sinceDate?: string } = {}): Promise<void> => {
   try {
-    const results = await reconcileVenmoSettlements({ ...options, apply: true });
+    const results = await reconcileVenmoSettlements({ sinceDate: options.sinceDate ?? undefined, apply: true });
     if (results.length > 0) console.log(`Matched ${results.length} Venmo settlement(s)`);
   } catch (error) {
     console.error('Venmo settlement reconciliation failed:', error instanceof Error ? error.message : error);

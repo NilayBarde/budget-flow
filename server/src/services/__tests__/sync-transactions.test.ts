@@ -709,6 +709,24 @@ describe('applySyncResult', () => {
 
       expect(reconcileCardPayments).toHaveBeenCalledWith({ sinceDate: null });
     });
+
+    it('never lets a first link auto-apply Venmo matches across all history', async () => {
+      reconcileVenmoSettlements.mockClear();
+
+      await apply(emptySync(), { reconcileSinceDate: null });
+
+      // No sinceDate means the matcher's own bounded default lookback; a null would mean no bound.
+      expect(reconcileVenmoSettlements).toHaveBeenCalledTimes(1);
+      expect(reconcileVenmoSettlements).toHaveBeenCalledWith({});
+    });
+
+    it('passes a real look back through to the Venmo matcher', async () => {
+      reconcileVenmoSettlements.mockClear();
+
+      await apply(emptySync(), { reconcileSinceDate: '2026-09-01' });
+
+      expect(reconcileVenmoSettlements).toHaveBeenCalledWith({ sinceDate: '2026-09-01' });
+    });
   });
 
   it('passes no look back by default, so the pairing uses its own short window', async () => {

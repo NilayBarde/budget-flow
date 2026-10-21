@@ -106,7 +106,9 @@ vi.mock('../../db/supabase.js', () => ({
   },
 }));
 
-const { reconcileVenmoSettlements, loadUnsettledSplits } = await import('../venmo-settlement-reconciliation.js');
+const { reconcileVenmoSettlements, reconcileVenmoSettlementsAfterSync, loadUnsettledSplits } = await import(
+  '../venmo-settlement-reconciliation.js'
+);
 
 describe('venmo-settlement-reconciliation', () => {
   beforeEach(resetState);
@@ -238,6 +240,19 @@ describe('venmo-settlement-reconciliation', () => {
       const sinceDate = daysAgo(30);
       await reconcileVenmoSettlements({ apply: false, sinceDate });
       expect(state.gteCalls).toContainEqual({ table: 'transactions', col: 'date', val: sinceDate });
+    });
+
+    it('the post-sync auto-apply stays within the default lookback even if handed a null', async () => {
+      seedBasicScenario();
+      // A JS caller (or an old call site) could still pass null; the auto-apply path must not
+      // treat that as "all history".
+      await reconcileVenmoSettlementsAfterSync({ sinceDate: null as unknown as string });
+
+      const daysBack = state.gteCalls
+        .filter((c) => c.table === 'transactions' && c.col === 'date')
+        .map((c) => Math.floor((Date.now() - Date.parse(c.val)) / (24 * 60 * 60 * 1000)));
+      // 90 days for Venmo transactions, plus the matcher's 21-day window for the splits' parents.
+      expect(daysBack.sort((a, b) => a - b)).toEqual([90, 111]);
     });
 
     it('applies no date filter when sinceDate is null', async () => {
