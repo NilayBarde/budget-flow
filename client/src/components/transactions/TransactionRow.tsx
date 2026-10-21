@@ -14,9 +14,14 @@ interface TransactionRowProps {
   isSelected?: boolean;
   onSelect?: (transactionId: string, selected: boolean) => void;
   selectionMode?: boolean;
+  /** Remaining amount still owed on this transaction's splits, if any is unsettled. */
+  pendingSettlementAmount?: number;
 }
 
-export const TransactionRow = ({ transaction, onEdit, onSplit, onDelete, isSelected = false, onSelect, selectionMode = false }: TransactionRowProps) => {
+export const TransactionRow = ({
+  transaction, onEdit, onSplit, onDelete, isSelected = false, onSelect, selectionMode = false,
+  pendingSettlementAmount,
+}: TransactionRowProps) => {
   const [showMenu, setShowMenu] = useState(false);
   const [openUpward, setOpenUpward] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
@@ -129,6 +134,9 @@ export const TransactionRow = ({ transaction, onEdit, onSplit, onDelete, isSelec
             {isIncome && <Badge color="#10b981" size="sm">Income</Badge>}
             {isInvestment && <Badge color="#8b5cf6" size="sm">Investment</Badge>}
             {transaction.is_split && <Badge color="#6366f1" size="sm">Split</Badge>}
+            {Boolean(pendingSettlementAmount) && (
+              <Badge color="#f59e0b" size="sm">{`Awaiting ${formatCurrency(pendingSettlementAmount as number)}`}</Badge>
+            )}
             {transaction.is_recurring && <Badge color="#10b981" size="sm">Recurring</Badge>}
             {transaction.needs_review && (
               <Badge color="#f59e0b" size="sm">
@@ -299,7 +307,7 @@ export const TransactionRow = ({ transaction, onEdit, onSplit, onDelete, isSelec
         </div>
 
         {/* Badges row */}
-        {(transaction.pending || isTransfer || isReturn || isIncome || isInvestment || transaction.is_split || transaction.is_recurring || transaction.needs_review || sortedTags.length > 0) && (
+        {(transaction.pending || isTransfer || isReturn || isIncome || isInvestment || transaction.is_split || transaction.is_recurring || transaction.needs_review || Boolean(pendingSettlementAmount) || sortedTags.length > 0) && (
           <div className="flex flex-wrap gap-1.5 mt-2 ml-13">
             {transaction.pending && (
               <Badge color="#f97316" size="sm">
@@ -312,6 +320,9 @@ export const TransactionRow = ({ transaction, onEdit, onSplit, onDelete, isSelec
             {isIncome && <Badge color="#10b981" size="sm">Income</Badge>}
             {isInvestment && <Badge color="#8b5cf6" size="sm">Investment</Badge>}
             {transaction.is_split && <Badge color="#6366f1" size="sm">Split</Badge>}
+            {Boolean(pendingSettlementAmount) && (
+              <Badge color="#f59e0b" size="sm">{`Awaiting ${formatCurrency(pendingSettlementAmount as number)}`}</Badge>
+            )}
             {transaction.is_recurring && <Badge color="#10b981" size="sm">Recurring</Badge>}
             {transaction.needs_review && (
               <Badge color="#f59e0b" size="sm">

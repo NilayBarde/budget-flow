@@ -17,6 +17,7 @@ interface TransactionListProps {
   selectedIds?: Set<string>;
   onSelectionChange?: (ids: Set<string>) => void;
   selectionMode?: boolean;
+  pendingSettlementAmountsByTransactionId?: Map<string, number>;
 }
 
 export const TransactionList = ({
@@ -29,6 +30,7 @@ export const TransactionList = ({
   selectedIds = new Set(),
   onSelectionChange,
   selectionMode = false,
+  pendingSettlementAmountsByTransactionId,
 }: TransactionListProps) => {
   const handleSelectTransaction = useCallback((transactionId: string, selected: boolean) => {
     if (!onSelectionChange) return;
@@ -106,6 +108,7 @@ export const TransactionList = ({
           isSelected={selectedIds.has(transaction.id)}
           onSelect={handleSelectTransaction}
           selectionMode={selectionMode}
+          pendingSettlementAmount={pendingSettlementAmountsByTransactionId?.get(transaction.id)}
         />
       ))}
     </div>
