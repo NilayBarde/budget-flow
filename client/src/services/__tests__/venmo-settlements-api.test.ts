@@ -8,7 +8,7 @@ describe('venmo settlements api', () => {
 
   it('getPendingVenmoSettlements fetches the pending list', async () => {
     const payload = [{ splitId: 's1', transactionId: 't1', description: 'Dinner', date: '2026-08-01', remainingAmount: 25 }];
-    vi.spyOn(global, 'fetch').mockResolvedValue(
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify(payload), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -22,7 +22,7 @@ describe('venmo settlements api', () => {
   });
 
   it('linkVenmoSettlement posts the chosen split ids', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValue(
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({}), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -38,7 +38,7 @@ describe('venmo settlements api', () => {
   });
 
   it('unlinkVenmoSettlement sends a DELETE', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValue(
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({}), {
         status: 200,
         headers: { 'content-type': 'application/json' },
