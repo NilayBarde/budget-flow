@@ -1,14 +1,16 @@
 import { Router } from 'express';
-import { supabase } from '../db/supabase.js';
+import { userContext } from '../db/context.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
+import { SERVER_MANAGED_SETTING_KEYS } from '../services/setting-keys.js';
 
 const router = Router();
 
 // Get all settings (returns { key: value } map)
 router.get(
   '/',
-  asyncHandler(async (_req, res) => {
-    const { data, error } = await supabase.from('app_settings').select('key, value');
+  asyncHandler(async (req, res) => {
+    const { db } = userContext(req);
+    const { data, error } = await db.from('app_settings').select('key, value');
 
     if (error) throw error;
 
@@ -24,8 +26,9 @@ router.get(
 router.get(
   '/:key',
   asyncHandler(async (req, res) => {
+    const { db } = userContext(req);
     const { key } = req.params;
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('app_settings')
       .select('value')
       .eq('key', key)
@@ -40,16 +43,20 @@ router.get(
 router.put(
   '/:key',
   asyncHandler(async (req, res) => {
+    const { db, userId } = userContext(req);
     const { key } = req.params;
     const { value } = req.body;
 
     if (value === undefined || value === null) {
       return res.status(400).json({ message: 'Value is required' });
     }
+    if (SERVER_MANAGED_SETTING_KEYS.has(key)) {
+      return res.status(400).json({ message: `${key} is managed by the server` });
+    }
 
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('app_settings')
-      .upsert({ key, value: String(value), updated_at: new Date().toISOString() }, { onConflict: 'key' })
+      .upsert({ user_id: userId, key, value: String(value), updated_at: new Date().toISOString() }, { onConflict: 'user_id,key' })
       .select()
       .single();
 

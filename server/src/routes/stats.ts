@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import { supabase } from '../db/supabase.js';
 import { userContext } from '../db/context.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import {
@@ -31,6 +30,7 @@ const router = Router();
 
 // Get monthly stats
 router.get('/monthly', asyncHandler(async (req, res) => {
+  const { db } = userContext(req);
     const { month, year } = req.query;
 
     if (!month || !year) {
@@ -40,7 +40,7 @@ router.get('/monthly', asyncHandler(async (req, res) => {
     const startDate = new Date(Number(year), Number(month) - 1, 1).toISOString().split('T')[0];
     const endDate = new Date(Number(year), Number(month), 0).toISOString().split('T')[0];
 
-    const { data: transactions, error } = await supabase
+    const { data: transactions, error } = await db
       .from('transactions')
       .select(`
         amount,
@@ -128,6 +128,7 @@ router.get('/yearly', asyncHandler(async (req, res) => {
 
 // Get spending insights (trends, merchants, velocity, daily breakdown)
 router.get('/insights', asyncHandler(async (req, res) => {
+  const { db } = userContext(req);
     const now = new Date();
     const currentMonth = now.getMonth() + 1; // 1-indexed
     const currentYear = now.getFullYear();
@@ -151,7 +152,7 @@ router.get('/insights', asyncHandler(async (req, res) => {
     // ── Query all active recurring charges (any frequency) ────────────
     // user_hidden mirrors the hide button: a hidden series must not count
     // toward the fixed-cost projection either.
-    const { data: recurringCharges } = await supabase
+    const { data: recurringCharges } = await db
       .from('recurring_transactions')
       .select('merchant_display_name, average_amount, frequency')
       .eq('is_active', true)
@@ -165,7 +166,7 @@ router.get('/insights', asyncHandler(async (req, res) => {
     // it is read in pages; a single request silently dropped the rest and skewed every number below.
     const transactions = await fetchAllRows(
       (from, to) =>
-        supabase
+        db
           .from('transactions')
           .select(`
             id,
@@ -422,13 +423,14 @@ router.get('/insights', asyncHandler(async (req, res) => {
 
 // Estimated monthly income, the average of the last 3 complete months of income
 router.get('/estimated-income', asyncHandler(async (req, res) => {
+  const { db } = userContext(req);
     const now = new Date();
     // Go back 3 full months from the 1st of the current month
     const endDate = new Date(now.getFullYear(), now.getMonth(), 1); // 1st of current month
     const startDate = new Date(endDate);
     startDate.setMonth(startDate.getMonth() - 3); // 3 months back
 
-    const { data: transactions, error } = await supabase
+    const { data: transactions, error } = await db
       .from('transactions')
       .select('amount, date, transaction_type')
       .eq('transaction_type', 'income')

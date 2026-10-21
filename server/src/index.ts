@@ -57,7 +57,13 @@ const PORT = process.env.PORT || 3001;
 // Middleware
 app.use(compression());
 app.use(cors());
-app.use(express.json());
+// Keep the exact request bytes: Plaid signs the raw webhook body, and re-serializing the parsed JSON
+// wouldn't reproduce it.
+app.use(express.json({
+  verify: (req, _res, buf) => {
+    (req as express.Request).rawBody = buf;
+  },
+}));
 
 // Every /api route needs a signed-in, invited user, except the health check and Plaid webhooks.
 app.use('/api', requireAuth);

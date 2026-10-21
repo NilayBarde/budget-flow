@@ -17,9 +17,6 @@ export type Db = SupabaseClient;
 // credentials and account inserts; such code must filter and stamp user_id itself.
 export const supabaseAdmin: Db = createClient(supabaseUrl, serviceRoleKey);
 
-/** @deprecated Use `req.db` in routes, or `supabaseAdmin` in webhooks and scripts. */
-export const supabase = supabaseAdmin;
-
 // A client acting as the signed-in user: every query runs under RLS with their JWT.
 export const createUserClient = (accessToken: string): Db => {
   const anonKey = process.env.SUPABASE_ANON_KEY;

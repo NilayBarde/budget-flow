@@ -29,9 +29,9 @@ describe('supabaseAdmin', () => {
     expect(createClient).not.toHaveBeenCalledWith('https://project.supabase.co', 'anon-key');
   });
 
-  it('is what the deprecated supabase export points at', async () => {
-    const { supabase, supabaseAdmin } = await loadModule();
-    expect(supabase).toBe(supabaseAdmin);
+  it('is the only shared client: routes must use the per-user one', async () => {
+    const module = await loadModule();
+    expect(Object.keys(module)).not.toContain('supabase');
   });
 });
 
