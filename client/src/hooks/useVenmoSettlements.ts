@@ -7,6 +7,8 @@ export const usePendingVenmoSettlements = () =>
     queryFn: api.getPendingVenmoSettlements,
   });
 
+// Linking and unlinking change the Venmo transaction's type (transfer vs. income/return), so every
+// total that counts by type goes stale too, not just the settlement list.
 export const useLinkVenmoSettlement = () => {
   const queryClient = useQueryClient();
   return useMutation({
@@ -15,6 +17,9 @@ export const useLinkVenmoSettlement = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['venmo-settlements'] });
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['stats'] });
+      queryClient.invalidateQueries({ queryKey: ['insights'] });
+      queryClient.invalidateQueries({ queryKey: ['budget-goals'] });
     },
   });
 };
@@ -26,6 +31,9 @@ export const useUnlinkVenmoSettlement = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['venmo-settlements'] });
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['stats'] });
+      queryClient.invalidateQueries({ queryKey: ['insights'] });
+      queryClient.invalidateQueries({ queryKey: ['budget-goals'] });
     },
   });
 };

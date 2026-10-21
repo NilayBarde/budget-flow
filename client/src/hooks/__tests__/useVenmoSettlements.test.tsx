@@ -45,7 +45,7 @@ describe('useLinkVenmoSettlement', () => {
     linkMock.mockReset();
   });
 
-  it('calls the link API and invalidates pending settlements and transactions', async () => {
+  it('calls the link API and invalidates pending settlements, transactions and every type-based total', async () => {
     linkMock.mockResolvedValue(undefined);
     const { result, invalidatedKeys } = setup(() => useLinkVenmoSettlement());
 
@@ -54,7 +54,9 @@ describe('useLinkVenmoSettlement', () => {
     });
 
     expect(linkMock).toHaveBeenCalledWith('v1', ['s1']);
-    expect(invalidatedKeys()).toEqual(expect.arrayContaining(['venmo-settlements', 'transactions']));
+    expect(invalidatedKeys()).toEqual(
+      expect.arrayContaining(['venmo-settlements', 'transactions', 'stats', 'insights', 'budget-goals']),
+    );
   });
 });
 
@@ -63,7 +65,7 @@ describe('useUnlinkVenmoSettlement', () => {
     unlinkMock.mockReset();
   });
 
-  it('calls the unlink API and invalidates pending settlements and transactions', async () => {
+  it('calls the unlink API and invalidates pending settlements, transactions and every type-based total', async () => {
     unlinkMock.mockResolvedValue(undefined);
     const { result, invalidatedKeys } = setup(() => useUnlinkVenmoSettlement());
 
@@ -72,6 +74,8 @@ describe('useUnlinkVenmoSettlement', () => {
     });
 
     expect(unlinkMock).toHaveBeenCalledWith('v1');
-    expect(invalidatedKeys()).toEqual(expect.arrayContaining(['venmo-settlements', 'transactions']));
+    expect(invalidatedKeys()).toEqual(
+      expect.arrayContaining(['venmo-settlements', 'transactions', 'stats', 'insights', 'budget-goals']),
+    );
   });
 });
