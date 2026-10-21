@@ -958,6 +958,8 @@ The body lists: what 030/031 do, how to run `npm run test:migrations --prefix se
 
 ## Roadmap: PRs 2–7 (each gets its own detailed plan when started)
 
+**Until PR 5 merges, never add a second email to `user_allowlist` on any environment running the feature branch:** routes still use the service-role client with no `user_id` filter, so any invited user would see and change everyone's data. PR 5 removes that client from routes.
+
 Before each: `git fetch origin && git merge origin/main` into `feature/multi-user`, re-run `npm test` and `npm run test:migrations --prefix server`.
 
 | PR | Scope (spec section) | Consumes | Produces |
