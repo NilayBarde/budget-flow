@@ -1,17 +1,36 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 // env is loaded in index.ts
 
 const supabaseUrl = process.env.SUPABASE_URL || '';
-// Prefer the service-role key so the server bypasses RLS.
-// Fall back to the anon key for backwards compatibility.
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '';
+// No fallback to the anon key: webhooks and account inserts need to bypass RLS, and as anon they
+// would silently see and write nothing.
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
-if (!supabaseUrl || !supabaseKey) {
-  console.warn('Warning: Supabase credentials not configured. Database operations will fail.');
+if (!supabaseUrl || !serviceRoleKey) {
+  console.warn('Warning: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is not set. Database operations will fail.');
 }
 
-export const supabase = createClient(supabaseUrl, supabaseKey);
+export type Db = SupabaseClient;
+
+// Bypasses RLS. Only for work with no signed-in user (Plaid webhooks, scripts) and for Plaid
+// credentials and account inserts; such code must filter and stamp user_id itself.
+export const supabaseAdmin: Db = createClient(supabaseUrl, serviceRoleKey);
+
+/** @deprecated Use `req.db` in routes, or `supabaseAdmin` in webhooks and scripts. */
+export const supabase = supabaseAdmin;
+
+// A client acting as the signed-in user: every query runs under RLS with their JWT.
+export const createUserClient = (accessToken: string): Db => {
+  const anonKey = process.env.SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !anonKey) {
+    throw new Error('SUPABASE_URL and SUPABASE_ANON_KEY are required for signed-in requests');
+  }
+  return createClient(supabaseUrl, anonKey, {
+    global: { headers: { Authorization: `Bearer ${accessToken}` } },
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
+};
 
 export type Database = {
   accounts: {
@@ -32,6 +51,8 @@ export type Database = {
     relinked_at: string | null;
     /** "Keep" on an idle connection hides the disconnect suggestion until then (migration 029) */
     idle_snoozed_until: string | null;
+    /** Derived from the token: manual or disconnected accounts (migration 030) */
+    is_manual: boolean;
   };
   transactions: {
     id: string;
