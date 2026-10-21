@@ -1,7 +1,7 @@
 import { Router } from 'express';
+import { asyncHandler } from '../utils/asyncHandler.js';
 import multer from 'multer';
 import { parse } from 'csv-parse/sync';
-import { supabase } from '../db/supabase.js';
 import { userContext } from '../db/context.js';
 import { categorizeForSpending, categorizeWithPlaid, cleanMerchantName } from '../services/categorizer.js';
 import { randomUUID } from 'node:crypto';
@@ -207,7 +207,9 @@ interface CsvImport {
 }
 
 // Preview CSV import (parse and show what will be imported)
-router.post('/:accountId/preview', upload.single('file'), async (req, res) => {
+router.post('/:accountId/preview', upload.single('file'), asyncHandler(async (req, res) => {
+  const ctx = userContext(req);
+  const { db } = ctx;
   try {
     const { accountId } = req.params;
     const file = req.file;
@@ -217,7 +219,7 @@ router.post('/:accountId/preview', upload.single('file'), async (req, res) => {
     }
 
     // Verify account exists
-    const { data: account, error: accountError } = await supabase
+    const { data: account, error: accountError } = await db
       .from('accounts')
       .select('id, institution_name')
       .eq('id', accountId)
@@ -251,7 +253,7 @@ router.post('/:accountId/preview', upload.single('file'), async (req, res) => {
     }
 
     // Get existing transactions for duplicate detection
-    const { data: existingTransactions } = await supabase
+    const { data: existingTransactions } = await db
       .from('transactions')
       .select('date, merchant_name, original_description, merchant_display_name, amount, csv_reference')
       .eq('account_id', accountId);
@@ -277,12 +279,12 @@ router.post('/:accountId/preview', upload.single('file'), async (req, res) => {
     });
 
     // Get categories for categorization
-    const { data: categories } = await supabase.from('categories').select('id, name');
+    const { data: categories } = await db.from('categories').select('id, name');
     const categoryMap = new Map(categories?.map(c => [c.name, c.id]) || []);
     const categoryNameById = new Map(categories?.map(c => [c.id, c.name]) || []);
 
     // Get merchant mappings so the preview reflects the user's previous corrections
-    const merchantMappings = await loadMerchantMappings(userContext(req));
+    const merchantMappings = await loadMerchantMappings(ctx);
 
     // Parse transactions
     const transactions: ParsedTransaction[] = [];
@@ -375,10 +377,12 @@ router.post('/:accountId/preview', upload.single('file'), async (req, res) => {
     console.error('Error previewing CSV:', error);
     res.status(500).json({ message: 'Failed to preview CSV file' });
   }
-});
+}));
 
 // Import transactions from CSV
-router.post('/:accountId/import', upload.single('file'), async (req, res) => {
+router.post('/:accountId/import', upload.single('file'), asyncHandler(async (req, res) => {
+  const ctx = userContext(req);
+  const { db } = ctx;
   try {
     const { accountId } = req.params;
     const { skipDuplicates = true } = req.body;
@@ -389,7 +393,7 @@ router.post('/:accountId/import', upload.single('file'), async (req, res) => {
     }
 
     // Verify account exists
-    const { data: account, error: accountError } = await supabase
+    const { data: account, error: accountError } = await db
       .from('accounts')
       .select('id')
       .eq('id', accountId)
@@ -423,7 +427,7 @@ router.post('/:accountId/import', upload.single('file'), async (req, res) => {
     }
 
     // Get existing transactions for duplicate detection
-    const { data: existingTransactions } = await supabase
+    const { data: existingTransactions } = await db
       .from('transactions')
       .select('date, merchant_name, original_description, merchant_display_name, amount, csv_reference')
       .eq('account_id', accountId);
@@ -448,14 +452,14 @@ router.post('/:accountId/import', upload.single('file'), async (req, res) => {
     });
 
     // Get categories and merchant mappings
-    const { data: categories } = await supabase.from('categories').select('id, name');
+    const { data: categories } = await db.from('categories').select('id, name');
     const categoryMap = new Map(categories?.map(c => [c.name, c.id]) || []);
 
-    const merchantMappings = await loadMerchantMappings(userContext(req));
+    const merchantMappings = await loadMerchantMappings(ctx);
 
     // Create import record
     const importId = randomUUID();
-    const { error: importError } = await supabase.from('csv_imports').insert({
+    const { error: importError } = await db.from('csv_imports').insert({
       id: importId,
       account_id: accountId,
       file_name: file.originalname,
@@ -528,7 +532,7 @@ router.post('/:accountId/import', upload.single('file'), async (req, res) => {
         }
 
         // Insert transaction with import_id
-        const { error: insertError } = await supabase.from('transactions').insert({
+        const { error: insertError } = await db.from('transactions').insert({
           id: randomUUID(),
           account_id: accountId,
           plaid_transaction_id: null,
@@ -565,14 +569,14 @@ router.post('/:accountId/import', upload.single('file'), async (req, res) => {
     }
 
     // Update import record with final count
-    await supabase
+    await db
       .from('csv_imports')
       .update({ transaction_count: imported })
       .eq('id', importId);
 
     // If no transactions were imported, delete the import record
     if (imported === 0) {
-      await supabase.from('csv_imports').delete().eq('id', importId);
+      await db.from('csv_imports').delete().eq('id', importId);
     }
 
     const response: ImportResponse = {
@@ -589,14 +593,15 @@ router.post('/:accountId/import', upload.single('file'), async (req, res) => {
     console.error('Error importing CSV:', error);
     res.status(500).json({ message: 'Failed to import CSV file' });
   }
-});
+}));
 
 // Get all imports for an account
-router.get('/:accountId/imports', async (req, res) => {
+router.get('/:accountId/imports', asyncHandler(async (req, res) => {
+  const { db } = userContext(req);
   try {
     const { accountId } = req.params;
 
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('csv_imports')
       .select('*')
       .eq('account_id', accountId)
@@ -608,15 +613,16 @@ router.get('/:accountId/imports', async (req, res) => {
     console.error('Error fetching imports:', error);
     res.status(500).json({ message: 'Failed to fetch imports' });
   }
-});
+}));
 
 // Delete an import (and all its transactions)
-router.delete('/imports/:importId', async (req, res) => {
+router.delete('/imports/:importId', asyncHandler(async (req, res) => {
+  const { db } = userContext(req);
   try {
     const { importId } = req.params;
 
     // Transactions will be cascade deleted due to foreign key
-    const { error } = await supabase
+    const { error } = await db
       .from('csv_imports')
       .delete()
       .eq('id', importId);
@@ -629,11 +635,12 @@ router.delete('/imports/:importId', async (req, res) => {
     console.error('Error deleting import:', error);
     res.status(500).json({ message: 'Failed to delete import' });
   }
-});
+}));
 
 // Backfill csv_reference for existing transactions by matching CSV rows
 // Matches on date + amount + description/merchant name
-router.post('/:accountId/backfill-references', upload.single('file'), async (req, res) => {
+router.post('/:accountId/backfill-references', upload.single('file'), asyncHandler(async (req, res) => {
+  const { db } = userContext(req);
   try {
     const { accountId } = req.params;
     const file = req.file;
@@ -665,7 +672,7 @@ router.post('/:accountId/backfill-references', upload.single('file'), async (req
     }
 
     // Get existing transactions without csv_reference
-    const { data: existingTransactions, error } = await supabase
+    const { data: existingTransactions, error } = await db
       .from('transactions')
       .select('id, date, amount, merchant_name, original_description, merchant_display_name')
       .eq('account_id', accountId)
@@ -720,7 +727,7 @@ router.post('/:accountId/backfill-references', upload.single('file'), async (req
         }) || candidates.find(t => !alreadyMatched.has(t.id)); // Fallback: first unmatched with same date+amount
 
         if (match) {
-          const { error: updateError } = await supabase
+          const { error: updateError } = await db
             .from('transactions')
             .update({ csv_reference: reference })
             .eq('id', match.id);
@@ -743,6 +750,6 @@ router.post('/:accountId/backfill-references', upload.single('file'), async (req
     console.error('Error backfilling references:', error);
     res.status(500).json({ message: 'Failed to backfill references' });
   }
-});
+}));
 
 export default router;
