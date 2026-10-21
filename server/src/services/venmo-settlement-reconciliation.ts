@@ -3,6 +3,7 @@ import { fetchAllRows } from '../utils/paginate.js';
 import { detectTransactionType, isVenmoAccount } from './transaction-type.js';
 import type { PlaidPFC } from './categorizer.js';
 import {
+  DEFAULT_WINDOW_DAYS,
   findSettlementMatches,
   type SplitCandidate,
   type VenmoTransactionCandidate,
@@ -60,12 +61,19 @@ interface TransactionDateRow {
   date: string;
 }
 
+const daysAgo = (days: number): string => new Date(Date.now() - days * DAY_MS).toISOString().slice(0, 10);
+
 /**
- * Unsettled "others owe me" splits, with their derived remaining amount. Read-only against
- * transaction_splits — nothing here writes to a split, ever.
+ * Unsettled "others owe me" splits, with their derived remaining amount, newest first. Only
+ * splits whose parent transaction is on or after `sinceDate` are returned (default: the last
+ * DEFAULT_LOOKBACK_DAYS days; null means all history) — an old split was most likely repaid some
+ * other way (cash, Zelle) or never meant to be, and should not sit in the pending list forever.
+ * Read-only against transaction_splits — nothing here writes to a split, ever.
  */
-export const loadUnsettledSplits = async (): Promise<UnsettledSplit[]> => {
-  const splits = await fetchAllRows<SplitRow>(
+export const loadUnsettledSplits = async (
+  sinceDate: string | null = daysAgo(DEFAULT_LOOKBACK_DAYS),
+): Promise<UnsettledSplit[]> => {
+  const allSplits = await fetchAllRows<SplitRow>(
     (from, to) =>
       supabase
         .from('transaction_splits')
@@ -75,13 +83,17 @@ export const loadUnsettledSplits = async (): Promise<UnsettledSplit[]> => {
         .range(from, to),
     { keyOf: (s) => s.id },
   );
-  if (splits.length === 0) return [];
+  if (allSplits.length === 0) return [];
 
-  const parentIds = [...new Set(splits.map((s) => s.parent_transaction_id))];
-  const parentRows = await selectInBatches<TransactionDateRow>(parentIds, (ids) =>
-    supabase.from('transactions').select('id, date').in('id', ids),
-  );
+  const parentIds = [...new Set(allSplits.map((s) => s.parent_transaction_id))];
+  const parentRows = await selectInBatches<TransactionDateRow>(parentIds, (ids) => {
+    const query = supabase.from('transactions').select('id, date').in('id', ids);
+    return sinceDate ? query.gte('date', sinceDate) : query;
+  });
+  // A parent outside the window is not returned, which drops its splits.
   const datesByTransactionId = new Map(parentRows.map((t) => [t.id, t.date]));
+  const splits = allSplits.filter((s) => datesByTransactionId.has(s.parent_transaction_id));
+  if (splits.length === 0) return [];
 
   const splitIds = splits.map((s) => s.id);
   const settlementRows = await selectInBatches<{ split_id: string; amount: number }>(splitIds, (ids) =>
@@ -96,10 +108,12 @@ export const loadUnsettledSplits = async (): Promise<UnsettledSplit[]> => {
     .map((s) => ({
       splitId: s.id,
       transactionId: s.parent_transaction_id,
-      date: datesByTransactionId.get(s.parent_transaction_id) ?? '',
+      date: datesByTransactionId.get(s.parent_transaction_id)!,
       remainingAmount: Math.abs(s.amount) - (settledBySplitId.get(s.id) ?? 0),
     }))
-    .filter((s) => s.remainingAmount > AMOUNT_TOLERANCE);
+    .filter((s) => s.remainingAmount > AMOUNT_TOLERANCE)
+    // Newest first; split id breaks ties so the order is stable between calls.
+    .sort((a, b) => (a.date !== b.date ? (a.date < b.date ? 1 : -1) : a.splitId < b.splitId ? -1 : 1));
 };
 
 interface VenmoCandidateRow {
@@ -146,11 +160,16 @@ const loadUnmatchedVenmoTransactions = async (sinceDate: string | null): Promise
  * transactions are excluded from candidates every time.
  */
 export const reconcileVenmoSettlements = async ({
-  sinceDate = new Date(Date.now() - DEFAULT_LOOKBACK_DAYS * DAY_MS).toISOString().slice(0, 10),
+  sinceDate = daysAgo(DEFAULT_LOOKBACK_DAYS),
   apply = true,
 }: ReconcileVenmoOptions = {}): Promise<VenmoSettlementResult[]> => {
+  // A Venmo payment can settle a split up to the matcher's window before it, so reach that much
+  // further back for splits than for Venmo transactions.
+  const splitsSinceDate = sinceDate
+    ? new Date(Date.parse(sinceDate) - DEFAULT_WINDOW_DAYS * DAY_MS).toISOString().slice(0, 10)
+    : null;
   const [unsettledSplits, venmoRows] = await Promise.all([
-    loadUnsettledSplits(),
+    loadUnsettledSplits(splitsSinceDate),
     loadUnmatchedVenmoTransactions(sinceDate),
   ]);
 

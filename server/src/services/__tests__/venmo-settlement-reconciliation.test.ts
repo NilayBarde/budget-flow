@@ -160,6 +160,26 @@ describe('venmo-settlement-reconciliation', () => {
     expect(await loadUnsettledSplits()).toEqual([]);
   });
 
+  it('loadUnsettledSplits leaves out splits older than the lookback window, and lists the rest newest first', async () => {
+    state.transactions = [
+      { id: 'ancient', account_id: 'bank-acct', amount: 40, date: daysAgo(400) },
+      { id: 'older', account_id: 'bank-acct', amount: 40, date: daysAgo(30) },
+      { id: 'newer', account_id: 'bank-acct', amount: 40, date: daysAgo(2) },
+    ];
+    // Inserted oldest-first, so a loader that does not sort returns them in the wrong order.
+    state.splits = [
+      { id: 'split-ancient', parent_transaction_id: 'ancient', amount: 20, is_my_share: false },
+      { id: 'split-older', parent_transaction_id: 'older', amount: 20, is_my_share: false },
+      { id: 'split-newer', parent_transaction_id: 'newer', amount: 20, is_my_share: false },
+    ];
+
+    const unsettled = await loadUnsettledSplits();
+
+    expect(unsettled.map((s) => s.splitId)).toEqual(['split-newer', 'split-older']);
+    // null still reaches all the way back, for a deliberate full-history dry run.
+    expect((await loadUnsettledSplits(null)).map((s) => s.splitId)).toEqual(['split-newer', 'split-older', 'split-ancient']);
+  });
+
   it('matches and applies: inserts a settlement row and retypes the Venmo transaction', async () => {
     seedBasicScenario();
     const results = await reconcileVenmoSettlements({ apply: true });
