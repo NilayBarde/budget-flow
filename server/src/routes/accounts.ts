@@ -5,8 +5,11 @@ import { buildAccountResolver } from '../services/sync-attribution.js';
 import { applySyncResult } from '../services/sync-transactions.js';
 import { getPlaidErrorCode, needsReconnect, redactError } from '../services/plaid-errors.js';
 import { recordSyncFailure } from '../services/sync-error.js';
+import { removeItemIfUnused } from '../services/plaid-items.js';
+import { isManualToken } from '../services/account-types.js';
+import { findIdleConnections, IDLE_SNOOZE_DAYS, type IdleCheckAccount, type IdleConnection } from '../services/idle-connections.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
 import { classifySyncHealth, DEFAULT_STALE_DAYS, INVESTMENT_STALE_DAYS, parseStaleDaysOverride } from '../services/sync-health.js';
-import { isHoldingsAccountType } from '../services/account-types.js';
 import { toPublicAccount } from '../services/account-redaction.js';
 import { randomUUID } from 'node:crypto';
 
@@ -18,42 +21,63 @@ const SYNC_COOLDOWN_MS = 30_000; // 30 seconds
 const lastSyncByAccount = new Map<string, number>();
 
 // Get all accounts
-router.get('/', async (req, res) => {
-  try {
-    const { data: accounts, error } = await supabase
-      .from('accounts')
-      .select('*')
-      .order('created_at', { ascending: false });
+router.get('/', asyncHandler(async (req, res) => {
+  const { data: accounts, error } = await supabase
+    .from('accounts')
+    .select('*')
+    .order('created_at', { ascending: false });
 
-    if (error) throw error;
+  if (error) throw error;
 
-    // Get the most recent CSV import date for each account
-    const { data: lastImports } = await supabase
-      .from('csv_imports')
-      .select('account_id, created_at')
-      .order('created_at', { ascending: false });
+  // Get the most recent CSV import date for each account
+  const { data: lastImports } = await supabase
+    .from('csv_imports')
+    .select('account_id, created_at')
+    .order('created_at', { ascending: false });
 
-    // Build a map of account_id -> most recent import date
-    const lastImportMap = new Map<string, string>();
-    for (const imp of lastImports || []) {
-      if (!lastImportMap.has(imp.account_id)) {
-        lastImportMap.set(imp.account_id, imp.created_at);
-      }
+  // Build a map of account_id -> most recent import date
+  const lastImportMap = new Map<string, string>();
+  for (const imp of lastImports || []) {
+    if (!lastImportMap.has(imp.account_id)) {
+      lastImportMap.set(imp.account_id, imp.created_at);
     }
-
-    // Merge last import dates into accounts
-    // Use csv_imports table first, fall back to account's own last_csv_import_at (set by holdings import)
-    const accountsWithLastImport = accounts?.map(account => ({
-      ...toPublicAccount(account),
-      last_csv_import_at: lastImportMap.get(account.id) || account.last_csv_import_at || null,
-    }));
-
-    res.json(accountsWithLastImport);
-  } catch (error) {
-    console.error('Error fetching accounts:', error);
-    res.status(500).json({ message: 'Failed to fetch accounts' });
   }
-});
+
+  const idle = await findIdleAccounts(accounts || []);
+
+  // Merge last import dates into accounts
+  // Use csv_imports table first, fall back to account's own last_csv_import_at (set by holdings import)
+  const accountsWithLastImport = accounts?.map(account => ({
+    ...toPublicAccount(account),
+    last_csv_import_at: lastImportMap.get(account.id) || account.last_csv_import_at || null,
+    idle: idle.get(account.id) ?? null,
+  }));
+
+  res.json(accountsWithLastImport);
+}));
+
+// Plaid connections with no activity in a while, which the Accounts page suggests disconnecting.
+// One "newest transaction" lookup per Plaid account (about 20, run in parallel). It is a nudge, so
+// a failed lookup leaves it out rather than failing the accounts list.
+const findIdleAccounts = async (accounts: IdleCheckAccount[]) => {
+  try {
+    const plaidAccounts = accounts.filter(a => !isManualToken(a.plaid_access_token));
+    const withDates = await Promise.all(plaidAccounts.map(async account => {
+      const { data: newest, error } = await supabase
+        .from('transactions')
+        .select('date')
+        .eq('account_id', account.id)
+        .order('date', { ascending: false })
+        .limit(1);
+      if (error) throw error;
+      return { ...account, last_transaction_date: newest?.[0]?.date ?? null };
+    }));
+    return findIdleConnections(withDates, Date.now());
+  } catch (error) {
+    console.warn('Could not check for idle Plaid connections:', redactError(error));
+    return new Map<string, IdleConnection>();
+  }
+};
 
 // Sync health: which Plaid-linked accounts need attention (re-auth required, or
 // haven't synced successfully in a while). Manual accounts are excluded since
@@ -160,45 +184,16 @@ router.post('/:id/sync', async (req, res) => {
     // Record sync timestamp before making Plaid calls
     lastSyncByAccount.set(id, Date.now());
 
-    // 1. Fetch Latest Balances (Concurrently if possible)
+    // 1. Fetch latest balance (works for investment accounts too)
     let latestBalance: number | null = account.current_balance;
-    const isInvestment = isHoldingsAccountType(account.account_type);
-
     try {
-      if (isInvestment) {
-        console.log(`[Sync] Attempting investment holdings balance for ${account.institution_name} (${id})...`);
-        try {
-          const holdings = await plaidService.getInvestmentHoldings(account.plaid_access_token);
-          const plaidAccount = holdings.accounts.find(a => a.account_id === account.plaid_account_id);
-          if (plaidAccount && plaidAccount.balances.current !== null) {
-            latestBalance = plaidAccount.balances.current;
-            console.log(`[Sync] Success via getInvestmentHoldings: ${latestBalance}`);
-          } else {
-            console.log(`[Sync] No balance found in holdings for ${id}, falling back to getAccounts...`);
-            const plaidData = await plaidService.getAccounts(account.plaid_access_token);
-            const fallbackAccount = plaidData.accounts.find(a => a.account_id === account.plaid_account_id);
-            if (fallbackAccount) {
-              latestBalance = fallbackAccount.balances.current;
-              console.log(`[Sync] Success via getAccounts (fallback): ${latestBalance}`);
-            }
-          }
-        } catch (holdingsError) {
-          console.warn(`[Sync] getInvestmentHoldings failed for ${id}, attempting fallback to getAccounts...`, redactError(holdingsError));
-          const plaidData = await plaidService.getAccounts(account.plaid_access_token);
-          const fallbackAccount = plaidData.accounts.find(a => a.account_id === account.plaid_account_id);
-          if (fallbackAccount) {
-            latestBalance = fallbackAccount.balances.current;
-            console.log(`[Sync] Success via getAccounts (after holdings error): ${latestBalance}`);
-          }
-        }
-      } else {
-        console.log(`[Sync] Fetching regular account balance for ${account.institution_name} (${id})...`);
-        const plaidData = await plaidService.getAccounts(account.plaid_access_token);
-        const plaidAccount = plaidData.accounts.find(a => a.account_id === account.plaid_account_id);
-        if (plaidAccount) {
-          latestBalance = plaidAccount.balances.current;
-          console.log(`[Sync] Success via getAccounts: ${latestBalance}`);
-        }
+      console.log(`[Sync] Fetching account balance for ${account.institution_name} (${id})...`);
+      const plaidData = await plaidService.getAccounts(account.plaid_access_token);
+      const plaidAccount = plaidData.accounts.find(a => a.account_id === account.plaid_account_id);
+      // Some institutions report no current balance; keep the last known one instead of blanking it
+      if (plaidAccount && plaidAccount.balances.current !== null) {
+        latestBalance = plaidAccount.balances.current;
+        console.log(`[Sync] Success via getAccounts: ${latestBalance}`);
       }
     } catch (balanceError) {
       console.warn(`[Sync] Final balance fetch failure for account ${id}:`, redactError(balanceError));
@@ -324,27 +319,107 @@ router.post('/:id/update-webhook', async (req, res) => {
   }
 });
 
-// Delete an account (also removes from Plaid to keep things clean)
-router.delete('/:id', async (req, res) => {
+// Disconnect a bank connection from Plaid but keep its accounts and their history: each becomes a
+// manual account (balance edited by hand, new activity from CSV imports). It acts on the whole Plaid
+// Item, not one account, because Plaid bills per Item and keeps sending every account on it: a
+// single account taken off a live Item would have its new transactions filed under a sibling.
+router.post('/:id/disconnect', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const { data: account, error: lookupError } = await supabase
+    .from('accounts')
+    .select('plaid_item_id, plaid_access_token')
+    .eq('id', id)
+    .maybeSingle();
+  if (lookupError) throw lookupError;
+  if (!account) return res.status(404).json({ message: 'Account not found' });
+  if (isManualToken(account.plaid_access_token)) {
+    return res.status(400).json({ message: 'Account is not connected to Plaid' });
+  }
+
+  const { data: connection, error: connectionError } = await supabase
+    .from('accounts')
+    .select('id, account_name')
+    .eq('plaid_item_id', account.plaid_item_id);
+  if (connectionError) throw connectionError;
+
+  // Remove the Item at Plaid first. If that fails nothing has changed here, and the access token is
+  // still stored so the user can retry; dropping it first would leave an Item billing forever. An
+  // Item Plaid no longer knows is already gone, which is the outcome we want.
+  try {
+    await plaidService.removeItem(account.plaid_access_token);
+  } catch (plaidError) {
+    const code = getPlaidErrorCode(plaidError);
+    if (code !== 'ITEM_NOT_FOUND' && code !== 'INVALID_ACCESS_TOKEN') {
+      console.warn('Could not remove item from Plaid:', redactError(plaidError));
+      return res.status(502).json({ message: 'Plaid could not remove the connection, so nothing was changed. Try again.' });
+    }
+  }
+
+  for (const row of connection ?? []) {
+    const { error } = await supabase
+      .from('accounts')
+      .update({
+        plaid_item_id: `manual-${row.id}`,
+        plaid_access_token: 'manual',
+        plaid_cursor: null,
+        needs_reauth: false,
+        reauth_detected_at: null,
+        last_sync_error: null,
+        last_sync_error_at: null,
+        relinked_at: null,
+        idle_snoozed_until: null,
+      })
+      .eq('id', row.id);
+    if (error) throw error;
+  }
+
+  // Pending rows will never post now, so they would count as spending forever
+  const ids = (connection ?? []).map(row => row.id);
+  if (ids.length > 0) {
+    const { error } = await supabase.from('transactions').delete().in('account_id', ids).eq('pending', true);
+    if (error) throw error;
+  }
+
+  res.json({ disconnected: (connection ?? []).map(row => row.account_name) });
+}));
+
+// "Keep" on an idle connection: hide the disconnect suggestion for IDLE_SNOOZE_DAYS. It applies to
+// every account on the connection, since the suggestion is about the connection.
+router.post('/:id/snooze-idle', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const { data: account, error: lookupError } = await supabase
+    .from('accounts')
+    .select('plaid_item_id, plaid_access_token')
+    .eq('id', id)
+    .maybeSingle();
+  if (lookupError) throw lookupError;
+  if (!account) return res.status(404).json({ message: 'Account not found' });
+  if (isManualToken(account.plaid_access_token)) {
+    return res.status(400).json({ message: 'Account is not connected to Plaid' });
+  }
+
+  const snoozedUntil = new Date(Date.now() + IDLE_SNOOZE_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const { error } = await supabase
+    .from('accounts')
+    .update({ idle_snoozed_until: snoozedUntil })
+    .eq('plaid_item_id', account.plaid_item_id);
+  if (error) throw error;
+
+  res.json({ idle_snoozed_until: snoozedUntil });
+}));
+
+// Delete an account (and its Plaid Item once no other account uses it)
+router.delete('/:id', asyncHandler(async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Get the access token to remove from Plaid
     const { data: account } = await supabase
       .from('accounts')
       .select('plaid_access_token')
       .eq('id', id)
       .single();
-
-    // Remove from Plaid (optional - helps keep Plaid dashboard clean)
-    if (account?.plaid_access_token) {
-      try {
-        await plaidService.removeItem(account.plaid_access_token);
-      } catch (plaidError) {
-        console.warn('Could not remove item from Plaid:', redactError(plaidError));
-        // Continue with local deletion even if Plaid removal fails
-      }
-    }
 
     // Delete all transactions for this account first
     await supabase.from('transactions').delete().eq('account_id', id);
@@ -352,12 +427,16 @@ router.delete('/:id', async (req, res) => {
     const { error } = await supabase.from('accounts').delete().eq('id', id);
 
     if (error) throw error;
+
+    // Stop Plaid billing for the connection, unless another account (the same bank's card, say) still uses it
+    if (account?.plaid_access_token) await removeItemIfUnused(account.plaid_access_token);
+
     res.status(204).send();
   } catch (error) {
     console.error('Error deleting account:', error);
     res.status(500).json({ message: 'Failed to delete account' });
   }
-});
+}));
 
 // Refresh accounts from Plaid - fetches any missing accounts from an existing Plaid Item
 // This is useful when the original link only stored one account but Plaid has multiple

@@ -75,6 +75,15 @@ export const Accounts = () => {
     return groups;
   }, [accounts]);
 
+  // Plaid bills per bank connection, which can hold several accounts (a bank's checking and card)
+  const namesByConnection = useMemo(() => {
+    const names = new Map<string, string[]>();
+    for (const account of accounts ?? []) {
+      names.set(account.plaid_item_id, [...(names.get(account.plaid_item_id) ?? []), account.account_name]);
+    }
+    return names;
+  }, [accounts]);
+
   const hasAnyAccounts = accounts && accounts.length > 0;
 
   const renderAccountGroup = (title: string, groupAccounts: Account[], icon: React.ReactNode) => {
@@ -96,6 +105,7 @@ export const Accounts = () => {
             <AccountCard
               key={account.id}
               account={account}
+              connectionAccountNames={namesByConnection.get(account.plaid_item_id) ?? [account.account_name]}
               onImportCsv={handleImportCsv}
               onViewHistory={handleViewHistory}
               onEdit={handleEditAccount}

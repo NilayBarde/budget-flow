@@ -6,6 +6,10 @@ import { redactError } from '../services/plaid-errors.js';
 import { recordSyncFailure } from '../services/sync-error.js';
 import { toPublicAccount } from '../services/account-redaction.js';
 import { randomUUID } from 'node:crypto';
+import { matchRelinkedAccounts, type LinkedPlaidAccount, type StoredPlaidAccount } from '../services/relink.js';
+import { isManualToken } from '../services/account-types.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
+import { removeItemIfUnused } from '../services/plaid-items.js';
 
 const router = Router();
 
@@ -54,7 +58,7 @@ router.post('/create-link-token', async (req, res) => {
   }
 });
 
-// Create update mode link token to add investments permission to existing accounts
+// Create update mode link token to reconnect or change an existing Plaid connection
 router.post('/create-update-link-token', async (req, res) => {
   try {
     const { account_id, redirect_uri } = req.body;
@@ -130,7 +134,7 @@ router.post('/log-link-event', async (req, res) => {
 });
 
 // Exchange public token for access token
-router.post('/exchange-token', async (req, res) => {
+router.post('/exchange-token', asyncHandler(async (req, res) => {
   try {
     const { public_token, metadata } = req.body;
 
@@ -156,17 +160,36 @@ router.post('/exchange-token', async (req, res) => {
 
     console.log(`Found ${plaidAccounts.length} accounts from ${institutionName}`);
 
-    // Check for existing accounts with the same plaid_account_id to prevent duplicates
-    // This handles the case where a user relinks the same bank (new item_id/access_token, same plaid_account_id)
+    // A re-link of a bank we already have creates a new Item. Find the stored accounts it replaces:
+    // any account Plaid kept the id of, plus this institution's other Plaid accounts, including ones
+    // the user disconnected (manual now, but they keep their Plaid account id), which this reconnects.
     const plaidAccountIds = plaidAccounts.map(a => a.account_id);
-    const { data: existingAccounts } = await supabase
-      .from('accounts')
-      .select('id, plaid_account_id')
-      .in('plaid_account_id', plaidAccountIds);
+    const columns = 'id, plaid_account_id, plaid_item_id, plaid_access_token, account_name, account_type';
+    const [byId, byInstitution] = await Promise.all([
+      supabase.from('accounts').select(columns).in('plaid_account_id', plaidAccountIds),
+      supabase.from('accounts').select(columns).eq('institution_name', institutionName),
+    ]);
+    const relinkable = new Map<string, StoredPlaidAccount>();
+    for (const row of [...(byId.data || []), ...(byInstitution.data || [])] as StoredPlaidAccount[]) {
+      const wasPlaid = !isManualToken(row.plaid_access_token) || Boolean(row.plaid_account_id);
+      if (row.plaid_item_id !== itemId && wasPlaid) relinkable.set(row.id, row);
+    }
 
-    const existingByPlaidId = new Map(
-      (existingAccounts || []).map(a => [a.plaid_account_id, a.id])
-    );
+    // What each old Item still reports about its accounts, when it can still be read. Its masks keep a
+    // second login's look-alike account from being taken for this one. /accounts/get is free.
+    const oldPlaidAccounts = new Map<string, LinkedPlaidAccount>();
+    for (const oldToken of new Set([...relinkable.values()].map(a => a.plaid_access_token))) {
+      if (isManualToken(oldToken)) continue;
+      try {
+        const old = await plaidService.getAccounts(oldToken);
+        for (const account of old.accounts) oldPlaidAccounts.set(account.account_id, account);
+      } catch {
+        // Usually the reason for the re-link (the login expired). The stored name and type stand in.
+      }
+    }
+
+    const relinked = matchRelinkedAccounts(plaidAccounts, [...relinkable.values()], oldPlaidAccounts);
+    const existingByPlaidId = new Map([...relinked].map(([plaidAccountId, stored]) => [plaidAccountId, stored.id]));
 
     // Store or update ALL accounts from this Plaid Item
     for (const plaidAccount of plaidAccounts) {
@@ -179,10 +202,17 @@ router.post('/exchange-token', async (req, res) => {
           .update({
             plaid_item_id: itemId,
             plaid_access_token: accessToken,
+            plaid_account_id: plaidAccount.account_id,
+            plaid_cursor: null,
+            // The new Item resends the history: every sync adopts stored copies until it is all in
+            historical_sync_complete: false,
+            relinked_at: new Date().toISOString(),
+            // A snooze was about the replaced connection
+            idle_snoozed_until: null,
             institution_name: institutionName,
-            account_name: plaidAccount.name || 'Account',
+            // account_name is left alone: the user may have renamed it
             account_type: plaidAccount.subtype || plaidAccount.type || 'unknown',
-            current_balance: plaidAccount.balances?.current ?? null,
+            ...(plaidAccount.balances?.current != null && { current_balance: plaidAccount.balances.current }),
           })
           .eq('id', existingId);
 
@@ -233,6 +263,19 @@ router.post('/exchange-token', async (req, res) => {
       throw new Error('Failed to create any accounts');
     }
 
+    // The old Item's pending rows will never post now. The new Item sends today's pending
+    // transactions again, so drop the stale copies rather than count them twice.
+    const relinkedIds = [...relinked.values()].map(a => a.id);
+    if (relinkedIds.length > 0) {
+      const { error: pendingError } = await supabase.from('transactions').delete().in('account_id', relinkedIds).eq('pending', true);
+      if (pendingError) console.warn('Could not clear pending rows from the replaced Item:', redactError(pendingError));
+    }
+
+    // Plaid bills every Item monthly, so remove each old Item once none of our accounts use it.
+    for (const oldToken of new Set([...relinked.values()].map(a => a.plaid_access_token))) {
+      if (await removeItemIfUnused(oldToken)) console.log(`Removed the replaced Plaid Item for ${institutionName}`);
+    }
+
     // Auto-sync transactions after connecting using /transactions/sync
     console.log('Auto-syncing transactions for new accounts...');
 
@@ -255,6 +298,7 @@ router.post('/exchange-token', async (req, res) => {
       });
 
       console.log(`Auto-synced ${counts.added} transactions across ${createdAccounts.length} accounts`);
+      if (counts.adopted > 0) console.log(`Carried over ${counts.adopted} stored transaction(s) from the re-linked Item`);
       if (counts.skipped > 0) {
         // These belong to an account that failed to link, and the cursor has moved past them.
         console.warn(`Skipped ${counts.skipped} transaction(s) for accounts that could not be linked`);
@@ -295,7 +339,7 @@ router.post('/exchange-token', async (req, res) => {
     const userMessage = errorDetails?.display_message || errorDetails?.error_message || 'Failed to connect account. Please try again.';
     res.status(500).json({ message: userMessage });
   }
-});
+}));
 
 export default router;
 

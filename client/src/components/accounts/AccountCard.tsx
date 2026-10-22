@@ -1,13 +1,15 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { usePlaidLink } from 'react-plaid-link';
-import { RefreshCw, Trash2, Upload, History, MoreVertical, KeyRound, Users, Eye, EyeOff, Pencil } from 'lucide-react';
+import clsx from 'clsx';
+import { RefreshCw, Trash2, Upload, History, MoreVertical, KeyRound, Users, Eye, EyeOff, Pencil, Unlink } from 'lucide-react';
 import { Card, Button } from '../ui';
 import type { Account } from '../../types';
 import { formatDate } from '../../utils/formatters';
-import { isManualAccount } from '../../utils/account-types';
+import { isDisconnectedAccount, isManualAccount } from '../../utils/account-types';
 import { ReconnectNotice } from './ReconnectNotice';
 import { SyncErrorNotice } from './SyncErrorNotice';
-import { useSyncAccount, useDeleteAccount, useRefreshAccounts, useCreatePlaidUpdateLinkToken, useToggleAccountInvestmentExclusion } from '../../hooks';
+import { IdleConnectionNotice } from './IdleConnectionNotice';
+import { useSyncAccount, useDeleteAccount, useDisconnectAccount, useSnoozeIdleConnection, useRefreshAccounts, useCreatePlaidUpdateLinkToken, useToggleAccountInvestmentExclusion } from '../../hooks';
 
 
 // Wrapper component for Plaid Link update mode - only renders when we have a token
@@ -35,8 +37,54 @@ const PlaidLinkUpdate = ({ token, onSuccess, onExit, institutionName }: PlaidLin
   return null; // This component doesn't render anything visible
 };
 
+// Marks an account that was disconnected from Plaid (Disconnect, keeps history)
+const DisconnectedPill = () => (
+  <span
+    className="inline-flex items-center gap-1 text-xs font-medium text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/30 flex-shrink-0"
+    title="Disconnected from Plaid. Its transaction history is kept; add new activity with CSV imports."
+  >
+    <Unlink className="h-3 w-3" />
+    Disconnected
+  </span>
+);
+
+interface RemoveMenuItemsProps {
+  isManual: boolean;
+  onDisconnect: () => void;
+  onDelete: () => void;
+  disconnectPending: boolean;
+  deletePending: boolean;
+}
+
+// The bottom of the account menu, shared by the mobile and desktop layouts
+const RemoveMenuItems = ({ isManual, onDisconnect, onDelete, disconnectPending, deletePending }: RemoveMenuItemsProps) => (
+  <>
+    {!isManual && (
+      <button
+        onClick={onDisconnect}
+        disabled={disconnectPending}
+        className="w-full px-3 py-2 text-left text-sm text-amber-400 hover:bg-midnight-700 flex items-center gap-2 disabled:opacity-50"
+      >
+        <Unlink className="h-4 w-4" />
+        Disconnect
+        <span className="text-xs text-slate-500 ml-auto">Keeps history</span>
+      </button>
+    )}
+    <button
+      onClick={onDelete}
+      disabled={deletePending}
+      className="w-full px-3 py-2 text-left text-sm text-rose-400 hover:bg-midnight-700 flex items-center gap-2 disabled:opacity-50"
+    >
+      <Trash2 className="h-4 w-4" />
+      Delete Account
+    </button>
+  </>
+);
+
 interface AccountCardProps {
   account: Account;
+  /** Every account on this account's bank connection, itself included */
+  connectionAccountNames: string[];
   onImportCsv?: (account: Account) => void;
   onViewHistory?: (account: Account) => void;
   onEdit?: (account: Account) => void;
@@ -66,9 +114,11 @@ const getOAuthRedirectUri = () => {
   return;
 };
 
-export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: AccountCardProps) => {
+export const AccountCard = ({ account, connectionAccountNames, onImportCsv, onViewHistory, onEdit }: AccountCardProps) => {
   const syncAccount = useSyncAccount();
   const deleteAccount = useDeleteAccount();
+  const disconnectAccount = useDisconnectAccount();
+  const snoozeIdle = useSnoozeIdleConnection();
   const refreshAccounts = useRefreshAccounts();
   const createUpdateLinkToken = useCreatePlaidUpdateLinkToken();
   const toggleExclusion = useToggleAccountInvestmentExclusion();
@@ -80,6 +130,13 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: Acc
   const desktopMenuRef = useRef<HTMLDivElement>(null);
 
   const isManual = isManualAccount(account);
+  const isDisconnected = isDisconnectedAccount(account);
+  // A manual account with no imports is a warning, unless it was disconnected from Plaid with its history kept
+  const importStatus = [
+    isDisconnected && 'History kept',
+    account.last_csv_import_at && `Last imported: ${formatDate(account.last_csv_import_at)}`,
+  ].filter(Boolean).join(' · ') || 'No imports yet';
+  const importStatusWarns = importStatus === 'No imports yet';
   const isCreditCard = isCreditCardAccount(account.account_type);
   const isInvestment = isInvestmentAccount(account.account_type);
 
@@ -107,10 +164,32 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: Acc
   }, [syncAccount, account.id]);
 
   const handleDelete = useCallback(() => {
-    if (confirm(`Are you sure you want to disconnect ${account.institution_name}?`)) {
+    const history = isManual ? '' : ' and all of its transaction history (use Disconnect to keep the history)';
+    if (confirm(`Delete ${account.institution_name} ${account.account_name}${history}? This can't be undone.`)) {
       deleteAccount.mutate(account.id);
     }
-  }, [deleteAccount, account.institution_name, account.id]);
+  }, [deleteAccount, isManual, account.institution_name, account.account_name, account.id]);
+
+  // Plaid bills, and keeps syncing, the whole bank connection, so Disconnect takes all of its accounts
+  const handleDisconnect = useCallback(() => {
+    const scope = connectionAccountNames.length > 1
+      ? `This disconnects the whole ${account.institution_name} connection: ${connectionAccountNames.join(', ')}.`
+      : `This disconnects ${account.institution_name} ${account.account_name}.`;
+    const message = `${scope}\n\n`
+      + 'Transaction history is kept. Each account becomes a manual account: edit the balance by hand and add new activity with CSV imports. '
+      + 'Plaid stops billing the connection. Linking the bank again later reconnects these accounts.';
+    if (!confirm(message)) return;
+    disconnectAccount.mutate(account.id, {
+      onSuccess: result => {
+        setRefreshResult(`Disconnected from Plaid, history kept: ${result.disconnected.join(', ')}`);
+        setTimeout(() => setRefreshResult(null), 8000);
+      },
+      onError: error => {
+        setUpdateError(error.message);
+        setTimeout(() => setUpdateError(null), 8000);
+      },
+    });
+  }, [disconnectAccount, connectionAccountNames, account.institution_name, account.account_name, account.id]);
 
   const handleImportCsv = useCallback(() => {
     onImportCsv?.(account);
@@ -258,7 +337,13 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: Acc
         />
       )}
 
-      <Card className="hover:border-midnight-500 transition-colors" padding="sm">
+      <Card
+        className={clsx(
+          'transition-colors',
+          isDisconnected ? 'border-dashed border-amber-500/50! hover:border-amber-500/70!' : 'hover:border-midnight-500',
+        )}
+        padding="sm"
+      >
         {/* The bank login expired: offer the reconnect flow right on the card */}
         {account.needs_reauth && !isManual && (
           <ReconnectNotice onReconnect={handleOpenUpdateLink} isLoading={createUpdateLinkToken.isPending} />
@@ -267,6 +352,23 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: Acc
         {/* The last sync failed for another reason: show it. Reconnect covers the expired login. */}
         {account.last_sync_error && !account.needs_reauth && !isManual && (
           <SyncErrorNotice message={account.last_sync_error} failedAt={account.last_sync_error_at} />
+        )}
+
+        {/* The connection has gone quiet: suggest disconnecting it, since Plaid bills it monthly anyway */}
+        {account.idle && !isManual && (
+          <IdleConnectionNotice
+            institutionName={account.institution_name}
+            lastActivity={account.idle.last_activity}
+            updatesBalances={account.idle.updates_balances}
+            onDisconnect={handleDisconnect}
+            onKeep={() => snoozeIdle.mutate(account.id, {
+              onError: error => {
+                setUpdateError(error.message);
+                setTimeout(() => setUpdateError(null), 8000);
+              },
+            })}
+            busy={disconnectAccount.isPending || snoozeIdle.isPending}
+          />
         )}
 
         {/* Refresh accounts result message */}
@@ -280,7 +382,10 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: Acc
         <div className="md:hidden">
           <div className="flex items-start gap-3">
             <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold flex-shrink-0"
+              className={clsx(
+                'w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold flex-shrink-0',
+                isDisconnected && 'opacity-50 grayscale',
+              )}
               style={{ backgroundColor: institutionColor }}
             >
               {account.institution_name.charAt(0).toUpperCase()}
@@ -288,7 +393,10 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: Acc
 
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between gap-2">
-                <h3 className="font-semibold text-slate-100 truncate">{account.institution_name}</h3>
+                <div className="flex items-center gap-2 min-w-0">
+                  <h3 className="font-semibold text-slate-100 truncate">{account.institution_name}</h3>
+                  {isDisconnected && <DisconnectedPill />}
+                </div>
                 <BalanceDisplay />
               </div>
               <p className="text-sm text-slate-400 truncate">
@@ -303,10 +411,8 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: Acc
                 Connected {formatDate(account.created_at)}
               </p>
               {isManual && (
-                <p className={`text-xs mt-0.5 ${account.last_csv_import_at ? 'text-slate-500' : 'text-amber-400'}`}>
-                  {account.last_csv_import_at
-                    ? `Last imported: ${formatDate(account.last_csv_import_at)}`
-                    : 'No imports yet'}
+                <p className={clsx('text-xs mt-0.5', importStatusWarns ? 'text-amber-400' : 'text-slate-500')}>
+                  {importStatus}
                 </p>
               )}
             </div>
@@ -380,7 +486,6 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: Acc
                       >
                         <KeyRound className="h-4 w-4 text-accent-400" />
                         Update Connection
-                        <span className="text-xs text-slate-500 ml-auto">Investments</span>
                       </button>
                       <button
                         onClick={() => handleMenuAction(handleRefreshAccounts)}
@@ -427,14 +532,13 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: Acc
                   )}
 
                   <div className="border-t border-midnight-600 my-1" />
-                  <button
-                    onClick={() => handleMenuAction(handleDelete)}
-                    disabled={deleteAccount.isPending}
-                    className="w-full px-3 py-2 text-left text-sm text-rose-400 hover:bg-midnight-700 flex items-center gap-2 disabled:opacity-50"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    {isManual ? 'Delete Account' : 'Disconnect Account'}
-                  </button>
+                  <RemoveMenuItems
+                    isManual={isManual}
+                    onDisconnect={() => handleMenuAction(handleDisconnect)}
+                    onDelete={() => handleMenuAction(handleDelete)}
+                    disconnectPending={disconnectAccount.isPending}
+                    deletePending={deleteAccount.isPending}
+                  />
                 </div>
               )}
             </div>
@@ -444,7 +548,10 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: Acc
         {/* Desktop Layout */}
         <div className="hidden md:flex items-center gap-4">
           <div
-            className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold"
+            className={clsx(
+              'w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold',
+              isDisconnected && 'opacity-50 grayscale',
+            )}
             style={{ backgroundColor: institutionColor }}
           >
             {account.institution_name.charAt(0).toUpperCase()}
@@ -453,6 +560,7 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: Acc
           <div className="flex-1">
             <div className="flex items-center gap-3">
               <h3 className="font-semibold text-slate-100">{account.institution_name}</h3>
+              {isDisconnected && <DisconnectedPill />}
               <BalanceDisplay />
             </div>
             <p className="text-sm text-slate-400">
@@ -468,10 +576,8 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: Acc
                 Connected {formatDate(account.created_at)}
               </p>
               {isManual && (
-                <span className={`text-xs ${account.last_csv_import_at ? 'text-slate-500' : 'text-amber-400'}`}>
-                  • {account.last_csv_import_at
-                    ? `Last imported: ${formatDate(account.last_csv_import_at)}`
-                    : 'No imports yet'}
+                <span className={clsx('text-xs', importStatusWarns ? 'text-amber-400' : 'text-slate-500')}>
+                  • {importStatus}
                 </span>
               )}
             </div>
@@ -542,7 +648,6 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: Acc
                       >
                         <KeyRound className="h-4 w-4 text-accent-400" />
                         Update Connection
-                        <span className="text-xs text-slate-500 ml-auto">Investments</span>
                       </button>
                       <button
                         onClick={() => handleMenuAction(handleRefreshAccounts)}
@@ -589,14 +694,13 @@ export const AccountCard = ({ account, onImportCsv, onViewHistory, onEdit }: Acc
                   )}
 
                   <div className="border-t border-midnight-600 my-1" />
-                  <button
-                    onClick={() => handleMenuAction(handleDelete)}
-                    disabled={deleteAccount.isPending}
-                    className="w-full px-3 py-2 text-left text-sm text-rose-400 hover:bg-midnight-700 flex items-center gap-2 disabled:opacity-50"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    {isManual ? 'Delete Account' : 'Disconnect Account'}
-                  </button>
+                  <RemoveMenuItems
+                    isManual={isManual}
+                    onDisconnect={() => handleMenuAction(handleDisconnect)}
+                    onDelete={() => handleMenuAction(handleDelete)}
+                    disconnectPending={disconnectAccount.isPending}
+                    deletePending={deleteAccount.isPending}
+                  />
                 </div>
               )}
             </div>

@@ -84,6 +84,30 @@ export const useDeleteAccount = () => {
   });
 };
 
+export const useDisconnectAccount = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (accountId: string) => api.disconnectAccount(accountId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['sync-health'] });
+    },
+  });
+};
+
+// "Keep" on an idle connection: the server hides the suggestion on all its accounts for 90 days
+export const useSnoozeIdleConnection = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (accountId: string) => api.snoozeIdleConnection(accountId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+    },
+  });
+};
+
 // CSV Import hooks
 export const usePreviewCsvImport = () => {
   return useMutation({

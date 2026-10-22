@@ -23,7 +23,8 @@ export const createLinkToken = async (userId: string, redirectUri?: string, webh
     user: { client_user_id: userId },
     client_name: 'BudgetFlow',
     products: [Products.Transactions],  // Only require Transactions - widely supported
-    optional_products: [Products.Investments],  // Request Investments if institution supports it
+    // NOTE: Plaid's Investments product is billed per Item per month and is NOT
+    // requested. Investment account balances come from /accounts/get instead.
     // NOTE: Plaid's "Recurring Transactions" product ($0.15/account/month) is NOT used
     // by this app — our recurring transaction tracking is entirely local (Supabase).
     // Make sure Products.RecurringTransactions is NOT listed here and is DISABLED in
@@ -62,7 +63,7 @@ export const createLinkToken = async (userId: string, redirectUri?: string, webh
   }
 };
 
-// Create a link token in update mode to add new products to an existing connection
+// Create a link token in update mode to repair or change an existing connection
 export const createUpdateLinkToken = async (
   userId: string,
   accessToken: string,
@@ -74,8 +75,6 @@ export const createUpdateLinkToken = async (
     access_token: accessToken, // This puts Link in update mode
     country_codes: [CountryCode.Us],
     language: 'en',
-    // Request additional consent for the Investments product
-    additional_consented_products: [Products.Investments],
     update: {
       account_selection_enabled: true,
     },
@@ -91,7 +90,7 @@ export const createUpdateLinkToken = async (
 
   try {
     const response = await plaidClient.linkTokenCreate(request);
-    console.log('Update mode link token created successfully (requesting Investments consent)');
+    console.log('Update mode link token created successfully');
     return response.data;
   } catch (error: unknown) {
     const plaidError = error as { response?: { data?: unknown } };
@@ -232,50 +231,4 @@ export const removeItem = async (accessToken: string) => {
   
   console.log('Item removed from Plaid');
   return response.data;
-};
-
-// Result of the holdings endpoint, slimmed to account balances: the app is
-// balance-only (holdings/securities storage was removed in 3ffbed8), but
-// /investments/holdings/get remains the reliable balance source for
-// investment accounts that the regular accounts endpoint omits.
-export interface InvestmentHoldingsResult {
-  accounts: Array<{
-    account_id: string;
-    name: string;
-    type: string;
-    subtype: string | null;
-    balances: {
-      current: number | null;
-    };
-  }>;
-}
-
-// Get investment account balances from Plaid's holdings endpoint
-export const getInvestmentHoldings = async (accessToken: string): Promise<InvestmentHoldingsResult> => {
-  try {
-    const response = await plaidClient.investmentsHoldingsGet({
-      access_token: accessToken,
-    });
-
-    const { accounts } = response.data;
-
-    return {
-      accounts: accounts.map(a => ({
-        account_id: a.account_id,
-        name: a.name,
-        type: a.type,
-        subtype: a.subtype,
-        balances: {
-          current: a.balances.current,
-        },
-      })),
-    };
-  } catch (error: unknown) {
-    const plaidError = error as { response?: { data?: { error_code?: string } } };
-    // Don't log ADDITIONAL_CONSENT_REQUIRED - it's expected for accounts without investment consent
-    if (plaidError.response?.data && plaidError.response.data.error_code !== 'ADDITIONAL_CONSENT_REQUIRED') {
-      console.error('Plaid get investment holdings error:', JSON.stringify(plaidError.response.data, null, 2));
-    }
-    throw error;
-  }
 };

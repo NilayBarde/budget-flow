@@ -157,6 +157,17 @@ export const syncAccount = (accountId: string) =>
 export const deleteAccount = (accountId: string) =>
   fetchApi<void>(`/accounts/${accountId}`, { method: 'DELETE' });
 
+export interface DisconnectAccountResult {
+  /** Every account on the bank connection, all now manual */
+  disconnected: string[];
+}
+
+export const snoozeIdleConnection = (accountId: string) =>
+  fetchApi<{ idle_snoozed_until: string }>(`/accounts/${accountId}/snooze-idle`, { method: 'POST' });
+
+export const disconnectAccount = (accountId: string) =>
+  fetchApi<DisconnectAccountResult>(`/accounts/${accountId}/disconnect`, { method: 'POST' });
+
 export interface UpdateAccountData {
   account_name?: string;
   account_type?: string;

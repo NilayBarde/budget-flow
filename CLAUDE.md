@@ -40,6 +40,17 @@ Required vars (see `server/ENV_SETUP.md`):
 - `PORT` (defaults to 3001)
 - Client: no env file needed locally (the client calls `/api` and the Vite dev server proxies it to `http://localhost:3001`). Set `VITE_API_URL` in `client/.env` (or the host's build env) only when the client is hosted separately from the API, for example on Vercel
 
+## Versioning
+
+**Every PR must bump the version in the root `package.json`.** The Settings page shows it (Vite injects it as `__APP_VERSION__`), and the `Version bump` GitHub check fails any PR whose version isn't higher than main's.
+
+```bash
+npm run bump                                    # patch: fixes, small tweaks (1.1.0 → 1.1.1)
+npm version minor --no-git-tag-version          # minor: new features (1.1.0 → 1.2.0)
+```
+
+Commit the updated `package.json` and `package-lock.json`. If main moved ahead while your PR was open, bump again above the new main version.
+
 ## Server Conventions
 
 **Routes**: Every route handler must be wrapped with `asyncHandler` — it catches rejections and passes to Express's global error handler.
@@ -97,14 +108,9 @@ export function useUpdateTransaction() {
 
 ## Database & Migrations
 
-**Migration naming**: `NNN_description_in_snake_case.sql` — next file should increment from the highest existing number.
+**Migration naming**: `NNN_description_in_snake_case.sql`. Take the next number after the highest in `migrations/` (check with `ls migrations | tail -1`; don't hardcode it here, it goes stale). Numbers aren't guaranteed unique (there are two `026_` files), so check rather than assume.
 
-```
-migrations/026_add_account_last_sync_error.sql  ← current latest
-migrations/027_your_new_migration.sql           ← next one
-```
-
-Run migrations in Supabase SQL editor (no CLI migration runner configured). `supabase-schema.sql` is a full baseline as of migration 023, so a fresh project runs it and then migrations 024 and up. Regenerate it when you want to move the baseline forward.
+Run migrations in Supabase SQL editor (no CLI migration runner configured), **before** deploying the code that reads them, and say so in the file's header comment. `supabase-schema.sql` is a full baseline as of migration 023, so a fresh project runs it and then migrations 024 and up. Regenerate it when you want to move the baseline forward.
 
 **RLS**: Enabled on all tables (migration 019). Server uses service-role key to bypass — no permissive policies needed. Don't add `user_id` filtering to server queries; the key handles isolation.
 

@@ -7,7 +7,8 @@
     "postinstall": "npm install --prefix client && npm install --prefix server",
     "build": "npm run build --prefix client",
     "start": "npm run start --prefix server",
-    "test": "npm run test --prefix server && npm run test --prefix client"
+    "test": "npm run test --prefix server && npm run test --prefix client",
+    "bump": "npm version patch --no-git-tag-version"
   },
   "devDependencies": {
     "concurrently": "^8.2.0"

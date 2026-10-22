@@ -19,7 +19,11 @@ export interface MerchantMappingLookup {
 }
 
 export const loadMerchantMappings = async (): Promise<MerchantMappingLookup> => {
-  const { data } = await supabase.from('merchant_mappings').select('*');
+  const { data, error } = await supabase.from('merchant_mappings').select('*');
+  // A failed read must not look like "no rules": a sync would then save every transaction without
+  // the user's corrections (a known transfer typed as spending). Throwing fails the sync before it
+  // saves anything, and the next sync retries from the same cursor.
+  if (error) throw error;
   const byName = new Map<string, MerchantMapping>(
     data?.map((m) => [m.original_name.toLowerCase(), m as MerchantMapping]) || [],
   );
@@ -59,10 +63,12 @@ export const loadManuallyTypedIds = async (
 
   for (let i = 0; i < transactions.length; i += ID_BATCH_SIZE) {
     const ids = transactions.slice(i, i + ID_BATCH_SIZE).map((tx) => tx.transaction_id);
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('transactions')
       .select('plaid_transaction_id, type_manually_set')
       .in('plaid_transaction_id', ids);
+    // Read as "nothing hand typed", a failure would let Plaid's update overwrite the user's types
+    if (error) throw error;
 
     for (const row of data || []) {
       if (row.type_manually_set) manuallyTypedIds.add(row.plaid_transaction_id);

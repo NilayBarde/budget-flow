@@ -23,24 +23,37 @@ const db = {
   /** Inserts that hit the unique constraint, because another sync stored the row first. */
   duplicateInsertFor: new Set<string>(),
   failUpdateFor: new Set<string>(),
+  /** Updates that hit the unique constraint, because another sync gave the row that id first. */
+  duplicateUpdateFor: new Set<string>(),
   failDeleteFor: new Set<string>(),
   /** Make every row lookup fail like a dropped connection, instead of "no rows". */
   lookupFails: false,
+  /** Accounts on the item still adopting a re-linked bank's history. */
+  relinkedAccounts: [] as { id: string; relinked_at: string }[],
+  /** Rows stored before the re-link, returned to the adoption lookup. */
+  adoptCandidates: [] as { id: string; date: string; amount: number; plaid_transaction_id: string | null; original_description: string | null }[],
 };
 
 const makeBuilder = (table: string) => {
-  const entry: Op = { table, op: 'select', filters: [] };
+  const entry: Op & { rangeFrom?: number } = { table, op: 'select', filters: [] };
   const plaidIdOfEntry = () =>
     (entry.payload as { plaid_transaction_id?: string } | undefined)?.plaid_transaction_id ??
     (entry.filters.find(([column]) => column === 'plaid_transaction_id')?.[1] as string | undefined);
   const result = () => {
     if (entry.op === 'select' && table === 'categories') return { data: db.categories, error: null };
+    if (entry.op === 'select' && table === 'accounts' && entry.filters.some(([column]) => column === 'relinked_at')) {
+      return { data: db.relinkedAccounts, error: null };
+    }
+    if (entry.op === 'select' && table === 'transactions' && entry.filters.some(([column]) => column === 'created_at')) {
+      return { data: (entry.rangeFrom ?? 0) === 0 ? db.adoptCandidates : [], error: null };
+    }
     const plaidId = plaidIdOfEntry() ?? '';
     if (entry.op === 'insert') {
       if (db.duplicateInsertFor.has(plaidId)) return { data: null, error: { code: '23505', message: 'duplicate key value' } };
       return { data: null, error: db.failInsertFor.has(plaidId) ? { code: 'P0001', message: 'insert failed' } : null };
     }
     if (entry.op === 'update' && db.failUpdateFor.has(plaidId)) return { data: null, error: { code: 'P0001', message: 'update failed' } };
+    if (entry.op === 'update' && db.duplicateUpdateFor.has(plaidId)) return { data: null, error: { code: '23505', message: 'duplicate key value' } };
     if (entry.op === 'delete' && db.failDeleteFor.has(plaidId)) return { data: null, error: { code: 'P0001', message: 'delete failed' } };
     return { data: null, error: null };
   };
@@ -65,6 +78,18 @@ const makeBuilder = (table: string) => {
     },
     eq: (column: string, value: unknown) => {
       entry.filters.push([column, value]);
+      return builder;
+    },
+    lt: (column: string, value: unknown) => {
+      entry.filters.push([column, value]);
+      return builder;
+    },
+    not: (column: string) => {
+      entry.filters.push([column, 'not null']);
+      return builder;
+    },
+    range: (from: number) => {
+      entry.rangeFrom = from;
       return builder;
     },
     single: async () => {
@@ -512,8 +537,11 @@ describe('applySyncResult', () => {
     db.failInsertFor = new Set();
     db.duplicateInsertFor = new Set();
     db.failUpdateFor = new Set();
+    db.duplicateUpdateFor = new Set();
     db.failDeleteFor = new Set();
     db.lookupFails = false;
+    db.relinkedAccounts = [];
+    db.adoptCandidates = [];
     rules.list = [];
     rules.lockedIds = new Set();
     reconcilePending.mockReset().mockResolvedValue(false);
@@ -544,6 +572,99 @@ describe('applySyncResult', () => {
     expect(moves[0].payload).toEqual({ account_id: 'acct-1' });
     expect(filterValue(moves[0], 'id')).toBe('row-2');
     expect(counts).toMatchObject({ added: 0, reattributed: 1 });
+  });
+
+  describe('after a bank is re-linked', () => {
+    const stored = { id: 'row-old', date: '2026-10-01', amount: 12.5, plaid_transaction_id: 'old-id', original_description: 'STARBUCKS #123 NEW YORK' };
+
+    it('re-keys the stored copy of a transaction instead of inserting it again', async () => {
+      db.relinkedAccounts = [{ id: 'acct-1', relinked_at: '2026-10-11T00:00:00Z' }];
+      db.adoptCandidates = [stored];
+
+      const counts = await apply(emptySync({ added: [tx({ transaction_id: 'new-id' })] }));
+
+      expect(opsOf('transactions', 'insert')).toHaveLength(0);
+      const rekeys = opsOf('transactions', 'update');
+      expect(rekeys).toHaveLength(1);
+      expect(rekeys[0].payload).toEqual({ plaid_transaction_id: 'new-id', pending: false });
+      expect(filterValue(rekeys[0], 'id')).toBe('row-old');
+      expect(counts).toMatchObject({ added: 0, adopted: 1 });
+    });
+
+    it('only offers rows stored before the re-link, so new rows never adopt each other', async () => {
+      db.relinkedAccounts = [{ id: 'acct-1', relinked_at: '2026-10-11T00:00:00Z' }];
+
+      await apply(emptySync({ added: [tx({ transaction_id: 'new-id' })] }));
+
+      const lookup = opsOf('transactions', 'select').find(o => filterValue(o, 'created_at') !== undefined);
+      expect(filterValue(lookup!, 'created_at')).toBe('2026-10-11T00:00:00Z');
+      expect(filterValue(lookup!, 'account_id')).toBe('acct-1');
+    });
+
+    it('keeps two identical charges on one day as two rows, adopting each stored copy once', async () => {
+      db.relinkedAccounts = [{ id: 'acct-1', relinked_at: '2026-10-11T00:00:00Z' }];
+      db.adoptCandidates = [stored];
+
+      const counts = await apply(emptySync({ added: [tx({ transaction_id: 'new-1' }), tx({ transaction_id: 'new-2' })] }));
+
+      expect(opsOf('transactions', 'insert').map(o => (o.payload as { plaid_transaction_id: string }).plaid_transaction_id)).toEqual(['new-2']);
+      expect(counts).toMatchObject({ added: 1, adopted: 1 });
+    });
+
+    it('does not adopt a stored row on another day or for another amount', async () => {
+      db.relinkedAccounts = [{ id: 'acct-1', relinked_at: '2026-10-11T00:00:00Z' }];
+      db.adoptCandidates = [stored];
+
+      const counts = await apply(emptySync({ added: [tx({ transaction_id: 'new-id', amount: 13 })] }));
+
+      expect(opsOf('transactions', 'insert')).toHaveLength(1);
+      expect(counts).toMatchObject({ added: 1, adopted: 0 });
+    });
+
+    it('inserts normally when no account on the item was re-linked', async () => {
+      db.adoptCandidates = [stored];
+
+      const counts = await apply(emptySync({ added: [tx({ transaction_id: 'new-id' })] }));
+
+      expect(opsOf('transactions', 'insert')).toHaveLength(1);
+      expect(counts).toMatchObject({ added: 1, adopted: 0 });
+    });
+
+    it('never offers a row Plaid is sending under its own id in the same batch', async () => {
+      db.relinkedAccounts = [{ id: 'acct-1', relinked_at: '2026-10-11T00:00:00Z' }];
+      // Two identical fares: one kept its id (and is in the batch), the other's id changed
+      db.adoptCandidates = [
+        { ...stored, id: 'row-kept', plaid_transaction_id: 'kept-id' },
+        { ...stored, id: 'row-changed', plaid_transaction_id: 'old-id' },
+      ];
+      db.existingByPlaidId.set('kept-id', { id: 'row-kept', account_id: 'acct-1' });
+
+      const counts = await apply(emptySync({ added: [tx({ transaction_id: 'new-id' }), tx({ transaction_id: 'kept-id' })] }));
+
+      const rekeys = opsOf('transactions', 'update');
+      expect(rekeys).toHaveLength(1);
+      expect(filterValue(rekeys[0], 'id')).toBe('row-changed');
+      expect(counts).toMatchObject({ added: 0, adopted: 1 });
+    });
+
+    it('treats a re-key that another sync already made as stored, not a failure', async () => {
+      db.relinkedAccounts = [{ id: 'acct-1', relinked_at: '2026-10-11T00:00:00Z' }];
+      db.adoptCandidates = [stored];
+      db.duplicateUpdateFor.add('new-id');
+
+      const counts = await apply(emptySync({ added: [tx({ transaction_id: 'new-id' })] }));
+
+      expect(counts).toMatchObject({ added: 0, adopted: 0 });
+      // The sync still records success, so the cursor moves on
+      expect(opsOf('accounts', 'update').length).toBeGreaterThan(0);
+    });
+
+    it('stops adopting once the history is complete', async () => {
+      await apply(emptySync(), { historicalComplete: true });
+
+      const historyUpdate = opsOf('accounts', 'update').find(o => (o.payload as Record<string, unknown>).historical_sync_complete);
+      expect(historyUpdate?.payload).toEqual({ historical_sync_complete: true, relinked_at: null });
+    });
   });
 
   it('skips a transaction whose Plaid account cannot be resolved and counts it', async () => {
@@ -693,13 +814,13 @@ describe('applySyncResult', () => {
 
       db.ops = [];
       await apply(emptySync(), { historicalComplete: true });
-      expect(stateWrites().map(w => w.payload)).toContainEqual({ historical_sync_complete: true });
+      expect(stateWrites().map(w => w.payload)).toContainEqual({ historical_sync_complete: true, relinked_at: null });
     });
 
     it('runs after every transaction is saved, and the card payment pairing after that', async () => {
       await apply(emptySync({ added: [tx()], removed: [{ transaction_id: 'gone' }] }));
 
-      const order = db.ops.map(o => `${o.table}:${o.op}`).filter(step => step !== 'categories:select' && step !== 'transactions:select');
+      const order = db.ops.map(o => `${o.table}:${o.op}`).filter(step => !step.endsWith(':select'));
       expect(order).toEqual(['transactions:insert', 'transactions:delete', 'accounts:update']);
       expect(reconcileCardPayments).toHaveBeenCalledTimes(1);
     });
