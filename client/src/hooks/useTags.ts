@@ -91,6 +91,7 @@ export const useBulkSplitTransactions = () => {
       queryClient.invalidateQueries({ queryKey: ['stats'] });
       queryClient.invalidateQueries({ queryKey: ['insights'] });
       queryClient.invalidateQueries({ queryKey: ['budget-goals'] });
+      queryClient.invalidateQueries({ queryKey: ['venmo-settlements'] });
     },
   });
 };

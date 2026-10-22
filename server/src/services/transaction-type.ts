@@ -120,6 +120,14 @@ export const isCashAccount = (accountType?: string | null): boolean => {
   return CASH_ACCOUNT_TYPES.some(cashType => type.includes(cashType));
 };
 
+// An account whose institution or account name says Venmo. Text-based like the gambling-operator
+// and investment-broker checks above, since Plaid's account_type/subtype for Venmo isn't a
+// reliable signal to key off of.
+export const isVenmoAccount = (
+  institutionName?: string | null,
+  accountName?: string | null,
+): boolean => [institutionName, accountName].some((text) => Boolean(text) && /venmo/i.test(text as string));
+
 /**
  * Detect transaction type based on amount and patterns.
  *

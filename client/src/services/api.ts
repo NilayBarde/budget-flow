@@ -12,6 +12,7 @@ import type {
   TransactionFilters,
   PlaidLinkToken,
   TransactionSplit,
+  PendingVenmoSettlement,
   InvestmentSummary,
   InsightsData,
   SyncHealth,
@@ -276,6 +277,18 @@ export const createSplit = (transactionId: string, splits: Omit<TransactionSplit
 
 export const deleteSplits = (transactionId: string) =>
   fetchApi<void>(`/transactions/${transactionId}/splits`, { method: 'DELETE' });
+
+// Venmo settlements
+export const getPendingVenmoSettlements = () => fetchApi<PendingVenmoSettlement[]>('/venmo-settlements/pending');
+
+export const linkVenmoSettlement = (venmoTransactionId: string, splitIds: string[]) =>
+  fetchApi<void>(`/venmo-settlements/${venmoTransactionId}/link`, {
+    method: 'POST',
+    body: JSON.stringify({ splitIds }),
+  });
+
+export const unlinkVenmoSettlement = (venmoTransactionId: string) =>
+  fetchApi<void>(`/venmo-settlements/${venmoTransactionId}`, { method: 'DELETE' });
 
 // Categories
 export const getCategories = () => fetchApi<Category[]>('/categories');

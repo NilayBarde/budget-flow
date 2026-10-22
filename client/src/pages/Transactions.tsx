@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { CheckSquare, X, Copy } from 'lucide-react';
 import { TransactionList, TransactionFilters, EditTransactionModal, SplitTransactionModal, BulkSplitModal, BulkActionBar, DuplicateReviewModal } from '../components/transactions';
 import { Button, ErrorState } from '../components/ui';
-import { useTransactions, useAccounts, useCategories, useTags, useBulkAddTagToTransactions, useDeleteTransaction, useBulkDeleteTransactions, useExpectedIncome, useDebouncedValue, usePrefetchAdjacentMonths, useMonthNavigation } from '../hooks';
+import { useTransactions, useAccounts, useCategories, useTags, useBulkAddTagToTransactions, useDeleteTransaction, useBulkDeleteTransactions, useExpectedIncome, useDebouncedValue, usePrefetchAdjacentMonths, useMonthNavigation, usePendingVenmoSettlements } from '../hooks';
 import type { Transaction, TransactionFilters as Filters, TransactionType } from '../types';
 import { computeTransactionTotals, filterByType } from '../utils/transactionTotals';
 import { monthFromSearchParams } from '../utils/month';
@@ -104,6 +104,14 @@ export const Transactions = () => {
   const bulkDeleteMutation = useBulkDeleteTransactions();
   const { expectedIncome } = useExpectedIncome();
   const [deletingTransaction, setDeletingTransaction] = useState<Transaction | null>(null);
+  const { data: pendingSettlements } = usePendingVenmoSettlements();
+  const pendingSettlementAmountsByTransactionId = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const s of pendingSettlements ?? []) {
+      map.set(s.transactionId, (map.get(s.transactionId) ?? 0) + s.remainingAmount);
+    }
+    return map;
+  }, [pendingSettlements]);
 
   const handleEdit = useCallback((transaction: Transaction) => {
     setEditingTransaction(transaction);
@@ -330,6 +338,7 @@ export const Transactions = () => {
         selectedIds={selectedIds}
         onSelectionChange={handleSelectionChange}
         selectionMode={selectionMode}
+        pendingSettlementAmountsByTransactionId={pendingSettlementAmountsByTransactionId}
       />
       )}
 

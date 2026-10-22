@@ -19,6 +19,7 @@ vi.mock('../../hooks', async (importOriginal) => {
     useDeleteTransaction: mutation,
     useBulkDeleteTransactions: mutation,
     usePrefetchAdjacentMonths: () => {},
+    usePendingVenmoSettlements: () => ({ data: [] }),
   };
 });
 

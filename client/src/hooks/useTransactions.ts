@@ -42,6 +42,7 @@ export const useUpdateTransaction = () => {
       queryClient.invalidateQueries({ queryKey: ['recurring-overview'] });
       queryClient.invalidateQueries({ queryKey: ['insights'] });
       queryClient.invalidateQueries({ queryKey: ['budget-goals'] });
+      queryClient.invalidateQueries({ queryKey: ['venmo-settlements'] });
     },
   });
 };
@@ -56,6 +57,7 @@ export const useDeleteTransaction = () => {
       queryClient.invalidateQueries({ queryKey: ['stats'] });
       queryClient.invalidateQueries({ queryKey: ['insights'] });
       queryClient.invalidateQueries({ queryKey: ['budget-goals'] });
+      queryClient.invalidateQueries({ queryKey: ['venmo-settlements'] });
     },
   });
 };
@@ -76,6 +78,7 @@ export const useCreateSplit = () => {
       queryClient.invalidateQueries({ queryKey: ['stats'] });
       queryClient.invalidateQueries({ queryKey: ['insights'] });
       queryClient.invalidateQueries({ queryKey: ['budget-goals'] });
+      queryClient.invalidateQueries({ queryKey: ['venmo-settlements'] });
     },
   });
 };
@@ -90,6 +93,7 @@ export const useDeleteSplits = () => {
       queryClient.invalidateQueries({ queryKey: ['stats'] });
       queryClient.invalidateQueries({ queryKey: ['insights'] });
       queryClient.invalidateQueries({ queryKey: ['budget-goals'] });
+      queryClient.invalidateQueries({ queryKey: ['venmo-settlements'] });
     },
   });
 };
@@ -112,6 +116,7 @@ export const useBulkDeleteTransactions = () => {
       queryClient.invalidateQueries({ queryKey: ['duplicates'] });
       queryClient.invalidateQueries({ queryKey: ['stats'] });
       queryClient.invalidateQueries({ queryKey: ['insights'] });
+      queryClient.invalidateQueries({ queryKey: ['venmo-settlements'] });
     },
   });
 };

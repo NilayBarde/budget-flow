@@ -5,6 +5,7 @@ import { detectTransactionType, type TransactionType } from './transaction-type.
 import { loadManuallyTypedIds, loadMerchantMappings, resolveTransactionType, type MerchantMapping } from './merchant-mappings.js';
 import { reconcilePendingTransaction } from './pending-reconciliation.js';
 import { reconcileCardPaymentsAfterSync } from './card-payment-reconciliation.js';
+import { reconcileVenmoSettlementsAfterSync } from './venmo-settlement-reconciliation.js';
 import { redactError } from './plaid-errors.js';
 import type { SyncResult } from './plaid.js';
 import { adoptionKey, pickAdoptableTransaction, type AdoptionCandidate } from './relink.js';
@@ -79,7 +80,7 @@ interface UpdateContext {
   accountId: string;
   accountType?: string | null;
   mapping: MerchantMapping | undefined;
-  /** True when the user set this row's type by hand, so it must not be re-detected. */
+  /** True when the user set this row's type by hand, or it is a matched Venmo settlement, so it must not be re-detected. */
   typeLocked: boolean;
   categoryMap: ReadonlyMap<string, string>;
   /**
@@ -393,7 +394,7 @@ export const applySyncResult = async ({
 
     const { data: existing, error: lookupError } = await supabase
       .from('transactions')
-      .select('merchant_name, merchant_display_name, transaction_type, original_description, category_id, plaid_category')
+      .select('merchant_name, merchant_display_name, transaction_type, original_description, category_id, plaid_category, is_venmo_settlement')
       .eq('plaid_transaction_id', tx.transaction_id)
       .single();
 
@@ -410,7 +411,10 @@ export const applySyncResult = async ({
       // A rule is learned under the name stored when the user made it, so look for that too: Plaid can
       // rename a merchant in the same change that modifies the transaction.
       mapping: mappings.find(tx.merchant_name, tx.name, existing?.merchant_name),
-      typeLocked: manuallyTypedIds.has(tx.transaction_id),
+      // A matched Venmo settlement is a transfer because it settled a split. Re-detecting its type
+      // would turn it back into income or a return while its settlement rows still exclude the
+      // others' share from the split, counting the money twice.
+      typeLocked: manuallyTypedIds.has(tx.transaction_id) || existing?.is_venmo_settlement === true,
       categoryMap,
       existing,
     });
@@ -431,6 +435,10 @@ export const applySyncResult = async ({
 
   await recordSuccessfulSync(plaidItemId, syncResult.nextCursor, historicalComplete);
   await reconcileCardPaymentsAfterSync(reconcileSinceDate === undefined ? {} : { sinceDate: reconcileSinceDate });
+  // Unlike card pairing, Venmo matching never auto-applies across all history: a first link's
+  // null look back falls back to the matcher's own bounded window, and a full backfill is run by
+  // hand as a dry run first.
+  await reconcileVenmoSettlementsAfterSync(reconcileSinceDate ? { sinceDate: reconcileSinceDate } : {});
 
   return counts;
 };

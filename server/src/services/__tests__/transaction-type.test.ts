@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectTransactionType } from '../transaction-type.js';
+import { detectTransactionType, isVenmoAccount } from '../transaction-type.js';
 
 describe('detectTransactionType', () => {
   // ── Transfer detection via text patterns ──────────────────────────────
@@ -446,5 +446,27 @@ describe('detectTransactionType', () => {
         detectTransactionType(50, ['Unknown', 'Nothing', 'Zelle Transfer']),
       ).toBe('transfer');
     });
+  });
+});
+
+describe('isVenmoAccount', () => {
+  it('matches when the institution name says Venmo', () => {
+    expect(isVenmoAccount('Venmo', 'My Venmo Balance')).toBe(true);
+  });
+
+  it('matches when only the account name says Venmo', () => {
+    expect(isVenmoAccount(null, 'Venmo')).toBe(true);
+  });
+
+  it('is case-insensitive', () => {
+    expect(isVenmoAccount('VENMO', null)).toBe(true);
+  });
+
+  it('does not match an unrelated bank', () => {
+    expect(isVenmoAccount('Chase', 'Chase Checking')).toBe(false);
+  });
+
+  it('does not match when both names are null', () => {
+    expect(isVenmoAccount(null, null)).toBe(false);
   });
 });
