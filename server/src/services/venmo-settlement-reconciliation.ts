@@ -202,6 +202,7 @@ interface VenmoCandidateRow {
   date: string;
   type_manually_set: boolean | null;
   merchant_name: string | null;
+  merchant_display_name: string | null;
 }
 
 const loadUnmatchedVenmoTransactions = async (sinceDate: string | null): Promise<VenmoCandidateRow[]> => {
@@ -220,7 +221,7 @@ const loadUnmatchedVenmoTransactions = async (sinceDate: string | null): Promise
     (from, to) => {
       let query = supabase
         .from('transactions')
-        .select('id, amount, date, type_manually_set, merchant_name')
+        .select('id, amount, date, type_manually_set, merchant_name, merchant_display_name')
         .in('account_id', venmoAccountIds)
         .eq('is_venmo_settlement', false)
         // id breaks date ties so pages never skip or repeat a row
@@ -298,7 +299,8 @@ export const reconcileVenmoSettlements = async ({
     amount: t.amount,
     date: t.date,
     typeManuallySet: t.type_manually_set,
-    payerName: t.merchant_name,
+    // The user-corrected name wins, same as everywhere else it's displayed (merchant_display_name).
+    payerName: t.merchant_display_name || t.merchant_name,
   }));
 
   const matches = findSettlementMatches(venmoCandidates, splitCandidates);

@@ -47,12 +47,18 @@ const daysBetween = (a: string, b: string): number => Math.abs(Date.parse(a) - D
 // it must never be treated as one when breaking a tie.
 const UNNAMED_DESCRIPTION = 'other';
 
-/** Whether the split's name plausibly identifies the Venmo payment's sender. */
+const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Whether the split's name plausibly identifies the Venmo payment's sender. Matched on whole
+ * word boundaries, not a bare substring — "Al" must not match inside "Natalie", but "Griffin"
+ * still matches "Griffin Byer" and a full-name split ("Griffin Byer") still matches too.
+ */
 const matchesPayerName = (description: string | undefined, payerName: string | null | undefined): boolean => {
   if (!description || !payerName) return false;
   const name = description.trim().toLowerCase();
   if (!name || name === UNNAMED_DESCRIPTION) return false;
-  return payerName.trim().toLowerCase().includes(name);
+  return new RegExp(`\\b${escapeRegExp(name)}\\b`, 'i').test(payerName);
 };
 
 /**

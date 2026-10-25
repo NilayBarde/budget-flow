@@ -100,6 +100,26 @@ describe('findSettlementMatches', () => {
     expect(findSettlementMatches([v], [matt, griffin])).toEqual([]);
   });
 
+  it('never matches a short name against a substring of an unrelated payer name', () => {
+    // "al" is a substring of "Natalie" but not a whole word in it, so a split named "Al" must
+    // not win the tie just because it happens to appear inside someone else's name.
+    const al = split({ remainingAmount: 50, description: 'Al' });
+    const unnamed = split({ remainingAmount: 50, description: 'Other' });
+    const v = venmo({ amount: -50, payerName: 'Natalie Chen' });
+
+    expect(findSettlementMatches([v], [al, unnamed])).toEqual([]);
+  });
+
+  it('matches a full-name split description against the full payer name', () => {
+    const fullName = split({ remainingAmount: 50, description: 'Griffin Byer' });
+    const other = split({ remainingAmount: 50, description: 'Other' });
+    const v = venmo({ amount: -50, payerName: 'Griffin Byer' });
+
+    expect(findSettlementMatches([v], [fullName, other])).toEqual([
+      { venmoTransactionId: v.id, splitIds: [fullName.id], splitAmounts: { [fullName.id]: 50 } },
+    ]);
+  });
+
   it('stays ambiguous when splits are unnamed, even with a payer name on the deposit', () => {
     const s1 = split({ remainingAmount: 82.36, description: 'Other' });
     const s2 = split({ remainingAmount: 82.36, description: 'Other' });

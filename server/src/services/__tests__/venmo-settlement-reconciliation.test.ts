@@ -270,6 +270,35 @@ describe('venmo-settlement-reconciliation', () => {
     expect(await loadUnsettledSplits()).toEqual([]);
   });
 
+  it('breaks a tie using the corrected display name when the raw Plaid name is generic', async () => {
+    // Plaid's merchant_name is often just "Venmo"; the user already corrected the display name
+    // to the real sender, same as everywhere else that name is shown in the app.
+    state.accounts = [{ id: 'venmo-acct', institution_name: 'Venmo', account_name: null }, { id: 'bank-acct', institution_name: 'Con Ed', account_name: null }];
+    state.transactions = [
+      { id: 'bill-txn', account_id: 'bank-acct', amount: 164.72, date: DINNER_DATE, transaction_type: 'expense', type_manually_set: false, is_venmo_settlement: false },
+      {
+        id: 'griffin-deposit',
+        account_id: 'venmo-acct',
+        amount: -82.36,
+        date: DEPOSIT_DATE,
+        merchant_name: 'Venmo',
+        merchant_display_name: 'Griffin Byer',
+        transaction_type: 'return',
+        type_manually_set: false,
+        is_venmo_settlement: false,
+      },
+    ];
+    state.splits = [
+      { id: 'split-mine', parent_transaction_id: 'bill-txn', amount: 82.36, is_my_share: true, description: 'Your portion' },
+      { id: 'split-matt', parent_transaction_id: 'bill-txn', amount: 82.36, is_my_share: false, description: 'Matt' },
+      { id: 'split-griffin', parent_transaction_id: 'bill-txn', amount: 82.36, is_my_share: false, description: 'Griffin' },
+    ];
+
+    const results = await reconcileVenmoSettlements({ apply: true });
+
+    expect(results).toEqual([{ venmoTransactionId: 'griffin-deposit', splitIds: ['split-griffin'], totalAmount: 82.36 }]);
+  });
+
   describe('if a match is interrupted between its two writes', () => {
     it('flips the payment before inserting the settlement rows', async () => {
       seedBasicScenario();
