@@ -20,7 +20,7 @@
     "csv-parse": "^7.0.2",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
-    "multer": "^2.4.0",
+    "multer": "^2.5.0",
     "plaid": "^41.0.0"
   },
   "devDependencies": {
