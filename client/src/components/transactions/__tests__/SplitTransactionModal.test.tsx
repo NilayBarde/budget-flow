@@ -6,8 +6,10 @@ const state = {
   createMutate: vi.fn(),
   deleteMutate: vi.fn(),
   addPersonMutate: vi.fn(),
+  renameMutate: vi.fn(),
   createPending: false,
   addPersonPending: false,
+  renamePending: false,
 };
 
 vi.mock('../../../hooks', async importOriginal => ({
@@ -15,6 +17,7 @@ vi.mock('../../../hooks', async importOriginal => ({
   useCreateSplit: () => ({ mutateAsync: state.createMutate, isPending: state.createPending }),
   useDeleteSplits: () => ({ mutateAsync: state.deleteMutate, isPending: false }),
   useAddSplitPerson: () => ({ mutateAsync: state.addPersonMutate, isPending: state.addPersonPending }),
+  useRenameSplit: () => ({ mutateAsync: state.renameMutate, isPending: state.renamePending }),
 }));
 
 const { SplitTransactionModal } = await import('../SplitTransactionModal');
@@ -148,5 +151,57 @@ describe('SplitTransactionModal — adding a person to an already-split transact
     fireEvent.click(screen.getByText('Add'));
 
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', "Amount exceeds what's left of your portion");
+  });
+});
+
+describe('SplitTransactionModal — renaming an existing split', () => {
+  beforeEach(() => {
+    state.createMutate = vi.fn().mockResolvedValue(undefined);
+    state.deleteMutate = vi.fn().mockResolvedValue(undefined);
+    state.addPersonMutate = vi.fn().mockResolvedValue(undefined);
+    state.renameMutate = vi.fn().mockResolvedValue(undefined);
+    state.createPending = false;
+    state.addPersonPending = false;
+    state.renamePending = false;
+  });
+
+  it('saves a new name for a split when the checkmark is clicked', async () => {
+    render(<SplitTransactionModal isOpen onClose={vi.fn()} transaction={splitTransaction} />);
+
+    fireEvent.click(screen.getByLabelText('Rename Matt'));
+    const nameInput = screen.getByDisplayValue('Matt');
+    fireEvent.change(nameInput, { target: { value: 'Matthew' } });
+    fireEvent.click(screen.getByLabelText('Save name'));
+
+    await waitFor(() => {
+      expect(state.renameMutate).toHaveBeenCalledWith({ transactionId: 'txn-2', splitId: 's2', description: 'Matthew' });
+    });
+  });
+
+  it('discards the edit when cancelled, without calling renameSplit', () => {
+    render(<SplitTransactionModal isOpen onClose={vi.fn()} transaction={splitTransaction} />);
+
+    fireEvent.click(screen.getByLabelText('Rename Griffin'));
+    fireEvent.change(screen.getByDisplayValue('Griffin'), { target: { value: 'Someone else entirely' } });
+    fireEvent.click(screen.getByLabelText('Cancel renaming'));
+
+    expect(screen.getByText('Griffin')).toBeTruthy();
+    expect(state.renameMutate).not.toHaveBeenCalled();
+  });
+
+  it('shows the server error message when renaming fails', async () => {
+    state.renameMutate = vi.fn().mockRejectedValue(new Error('Split not found'));
+    render(<SplitTransactionModal isOpen onClose={vi.fn()} transaction={splitTransaction} />);
+
+    fireEvent.click(screen.getByLabelText('Rename Matt'));
+    fireEvent.click(screen.getByLabelText('Save name'));
+
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Split not found');
+  });
+
+  it('does not offer renaming for your own share', () => {
+    render(<SplitTransactionModal isOpen onClose={vi.fn()} transaction={splitTransaction} />);
+
+    expect(screen.queryByLabelText('Rename Your portion')).toBeNull();
   });
 });

@@ -1,9 +1,9 @@
 import { useState, useCallback } from 'react';
-import { X, Plus } from 'lucide-react';
+import { X, Plus, Pencil, Check } from 'lucide-react';
 import { Modal, Button, Input } from '../ui';
 import type { Transaction } from '../../types';
 import { formatCurrency } from '../../utils/formatters';
-import { useCreateSplit, useDeleteSplits, useAddSplitPerson } from '../../hooks';
+import { useCreateSplit, useDeleteSplits, useAddSplitPerson, useRenameSplit } from '../../hooks';
 
 interface SplitTransactionModalProps {
   isOpen: boolean;
@@ -28,10 +28,14 @@ export const SplitTransactionModal = ({ isOpen, onClose, transaction }: SplitTra
   const [addPersonName, setAddPersonName] = useState('');
   const [addPersonAmount, setAddPersonAmount] = useState('');
   const [addPersonError, setAddPersonError] = useState<string | null>(null);
+  const [editingSplitId, setEditingSplitId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
+  const [renameError, setRenameError] = useState<string | null>(null);
 
   const createSplit = useCreateSplit();
   const deleteSplits = useDeleteSplits();
   const addSplitPerson = useAddSplitPerson();
+  const renameSplit = useRenameSplit();
 
   const totalAmount = transaction?.amount || 0;
 
@@ -110,6 +114,29 @@ export const SplitTransactionModal = ({ isOpen, onClose, transaction }: SplitTra
     }
   };
 
+  const startRenaming = (splitId: string, currentName: string) => {
+    setEditingSplitId(splitId);
+    setEditingName(currentName);
+    setRenameError(null);
+  };
+
+  const cancelRenaming = () => {
+    setEditingSplitId(null);
+    setEditingName('');
+    setRenameError(null);
+  };
+
+  const handleSaveRename = async () => {
+    if (!transaction || !editingSplitId || !editingName.trim()) return;
+    try {
+      await renameSplit.mutateAsync({ transactionId: transaction.id, splitId: editingSplitId, description: editingName.trim() });
+      setEditingSplitId(null);
+      setEditingName('');
+    } catch (error) {
+      setRenameError(error instanceof Error ? error.message : 'Could not rename that split');
+    }
+  };
+
   if (!transaction) return null;
 
   const hasSplits = transaction.is_split && transaction.splits && transaction.splits.length > 0;
@@ -136,21 +163,63 @@ export const SplitTransactionModal = ({ isOpen, onClose, transaction }: SplitTra
             <h4 className="text-sm font-medium text-slate-300">Current Splits</h4>
             {transaction.splits?.map((split, index) => (
               <div key={split.id} className="flex justify-between items-center bg-midnight-900 rounded-lg p-3">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className={`truncate ${split.is_my_share ? 'text-slate-100' : 'text-slate-500'}`}>
-                    {split.description || `Split ${index + 1}`}
-                  </span>
-                  {split.is_my_share && (
-                    <span className="text-xs bg-accent-500/20 text-accent-400 px-2 py-0.5 rounded flex-shrink-0">
-                      My share
+                {editingSplitId === split.id ? (
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <Input
+                      value={editingName}
+                      onChange={e => setEditingName(e.target.value)}
+                      autoFocus
+                      className="flex-1"
+                    />
+                    <button
+                      type="button"
+                      aria-label="Save name"
+                      onClick={handleSaveRename}
+                      disabled={!editingName.trim() || renameSplit.isPending}
+                      className="text-accent-400 hover:text-accent-300 disabled:opacity-30 p-1"
+                    >
+                      <Check className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Cancel renaming"
+                      onClick={cancelRenaming}
+                      className="text-slate-500 hover:text-rose-400 p-1"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={`truncate ${split.is_my_share ? 'text-slate-100' : 'text-slate-500'}`}>
+                      {split.description || `Split ${index + 1}`}
                     </span>
-                  )}
-                </div>
-                <span className={`font-medium flex-shrink-0 ml-2 ${split.is_my_share ? 'text-slate-100' : 'text-slate-500'}`}>
-                  {formatCurrency(split.amount)}
-                </span>
+                    {split.is_my_share ? (
+                      <span className="text-xs bg-accent-500/20 text-accent-400 px-2 py-0.5 rounded flex-shrink-0">
+                        My share
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        aria-label={`Rename ${split.description || `Split ${index + 1}`}`}
+                        onClick={() => startRenaming(split.id, split.description === 'Other' ? '' : split.description)}
+                        className="text-slate-500 hover:text-accent-400 p-1 flex-shrink-0"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                )}
+                {editingSplitId !== split.id && (
+                  <span className={`font-medium flex-shrink-0 ml-2 ${split.is_my_share ? 'text-slate-100' : 'text-slate-500'}`}>
+                    {formatCurrency(split.amount)}
+                  </span>
+                )}
               </div>
             ))}
+            {renameError && (
+              <p role="alert" className="text-xs text-rose-400">{renameError}</p>
+            )}
             <div className="pt-2 border-t border-midnight-600">
               <div className="flex justify-between text-sm">
                 <span className="text-slate-400">Your total:</span>

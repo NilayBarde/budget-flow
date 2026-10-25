@@ -152,8 +152,8 @@ describe('venmo-settlement-reconciliation', () => {
       },
     ];
     state.splits = [
-      { id: 'split-mine', parent_transaction_id: 'dinner-txn', amount: 25, is_my_share: true },
-      { id: 'split-theirs', parent_transaction_id: 'dinner-txn', amount: 25, is_my_share: false },
+      { id: 'split-mine', parent_transaction_id: 'dinner-txn', amount: 25, is_my_share: true, description: 'Your portion' },
+      { id: 'split-theirs', parent_transaction_id: 'dinner-txn', amount: 25, is_my_share: false, description: 'Friend' },
     ];
   };
 
@@ -161,7 +161,7 @@ describe('venmo-settlement-reconciliation', () => {
     seedBasicScenario();
     const unsettled = await loadUnsettledSplits();
     expect(unsettled).toEqual([
-      { splitId: 'split-theirs', transactionId: 'dinner-txn', date: DINNER_DATE, remainingAmount: 25 },
+      { splitId: 'split-theirs', transactionId: 'dinner-txn', date: DINNER_DATE, remainingAmount: 25, description: 'Friend' },
     ]);
   });
 
@@ -241,6 +241,62 @@ describe('venmo-settlement-reconciliation', () => {
     });
     const results = await reconcileVenmoSettlements({ apply: true });
     expect(results).toEqual([{ venmoTransactionId: 'venmo-deposit', splitIds: ['split-theirs'], totalAmount: 25 }]);
+  });
+
+  it('breaks a tie among identically-priced roommate splits using the payer name', async () => {
+    // Three roommates each owe the same $82.36 share of one utility bill, and each pays
+    // separately — the exact scenario a single combined "Others" split can never cleanly settle.
+    state.accounts = [{ id: 'venmo-acct', institution_name: 'Venmo', account_name: null }, { id: 'bank-acct', institution_name: 'Con Ed', account_name: null }];
+    state.transactions = [
+      { id: 'bill-txn', account_id: 'bank-acct', amount: 329.44, date: DINNER_DATE, transaction_type: 'expense', type_manually_set: false, is_venmo_settlement: false },
+      { id: 'matt-deposit', account_id: 'venmo-acct', amount: -82.36, date: DEPOSIT_DATE, merchant_name: 'Matt Vieira', transaction_type: 'return', type_manually_set: false, is_venmo_settlement: false },
+      { id: 'griffin-deposit', account_id: 'venmo-acct', amount: -82.36, date: DEPOSIT_DATE, merchant_name: 'Griffin Byer', transaction_type: 'return', type_manually_set: false, is_venmo_settlement: false },
+      { id: 'eli-deposit', account_id: 'venmo-acct', amount: -82.36, date: DEPOSIT_DATE, merchant_name: 'Eli Kaimowitz', transaction_type: 'return', type_manually_set: false, is_venmo_settlement: false },
+    ];
+    state.splits = [
+      { id: 'split-mine', parent_transaction_id: 'bill-txn', amount: 82.36, is_my_share: true, description: 'Your portion' },
+      { id: 'split-matt', parent_transaction_id: 'bill-txn', amount: 82.36, is_my_share: false, description: 'Matt' },
+      { id: 'split-griffin', parent_transaction_id: 'bill-txn', amount: 82.36, is_my_share: false, description: 'Griffin' },
+      { id: 'split-eli', parent_transaction_id: 'bill-txn', amount: 82.36, is_my_share: false, description: 'Eli' },
+    ];
+
+    const results = await reconcileVenmoSettlements({ apply: true });
+
+    expect(results.map((r) => ({ venmoTransactionId: r.venmoTransactionId, splitIds: r.splitIds })).sort((a, b) => a.venmoTransactionId.localeCompare(b.venmoTransactionId))).toEqual([
+      { venmoTransactionId: 'eli-deposit', splitIds: ['split-eli'] },
+      { venmoTransactionId: 'griffin-deposit', splitIds: ['split-griffin'] },
+      { venmoTransactionId: 'matt-deposit', splitIds: ['split-matt'] },
+    ]);
+    expect(await loadUnsettledSplits()).toEqual([]);
+  });
+
+  it('breaks a tie using the corrected display name when the raw Plaid name is generic', async () => {
+    // Plaid's merchant_name is often just "Venmo"; the user already corrected the display name
+    // to the real sender, same as everywhere else that name is shown in the app.
+    state.accounts = [{ id: 'venmo-acct', institution_name: 'Venmo', account_name: null }, { id: 'bank-acct', institution_name: 'Con Ed', account_name: null }];
+    state.transactions = [
+      { id: 'bill-txn', account_id: 'bank-acct', amount: 164.72, date: DINNER_DATE, transaction_type: 'expense', type_manually_set: false, is_venmo_settlement: false },
+      {
+        id: 'griffin-deposit',
+        account_id: 'venmo-acct',
+        amount: -82.36,
+        date: DEPOSIT_DATE,
+        merchant_name: 'Venmo',
+        merchant_display_name: 'Griffin Byer',
+        transaction_type: 'return',
+        type_manually_set: false,
+        is_venmo_settlement: false,
+      },
+    ];
+    state.splits = [
+      { id: 'split-mine', parent_transaction_id: 'bill-txn', amount: 82.36, is_my_share: true, description: 'Your portion' },
+      { id: 'split-matt', parent_transaction_id: 'bill-txn', amount: 82.36, is_my_share: false, description: 'Matt' },
+      { id: 'split-griffin', parent_transaction_id: 'bill-txn', amount: 82.36, is_my_share: false, description: 'Griffin' },
+    ];
+
+    const results = await reconcileVenmoSettlements({ apply: true });
+
+    expect(results).toEqual([{ venmoTransactionId: 'griffin-deposit', splitIds: ['split-griffin'], totalAmount: 82.36 }]);
   });
 
   describe('if a match is interrupted between its two writes', () => {

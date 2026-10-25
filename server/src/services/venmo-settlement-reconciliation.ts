@@ -14,6 +14,7 @@ export interface UnsettledSplit {
   transactionId: string;
   date: string;
   remainingAmount: number;
+  description: string;
 }
 
 export interface ReconcileVenmoOptions {
@@ -131,6 +132,7 @@ interface SplitRow {
   parent_transaction_id: string;
   amount: number;
   is_my_share: boolean;
+  description: string | null;
 }
 
 interface TransactionDateRow {
@@ -154,7 +156,7 @@ export const loadUnsettledSplits = async (
     (from, to) =>
       supabase
         .from('transaction_splits')
-        .select('id, parent_transaction_id, amount, is_my_share')
+        .select('id, parent_transaction_id, amount, is_my_share, description')
         .eq('is_my_share', false)
         .order('id')
         .range(from, to),
@@ -187,6 +189,7 @@ export const loadUnsettledSplits = async (
       transactionId: s.parent_transaction_id,
       date: datesByTransactionId.get(s.parent_transaction_id)!,
       remainingAmount: Math.abs(s.amount) - (settledBySplitId.get(s.id) ?? 0),
+      description: s.description ?? '',
     }))
     .filter((s) => s.remainingAmount > AMOUNT_TOLERANCE)
     // Newest first; split id breaks ties so the order is stable between calls.
@@ -198,6 +201,8 @@ interface VenmoCandidateRow {
   amount: number;
   date: string;
   type_manually_set: boolean | null;
+  merchant_name: string | null;
+  merchant_display_name: string | null;
 }
 
 const loadUnmatchedVenmoTransactions = async (sinceDate: string | null): Promise<VenmoCandidateRow[]> => {
@@ -216,7 +221,7 @@ const loadUnmatchedVenmoTransactions = async (sinceDate: string | null): Promise
     (from, to) => {
       let query = supabase
         .from('transactions')
-        .select('id, amount, date, type_manually_set')
+        .select('id, amount, date, type_manually_set, merchant_name, merchant_display_name')
         .in('account_id', venmoAccountIds)
         .eq('is_venmo_settlement', false)
         // id breaks date ties so pages never skip or repeat a row
@@ -287,12 +292,15 @@ export const reconcileVenmoSettlements = async ({
     id: s.splitId,
     date: s.date,
     remainingAmount: s.remainingAmount,
+    description: s.description,
   }));
   const venmoCandidates: VenmoTransactionCandidate[] = venmoRows.map((t) => ({
     id: t.id,
     amount: t.amount,
     date: t.date,
     typeManuallySet: t.type_manually_set,
+    // The user-corrected name wins, same as everywhere else it's displayed (merchant_display_name).
+    payerName: t.merchant_display_name || t.merchant_name,
   }));
 
   const matches = findSettlementMatches(venmoCandidates, splitCandidates);

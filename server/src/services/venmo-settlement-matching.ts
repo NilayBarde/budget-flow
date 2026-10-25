@@ -12,6 +12,8 @@ export interface SplitCandidate {
   date: string;
   /** abs(split.amount) minus whatever is already settled against it. Always > 0. */
   remainingAmount: number;
+  /** The name the user gave this split (e.g. "Griffin"), for breaking a tie by payer name. */
+  description?: string;
 }
 
 export interface VenmoTransactionCandidate {
@@ -20,6 +22,8 @@ export interface VenmoTransactionCandidate {
   amount: number;
   date: string;
   typeManuallySet?: boolean | null;
+  /** Who sent the money, e.g. "Griffin Byer", for breaking a tie among same-amount splits. */
+  payerName?: string | null;
 }
 
 export interface SettlementMatch {
@@ -38,6 +42,24 @@ const MAX_CANDIDATES_FOR_SUM_SEARCH = 20;
 
 const toCents = (n: number): number => Math.round(Math.abs(n) * 100);
 const daysBetween = (a: string, b: string): number => Math.abs(Date.parse(a) - Date.parse(b)) / DAY_MS;
+
+// "Other" is the default description for a split nobody named — never a real person's name, so
+// it must never be treated as one when breaking a tie.
+const UNNAMED_DESCRIPTION = 'other';
+
+const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Whether the split's name plausibly identifies the Venmo payment's sender. Matched on whole
+ * word boundaries, not a bare substring — "Al" must not match inside "Natalie", but "Griffin"
+ * still matches "Griffin Byer" and a full-name split ("Griffin Byer") still matches too.
+ */
+const matchesPayerName = (description: string | undefined, payerName: string | null | undefined): boolean => {
+  if (!description || !payerName) return false;
+  const name = description.trim().toLowerCase();
+  if (!name || name === UNNAMED_DESCRIPTION) return false;
+  return new RegExp(`\\b${escapeRegExp(name)}\\b`, 'i').test(payerName);
+};
 
 /**
  * All combinations (up to maxSize splits) of candidates whose remainingAmount sums to
@@ -95,7 +117,18 @@ export const findSettlementMatches = (
       usedSplitIds.add(exact.id);
       continue;
     }
-    if (exactMatches.length > 1) continue; // ambiguous: two splits owe the same amount, don't guess
+    if (exactMatches.length > 1) {
+      // Several splits owe the same amount (e.g. roommates splitting a bill evenly). If exactly
+      // one split's name plausibly matches who sent the money, that breaks the tie; otherwise
+      // still don't guess.
+      const namedMatches = exactMatches.filter((s) => matchesPayerName(s.description, txn.payerName));
+      if (namedMatches.length === 1) {
+        const [exact] = namedMatches;
+        matches.push({ venmoTransactionId: txn.id, splitIds: [exact.id], splitAmounts: { [exact.id]: exact.remainingAmount } });
+        usedSplitIds.add(exact.id);
+      }
+      continue;
+    }
 
     const combinations = findSumCombinations(candidates, targetCents, MAX_SPLITS_PER_MATCH);
     if (combinations.length === 1) {
