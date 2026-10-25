@@ -284,6 +284,12 @@ export const addSplitPerson = (transactionId: string, name: string, amount: numb
     body: JSON.stringify({ name, amount }),
   });
 
+export const renameSplit = (transactionId: string, splitId: string, description: string) =>
+  fetchApi<TransactionSplit>(`/transactions/${transactionId}/splits/${splitId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ description }),
+  });
+
 // Venmo settlements
 export const getPendingVenmoSettlements = () => fetchApi<PendingVenmoSettlement[]>('/venmo-settlements/pending');
 

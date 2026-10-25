@@ -83,6 +83,26 @@ export const useCreateSplit = () => {
   });
 };
 
+export const useRenameSplit = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      transactionId,
+      splitId,
+      description,
+    }: {
+      transactionId: string;
+      splitId: string;
+      description: string;
+    }) => api.renameSplit(transactionId, splitId, description),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['venmo-settlements'] });
+    },
+  });
+};
+
 export const useAddSplitPerson = () => {
   const queryClient = useQueryClient();
 

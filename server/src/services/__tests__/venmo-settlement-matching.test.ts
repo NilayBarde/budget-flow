@@ -80,6 +80,34 @@ describe('findSettlementMatches', () => {
     expect(findSettlementMatches([v], [s1, s2])).toEqual([]);
   });
 
+  it('breaks a 1:1 tie using the payer name when exactly one split name matches', () => {
+    // Three roommates each owe the identical $82.36 share of one utility bill.
+    const matt = split({ remainingAmount: 82.36, description: 'Matt' });
+    const griffin = split({ remainingAmount: 82.36, description: 'Griffin' });
+    const eli = split({ remainingAmount: 82.36, description: 'Eli' });
+    const v = venmo({ amount: -82.36, payerName: 'Griffin Byer' });
+
+    expect(findSettlementMatches([v], [matt, griffin, eli])).toEqual([
+      { venmoTransactionId: v.id, splitIds: [griffin.id], splitAmounts: { [griffin.id]: 82.36 } },
+    ]);
+  });
+
+  it('stays ambiguous when the payer name does not uniquely identify a split', () => {
+    const matt = split({ remainingAmount: 82.36, description: 'Matt' });
+    const griffin = split({ remainingAmount: 82.36, description: 'Griffin' });
+    const v = venmo({ amount: -82.36, payerName: 'Someone Else' });
+
+    expect(findSettlementMatches([v], [matt, griffin])).toEqual([]);
+  });
+
+  it('stays ambiguous when splits are unnamed, even with a payer name on the deposit', () => {
+    const s1 = split({ remainingAmount: 82.36, description: 'Other' });
+    const s2 = split({ remainingAmount: 82.36, description: 'Other' });
+    const v = venmo({ amount: -82.36, payerName: 'Griffin Byer' });
+
+    expect(findSettlementMatches([v], [s1, s2])).toEqual([]);
+  });
+
   it('never reuses a split across two different Venmo transactions', () => {
     const s = split({ remainingAmount: 25 });
     const v1 = venmo({ amount: -25, date: '2026-08-03' });

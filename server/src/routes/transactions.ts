@@ -738,6 +738,34 @@ router.post(
   }),
 );
 
+// Rename an existing split row (e.g. label an unnamed "Other" share with the person's actual
+// name). Only the description changes — amounts, settlements, and every other row are untouched.
+// A name also helps the settlement matcher break a tie between same-amount splits.
+router.patch(
+  '/:id/splits/:splitId',
+  asyncHandler(async (req, res) => {
+    const { id, splitId } = req.params;
+    const { description } = req.body as { description?: string };
+
+    if (!description || typeof description !== 'string' || !description.trim()) {
+      return res.status(400).json({ message: 'A name is required' });
+    }
+
+    const { data, error } = await supabase
+      .from('transaction_splits')
+      .update({ description: description.trim() })
+      .eq('id', splitId)
+      .eq('parent_transaction_id', id)
+      .select();
+    if (error) throw error;
+    if (!data || data.length === 0) {
+      return res.status(404).json({ message: 'Split not found' });
+    }
+
+    res.json(data[0]);
+  }),
+);
+
 // Delete all splits for a transaction
 router.delete('/:id/splits', async (req, res) => {
   try {
