@@ -367,7 +367,12 @@ export const Transactions = () => {
       <SplitTransactionModal
         isOpen={!!splittingTransaction}
         onClose={handleCloseSplit}
-        transaction={splittingTransaction}
+        // Adding a person while the modal is open invalidates the transactions query; look up
+        // the refetched row by id so "Current Splits" reflects it without closing the modal.
+        transaction={
+          (splittingTransaction && allTransactions?.find(t => t.id === splittingTransaction.id)) ||
+          splittingTransaction
+        }
       />
 
       <BulkSplitModal

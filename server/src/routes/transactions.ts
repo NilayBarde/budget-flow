@@ -712,12 +712,9 @@ router.post(
       throw error;
     }
 
-    const { error: updateError } = await supabase
-      .from('transaction_splits')
-      .update({ amount: newMyShareAmount })
-      .eq('id', myShareRow.id);
-    if (updateError) throw updateError;
-
+    // Insert the new row before shrinking "my share": if the update below fails, the splits
+    // temporarily sum to more than the transaction (visibly wrong, easy to retry) rather than
+    // less (money silently missing from the total with no row showing where it went).
     const { data: inserted, error: insertError } = await supabase
       .from('transaction_splits')
       .insert({
@@ -730,6 +727,12 @@ router.post(
       })
       .select();
     if (insertError) throw insertError;
+
+    const { error: updateError } = await supabase
+      .from('transaction_splits')
+      .update({ amount: newMyShareAmount })
+      .eq('id', myShareRow.id);
+    if (updateError) throw updateError;
 
     res.json(inserted?.[0]);
   }),
