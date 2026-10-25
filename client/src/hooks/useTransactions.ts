@@ -83,6 +83,29 @@ export const useCreateSplit = () => {
   });
 };
 
+export const useAddSplitPerson = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      transactionId,
+      name,
+      amount,
+    }: {
+      transactionId: string;
+      name: string;
+      amount: number;
+    }) => api.addSplitPerson(transactionId, name, amount),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['stats'] });
+      queryClient.invalidateQueries({ queryKey: ['insights'] });
+      queryClient.invalidateQueries({ queryKey: ['budget-goals'] });
+      queryClient.invalidateQueries({ queryKey: ['venmo-settlements'] });
+    },
+  });
+};
+
 export const useDeleteSplits = () => {
   const queryClient = useQueryClient();
 

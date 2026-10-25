@@ -278,6 +278,12 @@ export const createSplit = (transactionId: string, splits: Omit<TransactionSplit
 export const deleteSplits = (transactionId: string) =>
   fetchApi<void>(`/transactions/${transactionId}/splits`, { method: 'DELETE' });
 
+export const addSplitPerson = (transactionId: string, name: string, amount: number) =>
+  fetchApi<TransactionSplit>(`/transactions/${transactionId}/splits/people`, {
+    method: 'POST',
+    body: JSON.stringify({ name, amount }),
+  });
+
 // Venmo settlements
 export const getPendingVenmoSettlements = () => fetchApi<PendingVenmoSettlement[]>('/venmo-settlements/pending');
 

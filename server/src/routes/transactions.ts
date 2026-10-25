@@ -8,6 +8,8 @@ import { filterByTag } from '../services/transaction-filters.js';
 import type { TransactionType } from '../services/transaction-type.js';
 import { recurringUnmarkUpdate } from '../services/recurring-unmark.js';
 import { fetchAllRows } from '../utils/paginate.js';
+import { computeAddPersonSplit, AddSplitPersonError } from '../services/add-split-person.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
 
 const router = Router();
 
@@ -674,6 +676,67 @@ router.post('/:id/splits', async (req, res) => {
     res.status(500).json({ message: 'Failed to create splits' });
   }
 });
+
+// Add one more person to an already-split transaction, carving their share out of the
+// current user's own portion. Every other person's existing split row (and any settlement
+// already linked to it) is left untouched.
+router.post(
+  '/:id/splits/people',
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { name, amount } = req.body as { name?: string; amount?: number };
+
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ message: 'A name is required' });
+    }
+    if (typeof amount !== 'number' || !Number.isFinite(amount)) {
+      return res.status(400).json({ message: 'A valid amount is required' });
+    }
+
+    const { data: splits, error: splitsError } = await supabase
+      .from('transaction_splits')
+      .select('id, amount, is_my_share')
+      .eq('parent_transaction_id', id);
+    if (splitsError) throw splitsError;
+
+    const myShareRow = (splits ?? []).find((s) => s.is_my_share);
+    if (!myShareRow) {
+      return res.status(400).json({ message: 'This transaction has not been split yet' });
+    }
+
+    let newMyShareAmount: number;
+    try {
+      newMyShareAmount = computeAddPersonSplit(myShareRow.amount, amount);
+    } catch (error) {
+      if (error instanceof AddSplitPersonError) return res.status(400).json({ message: error.message });
+      throw error;
+    }
+
+    // Insert the new row before shrinking "my share": if the update below fails, the splits
+    // temporarily sum to more than the transaction (visibly wrong, easy to retry) rather than
+    // less (money silently missing from the total with no row showing where it went).
+    const { data: inserted, error: insertError } = await supabase
+      .from('transaction_splits')
+      .insert({
+        id: randomUUID(),
+        parent_transaction_id: id,
+        amount,
+        description: name.trim(),
+        is_my_share: false,
+        created_at: new Date().toISOString(),
+      })
+      .select();
+    if (insertError) throw insertError;
+
+    const { error: updateError } = await supabase
+      .from('transaction_splits')
+      .update({ amount: newMyShareAmount })
+      .eq('id', myShareRow.id);
+    if (updateError) throw updateError;
+
+    res.json(inserted?.[0]);
+  }),
+);
 
 // Delete all splits for a transaction
 router.delete('/:id/splits', async (req, res) => {

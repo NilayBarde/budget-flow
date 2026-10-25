@@ -1,8 +1,9 @@
 import { useState, useCallback } from 'react';
+import { X, Plus } from 'lucide-react';
 import { Modal, Button, Input } from '../ui';
 import type { Transaction } from '../../types';
 import { formatCurrency } from '../../utils/formatters';
-import { useCreateSplit, useDeleteSplits } from '../../hooks';
+import { useCreateSplit, useDeleteSplits, useAddSplitPerson } from '../../hooks';
 
 interface SplitTransactionModalProps {
   isOpen: boolean;
@@ -11,62 +12,81 @@ interface SplitTransactionModalProps {
 }
 
 const MY_PORTION_DESCRIPTION = 'Your portion';
-const OTHERS_DESCRIPTION = 'Others';
+
+interface PersonRow {
+  key: string;
+  name: string;
+  amount: string;
+}
+
+let rowCounter = 0;
+const newRow = (amount = ''): PersonRow => ({ key: `row-${++rowCounter}`, name: '', amount });
 
 export const SplitTransactionModal = ({ isOpen, onClose, transaction }: SplitTransactionModalProps) => {
   const [myAmount, setMyAmount] = useState('');
-  const [othersAmount, setOthersAmount] = useState('');
-  
+  const [people, setPeople] = useState<PersonRow[]>([newRow()]);
+  const [addPersonName, setAddPersonName] = useState('');
+  const [addPersonAmount, setAddPersonAmount] = useState('');
+  const [addPersonError, setAddPersonError] = useState<string | null>(null);
+
   const createSplit = useCreateSplit();
   const deleteSplits = useDeleteSplits();
+  const addSplitPerson = useAddSplitPerson();
 
   const totalAmount = transaction?.amount || 0;
 
-  const handleMyAmountChange = useCallback((value: string) => {
-    setMyAmount(value);
-    const enteredAmount = parseFloat(value) || 0;
-    if (enteredAmount >= 0 && enteredAmount <= totalAmount) {
-      setOthersAmount((totalAmount - enteredAmount).toFixed(2));
-    }
-  }, [totalAmount]);
-
-  const handleOthersAmountChange = useCallback((value: string) => {
-    setOthersAmount(value);
-    const enteredAmount = parseFloat(value) || 0;
-    if (enteredAmount >= 0 && enteredAmount <= totalAmount) {
-      setMyAmount((totalAmount - enteredAmount).toFixed(2));
-    }
-  }, [totalAmount]);
+  const resetNewSplitForm = useCallback(() => {
+    setMyAmount('');
+    setPeople([newRow()]);
+  }, []);
 
   const handleSplitEvenly = useCallback((value: string) => {
     const numPeople = parseInt(value, 10);
-    if (numPeople >= 2) {
-      const myShare = (totalAmount / numPeople).toFixed(2);
-      const othersShare = (totalAmount - parseFloat(myShare)).toFixed(2);
-      setMyAmount(myShare);
-      setOthersAmount(othersShare);
-    }
+    if (!(numPeople >= 2)) return;
+
+    const round = (n: number) => Math.round(n * 100) / 100;
+    const share = round(totalAmount / numPeople);
+    const othersCount = numPeople - 1;
+    const othersRows = Array.from({ length: othersCount }, () => newRow(share.toFixed(2)));
+
+    // The even division may not land exactly on cents; put the leftover on your own portion
+    // so every other person's row stays at the clean, round-number share.
+    const drift = round(totalAmount - share * numPeople);
+    setMyAmount((share + drift).toFixed(2));
+    setPeople(othersRows);
   }, [totalAmount]);
 
+  const handleAddRow = useCallback(() => {
+    setPeople(prev => [...prev, newRow()]);
+  }, []);
+
+  const handleRemoveRow = useCallback((key: string) => {
+    setPeople(prev => (prev.length > 1 ? prev.filter(p => p.key !== key) : prev));
+  }, []);
+
+  const handleRowChange = useCallback((key: string, field: 'name' | 'amount', value: string) => {
+    setPeople(prev => prev.map(p => (p.key === key ? { ...p, [field]: value } : p)));
+  }, []);
+
+  const peopleTotal = people.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+  const myAmountNum = parseFloat(myAmount) || 0;
+  const totalsMatch = Math.abs(totalAmount - myAmountNum - peopleTotal) <= 0.01;
+  const hasAtLeastOnePerson = people.some(p => (parseFloat(p.amount) || 0) > 0);
+
   const handleSave = async () => {
-    const myAmountNum = parseFloat(myAmount) || 0;
-    const othersAmountNum = parseFloat(othersAmount) || 0;
-    
-    if (!transaction || Math.abs(totalAmount - myAmountNum - othersAmountNum) > 0.01) return;
+    if (!transaction || !totalsMatch || !hasAtLeastOnePerson) return;
 
     const splitData = [
       { amount: myAmountNum, description: MY_PORTION_DESCRIPTION, is_my_share: true },
-      { amount: othersAmountNum, description: OTHERS_DESCRIPTION, is_my_share: false },
+      ...people
+        .filter(p => (parseFloat(p.amount) || 0) > 0)
+        .map(p => ({ amount: parseFloat(p.amount), description: p.name.trim() || 'Other', is_my_share: false })),
     ].filter(s => s.amount > 0);
 
-    await createSplit.mutateAsync({
-      transactionId: transaction.id,
-      splits: splitData,
-    });
+    await createSplit.mutateAsync({ transactionId: transaction.id, splits: splitData });
 
     onClose();
-    setMyAmount('');
-    setOthersAmount('');
+    resetNewSplitForm();
   };
 
   const handleRemoveAllSplits = async () => {
@@ -75,9 +95,25 @@ export const SplitTransactionModal = ({ isOpen, onClose, transaction }: SplitTra
     onClose();
   };
 
+  const handleAddPerson = async () => {
+    if (!transaction) return;
+    setAddPersonError(null);
+    const amount = parseFloat(addPersonAmount);
+    if (!addPersonName.trim() || !(amount > 0)) return;
+
+    try {
+      await addSplitPerson.mutateAsync({ transactionId: transaction.id, name: addPersonName.trim(), amount });
+      setAddPersonName('');
+      setAddPersonAmount('');
+    } catch (error) {
+      setAddPersonError(error instanceof Error ? error.message : 'Could not add that person');
+    }
+  };
+
   if (!transaction) return null;
 
   const hasSplits = transaction.is_split && transaction.splits && transaction.splits.length > 0;
+  const myShareSplit = transaction.splits?.find(s => s.is_my_share);
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Split Transaction" size="md">
@@ -125,6 +161,42 @@ export const SplitTransactionModal = ({ isOpen, onClose, transaction }: SplitTra
                 </span>
               </div>
             </div>
+
+            {/* Add another person, carved out of your own portion */}
+            <div className="p-3 bg-midnight-900 rounded-lg space-y-2">
+              <span className="text-sm text-slate-300">Add a person</span>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Name"
+                  value={addPersonName}
+                  onChange={e => setAddPersonName(e.target.value)}
+                  className="flex-1"
+                />
+                <div className="w-24">
+                  <Input
+                    type="number"
+                    placeholder="0.00"
+                    value={addPersonAmount}
+                    onChange={e => setAddPersonAmount(e.target.value)}
+                  />
+                </div>
+                <Button
+                  variant="secondary"
+                  onClick={handleAddPerson}
+                  isLoading={addSplitPerson.isPending}
+                  disabled={!addPersonName.trim() || !(parseFloat(addPersonAmount) > 0)}
+                >
+                  Add
+                </Button>
+              </div>
+              <p className="text-xs text-slate-500">
+                Taken out of your own portion ({formatCurrency(myShareSplit?.amount || 0)} left).
+              </p>
+              {addPersonError && (
+                <p role="alert" className="text-xs text-rose-400">{addPersonError}</p>
+              )}
+            </div>
+
             <Button
               variant="danger"
               onClick={handleRemoveAllSplits}
@@ -171,26 +243,50 @@ export const SplitTransactionModal = ({ isOpen, onClose, transaction }: SplitTra
                       type="number"
                       placeholder="0.00"
                       value={myAmount}
-                      onChange={e => handleMyAmountChange(e.target.value)}
+                      onChange={e => setMyAmount(e.target.value)}
                     />
                   </div>
                 </div>
               </div>
 
-              {/* Others portion */}
-              <div className="p-3 bg-midnight-900 rounded-lg">
-                <div className="flex justify-between items-center gap-3">
-                  <span className="text-slate-400">Others</span>
-                  <div className="w-32">
+              {/* One row per person, each their own name + amount */}
+              {people.map(person => (
+                <div key={person.key} className="p-3 bg-midnight-900 rounded-lg flex items-center gap-2">
+                  <Input
+                    placeholder="Name (optional)"
+                    value={person.name}
+                    onChange={e => handleRowChange(person.key, 'name', e.target.value)}
+                    className="flex-1"
+                  />
+                  <div className="w-28">
                     <Input
                       type="number"
                       placeholder="0.00"
-                      value={othersAmount}
-                      onChange={e => handleOthersAmountChange(e.target.value)}
+                      value={person.amount}
+                      onChange={e => handleRowChange(person.key, 'amount', e.target.value)}
                     />
                   </div>
+                  <button
+                    type="button"
+                    aria-label="Remove person"
+                    onClick={() => handleRemoveRow(person.key)}
+                    disabled={people.length === 1}
+                    className="text-slate-500 hover:text-rose-400 disabled:opacity-30 disabled:hover:text-slate-500 p-1"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
                 </div>
-              </div>
+              ))}
+
+              <Button variant="ghost" size="sm" onClick={handleAddRow} className="w-full">
+                <Plus className="h-4 w-4 mr-1" /> Add another person
+              </Button>
+
+              {!totalsMatch && (myAmountNum > 0 || peopleTotal > 0) && (
+                <p className="text-xs text-rose-400">
+                  Portions add up to {formatCurrency(myAmountNum + peopleTotal)}, not {formatCurrency(totalAmount)}.
+                </p>
+              )}
             </div>
 
             {/* Actions */}
@@ -201,7 +297,7 @@ export const SplitTransactionModal = ({ isOpen, onClose, transaction }: SplitTra
               <Button
                 onClick={handleSave}
                 isLoading={createSplit.isPending}
-                disabled={!myAmount || parseFloat(myAmount) <= 0}
+                disabled={!totalsMatch || !hasAtLeastOnePerson || myAmountNum < 0}
                 className="flex-1"
               >
                 Save Split
